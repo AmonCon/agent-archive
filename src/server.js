@@ -2,6 +2,7 @@ import http from 'node:http';
 import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionContent } from './query.js';
 import { search, indexStats } from './search.js';
 import { timelineMarkdown, sessionMarkdown, bundleMarkdown } from './export.js';
+import { latestProjectDigest, latestSessionSummary } from './digest.js';
 import { projectKey, durationMs, tildify } from './model.js';
 
 /**
@@ -161,6 +162,29 @@ async function handle(req, res) {
         'cache-control': 'no-store',
       });
       return res.end(md);
+    }
+
+    if (path === '/api/digest') {
+      const target = url.searchParams.get('path');
+      if (!target) return sendJson(res, { error: '缺少 path 参数' }, 400);
+      const d = latestProjectDigest(target);
+      if (!d) {
+        return sendJson(res, {
+          exists: false,
+          project: tildify(target),
+          hint: '还没有项目摘要。在终端运行：agent-archive digest <项目> --run',
+        });
+      }
+      return sendJson(res, {
+        exists: true,
+        project: tildify(target),
+        generatedAt: d.createdAt,
+        model: d.model,
+        promptVersion: d.promptVersion,
+        tokensIn: d.tokensIn,
+        tokensOut: d.tokensOut,
+        digest: d.text,
+      });
     }
 
     if (path === '/api/session') {
@@ -394,6 +418,74 @@ function highlight(snippet, query) {
   return parts.join('');
 }
 
+/**
+ * 极简 Markdown 渲染。
+ *
+ * 只处理摘要里实际会出现的几种结构：标题、有序/无序列表、加粗、段落。
+ * 先整体转义再套标签，所以正文里即使有 HTML 也不会执行。
+ * 不引第三方库——为了这几十行引入一个 markdown 解析器不值得。
+ */
+function renderMarkdownLite(md) {
+  const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let list = null;
+
+  const flushList = () => {
+    if (list) {
+      out.push(`<${list.tag}>${list.items.join('')}</${list.tag}>`);
+      list = null;
+    }
+  };
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (!line.trim()) {
+      flushList();
+      continue;
+    }
+
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) {
+      flushList();
+      const level = Math.min(h[1].length + 1, 5); // 页面已有 h1，降一级
+      out.push(`<h${level}>${inline(h[2])}</h${level}>`);
+      continue;
+    }
+
+    const ol = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
+    if (ol) {
+      if (!list || list.tag !== 'ol') {
+        flushList();
+        list = { tag: 'ol', items: [] };
+      }
+      list.items.push(`<li>${inline(ol[2])}</li>`);
+      continue;
+    }
+
+    const ul = line.match(/^\s*[-*]\s+(.*)$/);
+    if (ul) {
+      if (!list || list.tag !== 'ul') {
+        flushList();
+        list = { tag: 'ul', items: [] };
+      }
+      list.items.push(`<li>${inline(ul[1])}</li>`);
+      continue;
+    }
+
+    flushList();
+    out.push(`<p>${inline(line)}</p>`);
+  }
+  flushList();
+  return out.join('\n');
+}
+
+/** 行内：先转义，再把 **粗体** 和 `代码` 换成标签。 */
+function inline(s) {
+  return esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
 function pageTimeline(target, openAll) {
   if (!target) return pageNotFound('缺少项目路径');
 
@@ -445,6 +537,19 @@ function pageTimeline(target, openAll) {
        （或直接用 <code>/api/timeline?path=</code>）</p>`
     : '';
 
+  // 项目摘要：有就展示，没有就给一句怎么生成。
+  // 这是视图层（模型写的），和下面的时间线（事实）分开摆，视觉上也要分开。
+  const dg = latestProjectDigest(r.target);
+  const digestHtml = dg
+    ? `<details class="digest">
+         <summary>项目摘要 <span class="dim">· ${esc(dg.model)} · ${esc(fmtDate(dg.createdAt))} 生成</span></summary>
+         <div class="digest-body">${renderMarkdownLite(dg.text)}</div>
+         <p class="hint">模型生成的视图，不是原始事实。核对细节请点开下面的会话。</p>
+       </details>`
+    : `<p class="hint">还没有项目摘要。在终端运行
+       <code>agent-archive digest "${esc(r.target)}"</code> 先看预估成本，
+       确认后加 <code>--run</code> 生成。</p>`;
+
   return layout(
     tildify(r.target),
     `<p><a href="/">← 所有项目</a></p>
@@ -455,6 +560,7 @@ function pageTimeline(target, openAll) {
        <a href="/export?kind=timeline&amp;path=${encodeURIComponent(r.target)}">导出时间线 .md</a>
        <a href="/export?kind=bundle&amp;path=${encodeURIComponent(r.target)}">导出全部会话 .md</a>
      </p>
+     ${digestHtml}
      ${more}
      <div class="timeline">${body}</div>`
   );
@@ -503,6 +609,16 @@ async function pageSession(agent, id) {
 
   const exportHref = `/export?kind=session&amp;agent=${encodeURIComponent(session.agent)}&amp;id=${encodeURIComponent(session.id)}`;
 
+  // 会话级摘要：有就折起来放最上面，方便先扫一眼再决定读不读全文
+  const ss = latestSessionSummary(session);
+  const digestHtml = ss
+    ? `<details class="digest" open>
+         <summary>会话摘要 <span class="dim">· ${esc(ss.model)} · ${esc(fmtDate(ss.createdAt))} 生成</span></summary>
+         <div class="digest-body">${renderMarkdownLite(ss.text)}</div>
+         <p class="hint">模型生成的视图。下面是原始对话，核对细节用下面的。</p>
+       </details>`
+    : '';
+
   return layout(
     session.title,
     `${back}
@@ -511,6 +627,7 @@ async function pageSession(agent, id) {
        ${esc(fmtDate(session.end))} · ${esc(fmtDur(durationMs(session)))}</p>
      ${session.resume ? `<p class="sub mono">恢复：${esc(session.resume)}</p>` : ''}
      <p class="actions"><a href="${exportHref}">导出 .md</a></p>
+     ${digestHtml}
      <div class="messages">${body}</div>
      <script>
      // 折叠块展开时才去取全文。页面因此保持在几十 KB，
@@ -710,6 +827,19 @@ td.dim, .dim { color: var(--dim); }
   border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px;
 }
 .actions a:hover { color: var(--fg); border-color: var(--dim); }
+
+/* 项目摘要（视图层，与事实层视觉上分开） */
+.digest { margin: 18px 0 22px; border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px;
+          background: var(--soft); }
+.digest > summary { cursor: pointer; font-size: 13px; font-weight: 500; color: var(--fg); }
+.digest-body { margin-top: 12px; font-size: 14px; line-height: 1.75; }
+.digest-body h2, .digest-body h3, .digest-body h4, .digest-body h5 {
+  font-size: 14px; margin: 16px 0 6px; font-weight: 600;
+}
+.digest-body h2:first-child, .digest-body h3:first-child { margin-top: 0; }
+.digest-body p { margin: 0 0 8px; }
+.digest-body ul, .digest-body ol { margin: 6px 0 10px; padding-left: 22px; }
+.digest-body li { margin: 3px 0; }
 
 /* 搜索 */
 .search { display: flex; gap: 8px; margin: 0 0 18px; }
