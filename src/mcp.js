@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionContent } from './query.js';
 import { search, indexStats } from './search.js';
 import { timelineMarkdown } from './export.js';
+import { latestProjectDigest, latestSessionSummary } from './digest.js';
+import { deriveStats } from './derive.js';
 import { durationMs, tildify } from './model.js';
 
 /**
@@ -210,15 +212,106 @@ const TOOLS = [
     },
   },
   {
+    name: 'read_digest',
+    title: '读项目摘要',
+    description:
+      '读某个项目**已生成**的交接摘要（模型写的，不是原始会话）。' +
+      '如果还没生成过，会返回提示而不是现编一个——生成要花钱，由用户在终端显式执行。' +
+      '建议流程：先看 read_digest 有没有现成的，没有再用 project_timeline + read_session 自己翻。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: '项目路径，如 E:/my-app' },
+      },
+      required: ['project'],
+      additionalProperties: false,
+    },
+    handler: async ({ project }) => {
+      const d = latestProjectDigest(project);
+      if (!d) {
+        return {
+          exists: false,
+          hint:
+            '这个项目还没有生成摘要。让用户在终端运行：' +
+            `agent-archive digest "${project}" --run` +
+            '（先不带 --run 可以只看预估成本）。',
+        };
+      }
+      return {
+        exists: true,
+        project: tildify(project),
+        generatedAt: iso(d.createdAt),
+        model: d.model,
+        promptVersion: d.promptVersion,
+        // 摘要本身是给人读的 Markdown，原样返回
+        digest: d.text,
+        note: '这是模型生成的视图，不是原始事实。需要核对细节时用 read_session 回原文。',
+      };
+    },
+  },
+  {
+    name: 'read_session_summary',
+    title: '读会话摘要',
+    description:
+      '读某场会话**已生成**的摘要（比原文短得多）。用于快速判断"这场值得深挖吗"。' +
+      '没生成过就返回提示。要拿全文用 read_session。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '会话 id（可用前缀）' },
+        agent: { type: 'string', description: 'Agent 名，配合 id 精确定位' },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    handler: async ({ id, agent }) => {
+      const { matches, total } = findSessions({ query: id, agent });
+      if (!matches.length) return { error: `没有匹配 ${id} 的会话` };
+      if (matches.length > 1) {
+        return {
+          error: `${total} 场会话匹配 ${id}，请用更长的 id 前缀`,
+          candidates: matches.slice(0, 5).map((s) => ({ agent: s.agent, id: s.id, title: s.title })),
+        };
+      }
+
+      const s = matches[0];
+      const d = latestSessionSummary(s);
+      if (!d) {
+        return {
+          exists: false,
+          session: { agent: s.agent, id: s.id, title: s.title },
+          hint: '这场会话还没有摘要。可以直接 read_session 读原文（会分段返回）。',
+        };
+      }
+
+      return {
+        exists: true,
+        session: { agent: s.agent, id: s.id, title: s.title },
+        generatedAt: iso(d.createdAt),
+        model: d.model,
+        promptVersion: d.promptVersion,
+        summary: d.text,
+      };
+    },
+  },
+  {
     name: 'session_stats',
     title: '采集统计',
     description:
-      '报告采集质量：多少会话、各 Agent 分布、覆盖率的三个支柱（时间/项目/标题）、索引规模。' +
+      '报告采集质量：多少会话、各 Agent 分布、索引规模、已生成的摘要数量。' +
       '用它判断数据是否可信，或排查"为什么搜不到"。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     handler: async () => {
       const { projects, totalSessions, stats, unbound } = listProjects({});
       const idx = indexStats();
+      const der = deriveStats();
+      const summaryCount = der.groups
+        .filter((g) => g.kind === 'session_summary')
+        .reduce((n, g) => n + g.count, 0);
+      const digestCount = der.groups
+        .filter((g) => g.kind === 'project_digest')
+        .reduce((n, g) => n + g.count, 0);
+
       return {
         sessions: totalSessions,
         files: stats.files,
@@ -233,6 +326,12 @@ const TOOLS = [
               builtAt: iso(idx.builtAt),
             }
           : { exists: false, hint: '运行 agent-archive index 建立索引' },
+        // 视图层的进度：有多少会话/项目已经有摘要了
+        derived: {
+          sessionSummaries: summaryCount,
+          projectDigests: digestCount,
+          models: [...new Set(der.groups.map((g) => g.model))],
+        },
       };
     },
   },
@@ -381,8 +480,8 @@ async function dispatch(msg) {
         serverInfo: { name: 'agent-archive', version: '0.1.0' },
         instructions:
           '这是本机跨 Agent 的会话档案馆，只读。' +
-          '先用 list_projects 看有哪些项目，再用 project_timeline 或 search_sessions 定位，' +
-          '最后用 read_session 读正文（内容会截断，按需分段）。',
+          '推荐顺序：list_projects 看有哪些项目 → read_digest 看有没有现成的交接摘要 → ' +
+          '没有的话用 search_sessions 或 project_timeline 定位 → read_session 读正文（会截断，按需分段）。',
       };
     }
 

@@ -77,7 +77,7 @@ try {
   // 2. 列工具
   const list = await rpc('tools/list');
   const tools = (list.result && list.result.tools) || [];
-  push('tools/list 返回工具', tools.length >= 6, `${tools.length} 个`);
+  push('tools/list 返回工具', tools.length >= 8, `${tools.length} 个`);
   push('每个工具都有 inputSchema', tools.every((t) => t.inputSchema && t.inputSchema.type === 'object'));
   push('每个工具都标记只读', tools.every((t) => t.annotations && t.annotations.readOnlyHint === true));
 
@@ -86,6 +86,8 @@ try {
   push('含 project_timeline', names.includes('project_timeline'));
   push('含 search_sessions', names.includes('search_sessions'));
   push('含 read_session', names.includes('read_session'));
+  push('含 read_digest', names.includes('read_digest'));
+  push('含 read_session_summary', names.includes('read_session_summary'));
 
   // 3. 调 list_projects
   const lp = await rpc('tools/call', { name: 'list_projects', arguments: {} });
@@ -131,7 +133,29 @@ try {
     }
   }
 
-  // 7. 错误处理
+  // 7. 视图层工具：没有摘要时必须老实说"没有"，不能现编
+  // 用一个必定没有摘要的路径，否则测试结果会随本地摘要库变化
+  const dg = await rpc('tools/call', {
+    name: 'read_digest',
+    arguments: { project: 'E:/__agent_archive_no_digest__' },
+  });
+  const dgData = dg.result && dg.result.structuredContent;
+  push('read_digest 可用', !!dgData && typeof dgData.exists === 'boolean');
+  push('无摘要时给出提示而非编造', !!dgData && dgData.exists === false && !!dgData.hint, dgData && String(dgData.hint || '').slice(0, 40));
+
+  const ss = await rpc('tools/call', {
+    name: 'read_session_summary',
+    arguments: { id: tlData.sessions[0].id, agent: tlData.sessions[0].agent },
+  });
+  const ssData = ss.result && ss.result.structuredContent;
+  push('read_session_summary 可用', !!ssData && typeof ssData.exists === 'boolean');
+
+  // 8. 统计里要能看到视图层进度
+  const st = await rpc('tools/call', { name: 'session_stats', arguments: {} });
+  const stData = st.result && st.result.structuredContent;
+  push('stats 含 derived 段', !!stData && !!stData.derived, stData && stData.derived ? `摘要 ${stData.derived.sessionSummaries} 场` : '');
+
+  // 9. 错误处理
   const bad = await rpc('tools/call', { name: 'no_such_tool', arguments: {} });
   push('未知工具返回错误', !!bad.error || (bad.result && bad.result.isError), bad.error && bad.error.code);
 
