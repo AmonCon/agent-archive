@@ -1,0 +1,21 @@
+{
+  "name": "agent-archive",
+  "version": "0.1.0",
+  "private": true,
+  "description": "跨 Agent 的项目级会话档案馆",
+  "type": "module",
+  "bin": {
+    "agent-archive": "./src/cli.js",
+    "agent-archive-mcp": "./src/mcp.js"
+  },
+  "scripts": {
+    "start": "node --no-warnings src/cli.js",
+    "stats": "node --no-warnings src/cli.js stats",
+    "doctor": "node --no-warnings src/cli.js doctor",
+    "secrets": "node --no-warnings src/cli.js secrets",
+    "mcp": "node --no-warnings src/mcp.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

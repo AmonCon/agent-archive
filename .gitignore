@@ -1,0 +1,12 @@
+# 插件运行时状态，不进仓库
+.mimosa/
+
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 本工具的运行态数据（实际存放在 ~/.agent-archive，这里兜底）
+.agent-archive/
+*.log
+.DS_Store
+Thumbs.db
