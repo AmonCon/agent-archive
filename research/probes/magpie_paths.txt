@@ -1,0 +1,1500 @@
+*sessions.ak
+*sessions.uk
+viewSessions
+SessionState
+sessionState
+sweepSessions
+*sessions.Day
+*sessions.day
+*sessions.job
+*sessions.Hit
+watchSessions
+*sessions.ocDB
+*sessions.zcDB
+*sessions.Call
+*sessions.Part
+*sessions.file
+*sessions.tail
+*sessions.item
+*sessions.act0
+*sessions.save
+reloadSessions
+updateSessions
+*sessions.Usage
+*sessions.Model
+*sessions.Carry
+*sessions.Share
+*sessions.Skill
+*sessions.state
+*sessions.moved
+*sessions.block
+*sessions.cxRun
+*sessions.ccStr
+*sessions.saved
+*sessions.share
+*[]sessions.Day
+*[]sessions.job
+*sessions.Shape
+*sessions.wbIDs
+*sessions.Stats
+VisibleSessions
+*[]sessions.Part
+*[]sessions.Call
+*sessions.ocInfo
+*sessions.ocV2DB
+*sessions.poison
+*sessions.Active
+*sessions.Tokens
+*[]sessions.file
+*sessions.cxOpen
+*sessions.ocPart
+*sessions.piPart
+*sessions.ccCall
+*sessions.ccLine
+*sessions.cxCall
+*sessions.cxLine
+*sessions.piLine
+*sessions.wbLine
+*[]sessions.item
+*sessions.Rollup
+*[]sessions.Share
+*[1]sessions.Part
+*gui.sessionsJSON
+*sessions.ocStore
+*sessions.ocFiles
+*[]sessions.Usage
+*sessions.Managed
+*sessions.Session
+*[]sessions.Model
+*[]sessions.Carry
+*sessions.Summary
+*sessions.cxUsage
+*sessions.dshHead
+*sessions.Trashed
+*[]sessions.moved
+*sessions.WSLHome
+*sessions.piCarry
+*sessions.ccBlock
+*sessions.piEntry
+*sessions.wbEntry
+*sessions.agyStep
+*sessions.piUsage
+*[]sessions.Skill
+*[]sessions.saved
+*sessions.Content
+*sessions.ToolUse
+*tls.SessionState
+*sessions.zstdFile
+*[]sessions.Active
+*sessions.DayTotal
+*sessions.Subagent
+*sessions.ToolStat
+*sessions.ToolWeek
+*sessions.hermesDB
+*sessions.dshCarry
+*sessions.callFile
+*sessions.grokKind
+*sessions.wslEntry
+*[]sessions.piPart
+*sessions.almaMeta
+*sessions.dshEvent
+*sessions.grokLine
+*sessions.kimiLine
+*sessions.kimiWire
+*sessions.callsKey
+*sessions.identity
+*sessions.Progress
+*sessions.Overview
+*sessions.SkillUse
+*[1]sessions.Carry
+*[]sessions.Session
+*[]sessions.Summary
+*[]sessions.Managed
+*sessions.grokCarry
+*sessions.kimiCarry
+*sessions.almaStore
+*sessions.TraceSpan
+*sessions.cacheFile
+*sessions.cxContext
+*sessions.callFrame
+*sessions.callPatch
+*sessions.ccSubMeta
+*sessions.grokUsage
+*sessions.kimiSpawn
+*sessions.ocMessage
+*sessions.wbDetails
+*[]sessions.ccBlock
+*[]sessions.wbEntry
+*sessions.droidLine
+*sessions.dshSource
+*sessions.dshReplay
+*sessions.kimiUsage
+*sessions.kimiState
+*sessions.mcodeLine
+*sessions.traceTurn
+*[]sessions.Trashed
+*sessions.callsRide
+*sessions.CodexMove
+*[]sessions.DayTotal
+*sessions.AgentCount
+*sessions.CallSource
+*[]sessions.Subagent
+*[]sessions.ToolStat
+*sessions.summaryDay
+*sessions.droidCarry
+*sessions.clineCarry
+*sessions.ccTaskRead
+*sessions.cursorPart
+*sessions.hermesTool
+*sessions.cursorMeta
+*sessions.droidUsage
+*sessions.droidStart
+*sessions.kimiRecord
+*sessions.piCallLine
+*sessions.wslListing
+*[]sessions.wslEntry
+*[]sessions.ToolWeek
+*sessions.cursorSnap
+*sessions.Transcript
+*[]sessions.CodexMove
+*sessions.hermesQuery
+*sessions.GatewayTurn
+*sessions.ModelEffort
+*sessions.codexChange
+*sessions.hermesUsage
+*[]sessions.callPatch
+*sessions.codexConfig
+*sessions.ocTracePart
+*sessions.almaMessage
+*sessions.dshResponse
+*sessions.grokSummary
+*sessions.parentCalls
+*[]sessions.ocMessage
+*sessions.callsFlight
+*sessions.traceCursor
+*[]sessions.TraceSpan
+*sessions.TraceReader
+*[]sessions.AgentCount
+*sessions.TraceSession
+*sessions.cxCompaction
+*sessions.cxCallTiming
+*sessions.clineMessage
+*sessions.desktopTitle
+*sessions.kimiWireSubs
+*[]sessions.cursorPart
+*[]sessions.hermesTool
+*sessions.ocCallHandle
+*[]sessions.CallSource
+*sessions.ocTraceState
+*sessions.cursorParent
+*[1]sessions.TraceSpan
+*[]sessions.ModelEffort
+*sessions.CodexIdentity
+*sessions.ExternalModel
+*sessions.hermesMessage
+*sessions.codexInterval
+*[]sessions.hermesUsage
+*sessions.callDiskState
+*sessions.codexChatCall
+*sessions.codexCopyPair
+*sessions.codexPortHome
+*sessions.cursorMessage
+*sessions.hiddenGateway
+*[]sessions.ocTracePart
+*sessions.clineManifest
+*sessions.droidSettings
+*[]sessions.GatewayTurn
+*sessions.traceSnapshot
+*[1]sessions.cursorPart
+*tls.ClientSessionState
+json:"sessions"
+*[]sessions.TraceSession
+*[]sessions.cxCallTiming
+*sessions.codexPortState
+*sessions.codexTaskTitle
+*sessions.ocTraceMessage
+*sessions.relocationFile
+*sessions.representative
+*sessions.titleRecipient
+*sessions.cursorMetaFile
+*[]sessions.clineMessage
+*sessions.directoryEntry
+*sessions.hermesPrintSet
+*sessions.lineCallReader
+*[1]sessions.hermesUsage
+*[]sessions.ExternalModel
+*sessions.ExternalSession
+*sessions.codexUsageState
+*sessions.cxRecordedUsage
+*sessions.claudeToolUsage
+*map[string]*sessions.day
+*[]sessions.codexChatCall
+*sessions.geminiTraceTool
+*[]sessions.hiddenGateway
+*sessions.ccCacheCreation
+*sessions.shelf[*[]uint8]
+*sessions.codexTranscript
+*func(sessions.file) bool
+*sessions.codexCopyResult
+*map[string]*sessions.Day
+*sessions.ocTracePosition
+*sessions.ExternalDayUsage
+*sessions.TitleApplication
+*sessions.codexCounterBase
+**sessions.cxRecordedUsage
+*sessions.claudeUsageState
+*sessions.cursorEditorMeta
+*sessions.traceHeaderCache
+*sessions.callContinuation
+*sessions.codexChatMessage
+*sessions.listMemo[string]
+*[]sessions.ocTraceMessage
+*map[sessions.identity]int
+*sessions.geminiTraceState
+*[]sessions.titleRecipient
+*map[string]sessions.Shape
+*map[string]sessions.wbIDs
+*sessions.ClaudeRelocation
+*[1]sessions.codexChatCall
+*sessions.TraceSessionIndex
+*sessions.codexContribution
+*sessions.cxHistorySnapshot
+*sessions.claudeToolVersion
+*map[string]sessions.Tokens
+*map[string]*sessions.state
+*map[string]sessions.cxOpen
+*[]sessions.geminiTraceTool
+*sessions.memoEntry[string]
+*sessions.revisionCandidate
+*sessions.memoRound[string]
+*map[string]*sessions.Model
+*map[string]*sessions.Share
+*map[string]*sessions.Skill
+*map[string]*sessions.share
+*map[string][]sessions.file
+*[2]sessions.ocTraceMessage
+*[]sessions.TitleApplication
+*[]sessions.ExternalDayUsage
+*sessions.codexDiscoveryInfo
+*[]sessions.codexCounterBase
+*sessions.claudeContribution
+*sessions.claudeUsageVersion
+*sessions.geminiTraceMessage
+*sessions.claudeTraceMessage
+*map[string]sessions.dshHead
+*map[string]sessions.piEntry
+*map[int]*sessions.summaryDay
+*[]sessions.codexContribution
+*[]sessions.claudeToolVersion
+*[]sessions.revisionCandidate
+*map[string][]sessions.Summary
+*[]sessions.claudeUsageVersion
+*map[string]sessions.cxContext
+*map[string]sessions.kimiSpawn
+*map[string]sessions.grokUsage
+*sessions.shelf[*bufio.Reader]
+*[]sessions.geminiTraceMessage
+*map[string]*sessions.ToolStat
+*map[string]*sessions.callFile
+*map[string]sessions.TraceSpan
+*func(*sessions.callFile) bool
+*map.group[string]*sessions.day
+*sessions.traceIdentitySnapshot
+*map[sessions.TraceSession]bool
+*func(sessions.Summary) float64
+*map[sessions.ak]*sessions.act0
+*map.group[string]*sessions.Day
+*map[string]*sessions.traceTurn
+ *sessions.ClaudeRelocationResult
+ *map[string]*sessions.summaryDay
+ *map[string]*sessions.wslListing
+ *map.group[sessions.identity]int
+ *map[sessions.uk]sessions.Tokens
+ *map[string]*sessions.cursorSnap
+ *map.group[string]sessions.Shape
+ *map.group[string]sessions.wbIDs
+ *sessions.shelf[go.shape.*uint8]
+!*map[sessions.codexInterval][]int
+!*map.group[string]sessions.Tokens
+!*map.group[string]*sessions.state
+!*map.group[string]sessions.cxOpen
+!*func() (sessions.grokKind, bool)
+!*map[sessions.codexTaskTitle]bool
+!*map.group[string]*sessions.Model
+!*map.group[string]*sessions.Share
+!*map.group[string]*sessions.Skill
+!*map[string]*sessions.parentCalls
+!*map.group[string]*sessions.share
+!*map[string]*sessions.traceCursor
+!*map.group[string][]sessions.file
+!*map[string]sessions.cursorParent
+!*map[string]sessions.desktopTitle
+json:"sessions,omitempty"
+"*map[string][]sessions.ModelEffort
+"*[]*sessions.traceIdentitySnapshot
+"*map[string]sessions.codexPortHome
+"*map[string]*sessions.ocCallHandle
+"*map[string]sessions.CodexIdentity
+"*map.group[string]sessions.dshHead
+"*func(*sessions.callFile, []uint8)
+"*map.group[string]sessions.piEntry
+#*map.group[int]*sessions.summaryDay
+#*[0]*sessions.traceIdentitySnapshot
+#*map[sessions.codexTaskTitle]string
+#*map[string]*sessions.traceSnapshot
+#*map[string]sessions.ocTraceMessage
+#*map[string]sessions.directoryEntry
+#*map[string]sessions.hermesPrintSet
+#*map[string]sessions.lineCallReader
+#*sessions.listMemo[go.shape.string]
+$*map.group[string][]sessions.Summary
+$*map[string]sessions.claudeToolUsage
+$*map.group[string]sessions.cxContext
+$*map.group[string]sessions.kimiSpawn
+$*map.group[string]sessions.grokUsage
+$*map.group[string]*sessions.ToolStat
+$*map.group[string]*sessions.callFile
+$*map.group[string]sessions.TraceSpan
+$*sessions.memoRound[go.shape.string]
+$*sessions.memoEntry[go.shape.string]
+%*func(string, string) sessions.Rollup
+%*func(string) (sessions.ocInfo, bool)
+%*map.group[sessions.TraceSession]bool
+%*map[string]sessions.traceHeaderCache
+SessionSummary
+%*struct { Models []sessions.wbEntry }
+%*map.group[sessions.ak]*sessions.act0
+%*map.group[string]*sessions.traceTurn
+%*map[string][]sessions.titleRecipient
+%*map[string]sessions.TitleApplication
+%*map[string]sessions.callContinuation
+&*map[string]sessions.codexContribution
+&*func(*sessions.traceIdentitySnapshot)
+&*map[string]sessions.memoEntry[string]
+&*map.group[string]*sessions.summaryDay
+&*map.group[string]*sessions.wslListing
+&*map.group[sessions.uk]sessions.Tokens
+&*map[string]*sessions.cursorEditorMeta
+&*map.group[string]*sessions.cursorSnap
+&*map[string]sessions.revisionCandidate
+&*func(string, *tls.ClientSessionState)
+'*map[string][]sessions.TitleApplication
+'*map.group[sessions.codexInterval][]int
+'*func() *sessions.traceIdentitySnapshot
+'*map.group[sessions.codexTaskTitle]bool
+'*map.group[string]*sessions.parentCalls
+'*map.group[string]*sessions.traceCursor
+'*map.group[string]sessions.cursorParent
+'*map.group[string]sessions.desktopTitle
+(*map.group[string][]sessions.ModelEffort
+(*map[string]*sessions.claudeContribution
+(*map.group[string]sessions.codexPortHome
+(*map[string]*sessions.geminiTraceMessage
+(*map.group[string]*sessions.ocCallHandle
+(*map.group[string]sessions.CodexIdentity
+(*func(*sessions.callFile, sessions.file)
+)*func(sessions.Skill, sessions.Skill) int
+)*map.group[sessions.codexTaskTitle]string
+)*map.group[string]sessions.ocTraceMessage
+)*map.group[string]*sessions.traceSnapshot
+)*map.group[string]sessions.directoryEntry
+)*map.group[string]sessions.hermesPrintSet
+)*map.group[string]sessions.lineCallReader
+*github.com/yetone/magpie/internal/sessions
+**map.group[string]sessions.claudeToolUsage
+**struct { key string; elem *sessions.day }
+**struct { key string; elem *sessions.Day }
+**map[string]func(sessions.Summary) float64
+**func(sessions.CallSource) []sessions.Call
++*map.group[string]sessions.traceHeaderCache
++*struct { key sessions.identity; elem int }
++*map.group[string][]sessions.titleRecipient
++*struct { key string; elem sessions.Shape }
++*map.group[string]sessions.TitleApplication
++*map.group[string]sessions.callContinuation
++*struct { key string; elem sessions.wbIDs }
++*struct { F uintptr; X0 *sessions.Session }
++*func() ([]uint8, *tls.SessionState, error)
+,*map.group[string]sessions.codexContribution
+,*struct { key string; elem sessions.Tokens }
+,*[]struct { key string; elem *sessions.day }
+,*struct { key string; elem *sessions.state }
+,*struct { key string; elem sessions.cxOpen }
+,*map.group[string]sessions.memoEntry[string]
+,*func([]uint8) (sessions.codexConfig, error)
+,*map[sessions.callsKey]*sessions.callsFlight
+,*[]struct { key string; elem *sessions.Day }
+,*struct { key string; elem *sessions.Model }
+,*struct { key string; elem *sessions.Share }
+,*struct { key string; elem *sessions.Skill }
+,*map.group[string]*sessions.cursorEditorMeta
+,*struct { key string; elem *sessions.share }
+,*struct { key string; elem []sessions.file }
+,*map.group[string]sessions.revisionCandidate
+-*map.group[string][]sessions.TitleApplication
+-*[8]struct { key string; elem *sessions.day }
+-*func([]uint8) (sessions.desktopTitle, error)
+-*[]struct { key sessions.identity; elem int }
+-*[8]struct { key string; elem *sessions.Day }
+-*[]struct { key string; elem sessions.Shape }
+-*struct { key string; elem sessions.dshHead }
+-*struct { key string; elem sessions.piEntry }
+-*[]struct { key string; elem sessions.wbIDs }
+-*func(string) (*tls.ClientSessionState, bool)
+.*struct { key int; elem *sessions.summaryDay }
+.*map.group[string]*sessions.claudeContribution
+.*[]struct { key string; elem sessions.Tokens }
+.*[]struct { key string; elem *sessions.state }
+.*[]struct { key string; elem sessions.cxOpen }
+.*[8]struct { key sessions.identity; elem int }
+.*[]struct { key string; elem *sessions.Model }
+.*[]struct { key string; elem *sessions.Share }
+.*[]struct { key string; elem *sessions.Skill }
+.*map.group[string]*sessions.geminiTraceMessage
+.*[]struct { key string; elem *sessions.share }
+.*[]struct { key string; elem []sessions.file }
+.*[8]struct { key string; elem sessions.Shape }
+.*[8]struct { key string; elem sessions.wbIDs }
+.*struct { F uintptr; X0 *sessions.cursorSnap }
+/*struct { key string; elem []sessions.Summary }
+/*[8]struct { key string; elem sessions.Tokens }
+/*[8]struct { key string; elem *sessions.state }
+/*struct { key string; elem sessions.cxContext }
+/*[8]struct { key string; elem sessions.cxOpen }
+/*struct { key string; elem sessions.kimiSpawn }
+/*struct { key string; elem sessions.grokUsage }
+/*func(sessions.ToolStat, sessions.ToolStat) int
+/*func(sessions.ToolWeek, sessions.ToolWeek) int
+/*[8]struct { key string; elem *sessions.Model }
+/*[8]struct { key string; elem *sessions.Share }
+/*[8]struct { key string; elem *sessions.Skill }
+/*struct { key string; elem *sessions.ToolStat }
+/*struct { key string; elem *sessions.callFile }
+/*[8]struct { key string; elem *sessions.share }
+/*[8]struct { key string; elem []sessions.file }
+/*func(sessions.file) (*sessions.callFile, bool)
+/*[]struct { key string; elem sessions.dshHead }
+/*[]struct { key string; elem sessions.piEntry }
+/*map[string]sessions.memoEntry[go.shape.string]
+0*[]struct { key int; elem *sessions.summaryDay }
+0*struct { key sessions.TraceSession; elem bool }
+0*struct { key sessions.ak; elem *sessions.act0 }
+0*struct { key string; elem *sessions.traceTurn }
+0*struct { key string; elem *sessions.TraceSpan }
+0*map.group[string]func(sessions.Summary) float64
+0*[8]struct { key string; elem sessions.dshHead }
+0*[8]struct { key string; elem sessions.piEntry }
+1*[]struct { key string; elem []sessions.Summary }
+1*[8]struct { key int; elem *sessions.summaryDay }
+1*[]struct { key string; elem sessions.cxContext }
+1*[]struct { key string; elem sessions.kimiSpawn }
+1*[]struct { key string; elem sessions.grokUsage }
+1*struct { key string; elem *sessions.summaryDay }
+1*struct { key string; elem *sessions.wslListing }
+1*struct { key sessions.uk; elem sessions.Tokens }
+1*[]struct { key string; elem *sessions.ToolStat }
+1*[]struct { key string; elem *sessions.callFile }
+1*struct { key string; elem *sessions.cursorSnap }
+2*[8]struct { key string; elem []sessions.Summary }
+2*struct { key sessions.codexInterval; elem []int }
+2*[]struct { key sessions.TraceSession; elem bool }
+2*[8]struct { key string; elem sessions.cxContext }
+2*[8]struct { key string; elem sessions.kimiSpawn }
+2*[8]struct { key string; elem sessions.grokUsage }
+2*[]struct { key sessions.ak; elem *sessions.act0 }
+2*map.group[sessions.callsKey]*sessions.callsFlight
+2*struct { key sessions.codexTaskTitle; elem bool }
+2*[8]struct { key string; elem *sessions.ToolStat }
+2*[8]struct { key string; elem *sessions.callFile }
+2*struct { key string; elem *sessions.parentCalls }
+2*[]struct { key string; elem *sessions.traceTurn }
+2*[]struct { key string; elem *sessions.TraceSpan }
+2*struct { key string; elem *sessions.traceCursor }
+2*struct { key string; elem sessions.cursorParent }
+2*struct { key string; elem sessions.desktopTitle }
+3*struct { key string; elem []sessions.ModelEffort }
+3*map[string]map[string]*sessions.claudeContribution
+3*[8]struct { key sessions.TraceSession; elem bool }
+3*struct { key string; elem sessions.codexPortHome }
+3*[]struct { key string; elem *sessions.summaryDay }
+3*[]struct { key string; elem *sessions.wslListing }
+3*[8]struct { key sessions.ak; elem *sessions.act0 }
+3*[]struct { key sessions.uk; elem sessions.Tokens }
+3*[]struct { key string; elem *sessions.cursorSnap }
+3*struct { key string; elem *sessions.ocCallHandle }
+3*[8]struct { key string; elem *sessions.traceTurn }
+3*[8]struct { key string; elem *sessions.TraceSpan }
+3*struct { key string; elem sessions.CodexIdentity }
+3*func(sessions.CallSource, sessions.CallSource) int
+4*func(string, string, string, int) sessions.Overview
+4*[]struct { key sessions.codexInterval; elem []int }
+4*[8]struct { key string; elem *sessions.summaryDay }
+4*[8]struct { key string; elem *sessions.wslListing }
+4*map[sessions.codexCopyPair]sessions.codexCopyResult
+4*[]struct { key sessions.codexTaskTitle; elem bool }
+4*struct { key sessions.codexTaskTitle; elem string }
+4*[8]struct { key sessions.uk; elem sessions.Tokens }
+4*[8]struct { key string; elem *sessions.cursorSnap }
+4*[]struct { key string; elem *sessions.parentCalls }
+4*[]struct { key string; elem *sessions.traceCursor }
+4*struct { key string; elem *sessions.traceSnapshot }
+4*[]struct { key string; elem sessions.cursorParent }
+4*[]struct { key string; elem sessions.desktopTitle }
+4*struct { key string; elem sessions.directoryEntry }
+4*struct { key string; elem sessions.hermesPrintSet }
+4*struct { key string; elem sessions.lineCallReader }
+5*[]struct { key string; elem []sessions.ModelEffort }
+5*[8]struct { key sessions.codexInterval; elem []int }
+5*struct { key string; elem sessions.claudeToolUsage }
+5*[]struct { key string; elem sessions.codexPortHome }
+5*[8]struct { key sessions.codexTaskTitle; elem bool }
+5*[]struct { key string; elem *sessions.ocCallHandle }
+5*[8]struct { key string; elem *sessions.parentCalls }
+5*[8]struct { key string; elem *sessions.traceCursor }
+5*struct { key string; elem *sessions.ocTraceMessage }
+5*[]struct { key string; elem sessions.CodexIdentity }
+5*[8]struct { key string; elem sessions.cursorParent }
+5*[8]struct { key string; elem sessions.desktopTitle }
+5*map.group[string]sessions.memoEntry[go.shape.string]
+5*struct { F uintptr; X0 []sessions.job; X1 chan int }
+5*func(sessions.ModelEffort, sessions.ModelEffort) int
+6*[8]struct { key string; elem []sessions.ModelEffort }
+6*struct { key string; elem sessions.traceHeaderCache }
+6*[8]struct { key string; elem sessions.codexPortHome }
+6*[]struct { key sessions.codexTaskTitle; elem string }
+6*[8]struct { key string; elem *sessions.ocCallHandle }
+6*[]struct { key string; elem *sessions.traceSnapshot }
+6*struct { key string; elem []sessions.titleRecipient }
+6*[8]struct { key string; elem sessions.CodexIdentity }
+6*struct { key string; elem sessions.TitleApplication }
+6*[]struct { key string; elem sessions.directoryEntry }
+6*[]struct { key string; elem sessions.hermesPrintSet }
+6*[]struct { key string; elem sessions.lineCallReader }
+7*[]struct { key string; elem sessions.claudeToolUsage }
+7*struct { Source sessions.dshSource "json:\"source\"" }
+7*struct { key string; elem sessions.memoEntry[string] }
+7*[8]struct { key sessions.codexTaskTitle; elem string }
+7*struct { key string; elem *sessions.cursorEditorMeta }
+7*[]struct { key string; elem *sessions.ocTraceMessage }
+7*[8]struct { key string; elem *sessions.traceSnapshot }
+7*struct { key string; elem *sessions.callContinuation }
+7*[8]struct { key string; elem sessions.directoryEntry }
+7*[8]struct { key string; elem sessions.hermesPrintSet }
+7*[8]struct { key string; elem sessions.lineCallReader }
+7*struct { key string; elem sessions.revisionCandidate }
+8*struct { key string; elem []sessions.TitleApplication }
+8*struct { key string; elem *sessions.codexContribution }
+8*[8]struct { key string; elem sessions.claudeToolUsage }
+8*[]struct { key string; elem sessions.traceHeaderCache }
+8*[8]struct { key string; elem *sessions.ocTraceMessage }
+8*[]struct { key string; elem []sessions.titleRecipient }
+8*[]struct { key string; elem sessions.TitleApplication }
+9*struct { key string; elem *sessions.claudeContribution }
+9*map.group[string]map[string]*sessions.claudeContribution
+9*[8]struct { key string; elem sessions.traceHeaderCache }
+9*[]struct { key string; elem sessions.memoEntry[string] }
+9*[]struct { key string; elem *sessions.cursorEditorMeta }
+9*struct { key string; elem *sessions.geminiTraceMessage }
+9*[8]struct { key string; elem []sessions.titleRecipient }
+9*[8]struct { key string; elem sessions.TitleApplication }
+9*[]struct { key string; elem *sessions.callContinuation }
+9*[]struct { key string; elem sessions.revisionCandidate }
+:*[]struct { key string; elem []sessions.TitleApplication }
+:*[]struct { key string; elem *sessions.codexContribution }
+:*[8]struct { key string; elem sessions.memoEntry[string] }
+:*map.group[sessions.codexCopyPair]sessions.codexCopyResult
+:*[8]struct { key string; elem *sessions.cursorEditorMeta }
+:*map[string]func(sessions.file) (*sessions.callFile, bool)
+:*[8]struct { key string; elem *sessions.callContinuation }
+:*[8]struct { key string; elem sessions.revisionCandidate }
+;*[8]struct { key string; elem []sessions.TitleApplication }
+;*[8]struct { key string; elem *sessions.codexContribution }
+;*[]struct { key string; elem *sessions.claudeContribution }
+;*struct { Type string "json:\"type\""; sessions.kimiSpawn }
+;*[]struct { key string; elem *sessions.geminiTraceMessage }
+;*struct { key string; elem func(sessions.Summary) float64 }
+;*struct { F uintptr; X0 *sessions.ocCallHandle; X1 string }
+<*[8]struct { key string; elem *sessions.claudeContribution }
+<*sessions.shelf[*github.com/klauspost/compress/zstd.Decoder]
+<*[8]struct { key string; elem *sessions.geminiTraceMessage }
+=*struct { key sessions.callsKey; elem *sessions.callsFlight }
+=*[]struct { key string; elem func(sessions.Summary) float64 }
+=*struct { F uintptr; X0 *sync.Once; X1 *sessions.cursorSnap }
+>*[8]struct { key string; elem func(sessions.Summary) float64 }
+>*func([]uint8, tls.ConnectionState) (*tls.SessionState, error)
+>*func(tls.ConnectionState, *tls.SessionState) ([]uint8, error)
+?*[]struct { key sessions.callsKey; elem *sessions.callsFlight }
+@*struct { Messages []sessions.clineMessage "json:\"messages\"" }
+@*[8]struct { key sessions.callsKey; elem *sessions.callsFlight }
+@*map.group[string]func(sessions.file) (*sessions.callFile, bool)
+@*struct { key string; elem sessions.memoEntry[go.shape.string] }
+B*[]struct { key string; elem sessions.memoEntry[go.shape.string] }
+B*sessions.listMemo[go.shape.struct { Kind string; Parent string }]
+C*sessions.memoEntry[go.shape.struct { Kind string; Parent string }]
+C*[8]struct { key string; elem sessions.memoEntry[go.shape.string] }
+C*sessions.memoRound[go.shape.struct { Kind string; Parent string }]
+D*struct { key string; elem map[string]*sessions.claudeContribution }
+D*struct { SessionID string; Messages []sessions.geminiTraceMessage }
+D*go.shape.[]github.com/yetone/magpie/internal/sessions.hiddenGateway
+E*struct { key sessions.codexCopyPair; elem sessions.codexCopyResult }
+F*struct { sessions.Stats; Agents map[string]string "json:\"agents\"" }
+F*[]struct { key string; elem map[string]*sessions.claudeContribution }
+F*func(*sessions.traceIdentitySnapshot) *sessions.traceIdentitySnapshot
+G*[8]struct { key string; elem map[string]*sessions.claudeContribution }
+G*sessions.listMemo[github.com/yetone/magpie/internal/sessions.grokKind]
+G*[]struct { key sessions.codexCopyPair; elem sessions.codexCopyResult }
+H*sessions.memoEntry[github.com/yetone/magpie/internal/sessions.grokKind]
+H*sessions.memoRound[github.com/yetone/magpie/internal/sessions.grokKind]
+H*[8]struct { key sessions.codexCopyPair; elem sessions.codexCopyResult }
+H*func(sessions.file, *sessions.callFile) (*sessions.callFile, int, bool)
+K*struct { key string; elem func(sessions.file) (*sessions.callFile, bool) }
+K*go.shape.map[string]*github.com/yetone/magpie/internal/sessions.wslListing
+K*struct { F uintptr; X0 *sessions.shelf[go.shape.*uint8]; X1 *[13]uintptr }
+L*func(*sessions.traceIdentitySnapshot, *sessions.traceIdentitySnapshot) bool
+M*[]struct { key string; elem func(sessions.file) (*sessions.callFile, bool) }
+N*[8]struct { key string; elem func(sessions.file) (*sessions.callFile, bool) }
+N*map[string]sessions.memoEntry[go.shape.struct { Kind string; Parent string }]
+Q*atomic.Pointer[github.com/yetone/magpie/internal/sessions.traceIdentitySnapshot]
+Q*struct { Model string; Provider string; Purpose string; Usage sessions.piUsage }
+S*map[string]sessions.memoEntry[github.com/yetone/magpie/internal/sessions.grokKind]
+S*map[string]func(sessions.file, *sessions.callFile) (*sessions.callFile, int, bool)
+T*map.group[string]sessions.memoEntry[go.shape.struct { Kind string; Parent string }]
+Y*map.group[string]sessions.memoEntry[github.com/yetone/magpie/internal/sessions.grokKind]
+Y*map.group[string]func(sessions.file, *sessions.callFile) (*sessions.callFile, int, bool)
+]*struct { F uintptr; X0 func(sessions.CallSource) []sessions.Call; X1 []sessions.CallSource }
+^*struct { sessions.grokUsage; ModelUsage map[string]sessions.grokUsage "json:\"modelUsage\"" }
+_*struct { key string; elem sessions.memoEntry[go.shape.struct { Kind string; Parent string }] }
+a*struct { Moved []sessions.CodexMove "json:\"moved\""; Refused []gui.refused "json:\"refused\"" }
+a*[]struct { key string; elem sessions.memoEntry[go.shape.struct { Kind string; Parent string }] }
+b*[8]struct { key string; elem sessions.memoEntry[go.shape.struct { Kind string; Parent string }] }
+d*struct { key string; elem sessions.memoEntry[github.com/yetone/magpie/internal/sessions.grokKind] }
+d*struct { key string; elem func(sessions.file, *sessions.callFile) (*sessions.callFile, int, bool) }
+f*[]struct { key string; elem sessions.memoEntry[github.com/yetone/magpie/internal/sessions.grokKind] }
+f*[]struct { key string; elem func(sessions.file, *sessions.callFile) (*sessions.callFile, int, bool) }
+g*[8]struct { key string; elem sessions.memoEntry[github.com/yetone/magpie/internal/sessions.grokKind] }
+g*[8]struct { key string; elem func(sessions.file, *sessions.callFile) (*sessions.callFile, int, bool) }
+k*struct { F uintptr; X0 chan int; X1 []sessions.job; X2 map[string]bool; X3 map[string]int64; X4 chan int }
+t*struct { Total *sessions.cxUsage "json:\"total_token_usage\""; Last *sessions.cxUsage "json:\"last_token_usage\"" }
+*struct { F uintptr; X0 chan int; X1 map[int]*usage.slot; X2 func(sessions.CallSource) []sessions.Call; X3 []sessions.CallSource }
+*struct { F uintptr; X0 map[int]*usage.slot; X1 func(sessions.CallSource) []sessions.Call; X2 []sessions.CallSource; X3 chan struct {} }
+*struct { ID string "json:\"id\""; From string "json:\"from\""; To string "json:\"to\""; At time.Time "json:\"at\""; Items []sessions.item "json:\"items\"" }
+*go.shape.struct { Name string "json:\"name\""; Category string "json:\"category,omitempty\""; Calls int "json:\"calls\""; Sessions int "json:\"sessions\"" }(
+*struct { IDs []string "json:\"ids\""; Groups bool "json:\"groups\""; RouteIDs []int64 "json:\"routeIds\""; Day string "json:\"day\""; Sessions []string "json:\"sessions\"" }
+*struct { Role string "json:\"role\""; Provider string "json:\"provider\""; Model string "json:\"model\""; Usage *sessions.piUsage "json:\"usage\""; Timestamp int64 "json:\"timestamp\"" }
+*struct { Role string; ToolCallID string; ToolName string; Model string; Provider string; ResponseID string; ResponseModel string; StopReason string; Timestamp int64; IsError bool; Content json.RawMessage; Usage sessions.piUsage }
+*go.shape.struct { Model string "json:\"model\""; Effort string "json:\"effort\""; github.com/yetone/magpie/internal/sessions.Tokens; Reasoning int "json:\"reasoning\""; Cost float64 "json:\"cost\""; Priced bool "json:\"priced\"" }
+*struct { Input int "json:\"input_tokens\""; Output int "json:\"output_tokens\""; CacheRead int "json:\"cache_read_input_tokens\""; CacheWrite int "json:\"cache_creation_input_tokens\""; Creation *sessions.ccCacheCreation "json:\"cache_creation\"" }
+*struct { Role string "json:\"role\""; Provider string "json:\"provider\""; Model string "json:\"model\""; Usage *sessions.piUsage "json:\"usage\""; DurationMs float64 "json:\"durationMs\""; Duration float64 "json:\"duration\""; TTFT float64 "json:\"ttft\"" }
+*go.shape.struct { Name string "json:\"name\""; Calls int "json:\"calls\""; Sessions int "json:\"sessions\""; Last string "json:\"last\""; Agents map[string]int "json:\"agents\""; Projects []github.com/yetone/magpie/internal/sessions.ToolStat "json:\"projects\"" }
+*struct { Role string "json:\"role\""; Model string "json:\"model\""; Content json.RawMessage "json:\"content\""; Usage *sessions.piUsage "json:\"usage\""; NestedCalls *struct { Calls []struct { Name string "json:\"name\"" } "json:\"calls\"" } "json:\"nestedCalls\"" }
+*struct { SessionUpdate string "json:\"sessionUpdate\""; Content struct { Type string "json:\"type\""; Text string "json:\"text\"" } "json:\"content\""; Usage *struct { sessions.grokUsage; ModelUsage map[string]sessions.grokUsage "json:\"modelUsage\"" } "json:\"usage\"" }
+*struct { Update struct { SessionUpdate string "json:\"sessionUpdate\""; Content struct { Type string "json:\"type\""; Text string "json:\"text\"" } "json:\"content\""; Usage *struct { sessions.grokUsage; ModelUsage map[string]sessions.grokUsage "json:\"modelUsage\"" } "json:\"usage\"" } "json:\"update\"" }
+*struct { Agents []gui.manageAgentJSON "json:\"agents\""; Agent string "json:\"agent\""; Sessions []gui.managedJSON "json:\"sessions\""; Terminal bool "json:\"terminal\""; Trash []gui.trashedJSON "json:\"trash\""; TrashDir string "json:\"trashDir\""; Recording bool "json:\"recording\""; Recorded bool "json:\"recorded\"" }
+*struct { ID string "json:\"id\""; Model string "json:\"model\""; Usage *struct { Input int "json:\"input_tokens\""; Output int "json:\"output_tokens\""; CacheRead int "json:\"cache_read_input_tokens\""; CacheWrite int "json:\"cache_creation_input_tokens\""; Creation *sessions.ccCacheCreation "json:\"cache_creation\"" } "json:\"usage\"" }
+*struct { Type string; ID string; ParentID string; CustomType string; Timestamp time.Time; Message struct { Role string; ToolCallID string; ToolName string; Model string; Provider string; ResponseID string; ResponseModel string; StopReason string; Timestamp int64; IsError bool; Content json.RawMessage; Usage sessions.piUsage }; Data struct { EndAt int64; TotalMS int64 } }
+*struct { ID string "json:\"id\""; Model string "json:\"model\""; Content json.RawMessage "json:\"content\""; Usage *struct { Input int "json:\"input_tokens\""; Output int "json:\"output_tokens\""; CacheRead int "json:\"cache_read_input_tokens\""; CacheWrite int "json:\"cache_creation_input_tokens\""; Creation *sessions.ccCacheCreation "json:\"cache_creation\"" } "json:\"usage\"" }
+*struct { Input int "json:\"inputTokens\""; Output int "json:\"outputTokens\""; InputDetails sessions.wbDetails "json:\"inputTokensDetails\""; OldInput int "json:\"input_tokens\""; OldOutput int "json:\"output_tokens\""; OldDetails sessions.wbDetails "json:\"input_tokens_details\""; CacheWrite int "json:\"cacheCreationTokens\""; OldCacheWrite int "json:\"cache_creation_input_tokens\"" }
+*struct { SessionID string; Messages []sessions.geminiTraceMessage; Set *struct { SessionID string; Messages []sessions.geminiTraceMessage } "json:\"$set\""; Rewind string "json:\"$rewindTo\""; Patch *struct { ID string; Content json.RawMessage; ToolCalls []struct { ID string; Result json.RawMessage }; Updates []json.RawMessage; RemoveIDs []string; OrderIDs []string } "json:\"$patch\"" }
+*struct { Content json.RawMessage "json:\"content\""; Source struct { Kind string "json:\"kind\"" } "json:\"source\""; Title string "json:\"title\""; Inherited bool "json:\"inherited\""; Message struct { Source sessions.dshSource "json:\"source\"" } "json:\"message\""; Usage *struct { Input int "json:\"inputTokens\""; Output int "json:\"outputTokens\""; CacheRead int "json:\"cacheReadTokens\""; CacheWrite int "json:\"cacheWriteTokens\"" } "json:\"usage\"" }
+*struct { MessageID string "json:\"messageId\""; Model string "json:\"model\""; RequestModel string "json:\"requestModelId\""; Usage *struct { Input int "json:\"inputTokens\""; Output int "json:\"outputTokens\""; InputDetails sessions.wbDetails "json:\"inputTokensDetails\""; OldInput int "json:\"input_tokens\""; OldOutput int "json:\"output_tokens\""; OldDetails sessions.wbDetails "json:\"input_tokens_details\""; CacheWrite int "json:\"cacheCreationTokens\""; OldCacheWrite int "json:\"cache_creation_input_tokens\"" } "json:\"usage\"" }(
+*struct { sessions.cxCompaction; sessions.cxHistorySnapshot; Type string "json:\"type\""; ID string "json:\"id\""; SessionID string "json:\"session_id\""; ThreadID string "json:\"thread_id\""; Upstream string "json:\"model_provider\""; AccountID string "json:\"creator_account_id\""; UserID string "json:\"creator_user_id\""; Cwd string "json:\"cwd\""; Model string "json:\"model\""; Effort sessions.ccStr "json:\"effort\""; TurnID string "json:\"turn_id\""; ResponseID string "json:\"response_id\""; Usage *sessions.cxUsage "json:\"usage\""; ThreadUsage *sessions.cxUsage "json:\"thread_token_usage\""; Duration int64 "json:\"duration_ms\""; FirstToken int64 "json:\"time_to_first_token_ms\""; Settings struct { Model string "json:\"model\""; Upstream string "json:\"model_provider\"" } "json:\"thread_settings\""; Info *struct { Total *sessions.cxUsage "json:\"total_token_usage\""; Last *sessions.cxUsage "json:\"last_token_usage\"" } "json:\"info\"" }
+*struct { sessions.cxCompaction; sessions.cxHistorySnapshot; Type string "json:\"type\""; SessionID string "json:\"session_id\""; ThreadID string "json:\"thread_id\""; ParentThreadID string "json:\"parent_thread_id\""; Source json.RawMessage "json:\"source\""; TurnID string "json:\"turn_id\""; ResponseID string "json:\"response_id\""; Usage *sessions.cxUsage "json:\"usage\""; ThreadUsage *sessions.cxUsage "json:\"thread_token_usage\""; ID string "json:\"id\""; Cwd string "json:\"cwd\""; Model string "json:\"model\""; ModelProvider string "json:\"model_provider\""; Role string "json:\"role\""; Message string "json:\"message\""; AgentNickname string "json:\"agent_nickname\""; CallID string "json:\"call_id\""; Name string "json:\"name\""; Arguments string "json:\"arguments\""; EventID string "json:\"event_id\""; AgentThreadID string "json:\"agent_thread_id\""; Kind string "json:\"kind\""; Item struct { ID string "json:\"id\""; Type string "json:\"type\""; Kind string "json:\"kind\""; AgentThreadID string "json:\"agent_thread_id\"" } "json:\"item\""; Content []struct { Type string "json:\"type\""; Text string "json:\"text\"" } "json:\"content\""; Settings struct { Model string "json:\"model\""; Cwd string "json:\"cwd\"" } "json:\"thread_settings\""; Info *struct { Total *sessions.cxUsage "json:\"total_token_usage\""; Last *sessions.cxUsage "json:\"last_token_usage\"" } "json:\"info\"" }
+>  customunmaskedlocationcontext.just nowno bound%-*s  %sall timenothing no priceContentssessionshttps://passwordprofilesat 15:04  %s %s
+ use no matchresume: profile  deleted.blocked, not %qcodesign--verify--strict.gatewayindex.tsindex.js-android.bun-tagbun.lock":\s*\["authPathmodified API keyvalidate secondscost_usdroute_idrejectedguardianSubagentreported:missing%s:%d:%d creditsnav.pagerotationSessionsFuncTypestruct {bad inst not in freeformtoml: %soffsets:basefontthetasym xmlns="encodingSnapshotBecause;Cayleys;Cconint;Cedilla;Diamond;DownTee;Element;Epsilon;Implies;LeftTee;NewLine;NoBreak;NotLess;Omicron;OverBar;Product;UpArrow;Uparrow;Upsilon;alefsym;angrtvb;angzarr;asympeq;backsim;because;bemptyv;between;bigcirc;bigodot;bigstar;boxplus;ccupssm;cemptyv;cirscir;coloneq;congdot;cudarrl;cudarrr;cularrp;curarrm;dbkarow;ddagger;ddotseq;demptyv;diamond;digamma;dotplus;dwangle;epsilon;eqcolon;equivDD;gesdoto;gtquest;gtrless;harrcir;intprod;isindot;larrbfs;larrsim;lbrksld;lbrkslu;ldrdhar;lesdoto;lessdot;lessgtr;lesssim;lotimes;lozenge;ltquest;luruhar;maltese;minusdu;napprox;natural;nearrow;nexists;notinva;notinvb;notinvc;notniva;notnivb;notnivc;npolint;nsqsube;nsqsupe;nvinfin;nwarrow;olcross;omicron;orderof;orslope;pertenk;planckh;pluscir;plussim;plustwo;precsim;quatint;questeq;rarrbfs;rarrsim;rbrksld;rbrkslu;rdldhar;realine;rotimes;ruluhar;searrow;simplus;simrarr;subedot;submult;subplus;subrarr;succsim;supdsub;supedot;suphsol;suphsub;suplarr;supmult;supplus;swarrow;topfork;triplus;tritime;uparrow;upsilon;uwangle;vzigzag;zigrarr;bnequiv;npreceq;nsubset;nsucceq;nsupset;nvltrie;nvrtrie;readbuf:MD5+SHA1SHA3-224SHA3-256SHA3-384SHA3-512SHA1-RSADSA-SHA1DNS namepassportPASSPORTbirthdayBIRTHDAYUSERNAMEuserhostHOSTNAMEPASSWORDyournameec2-userpostgreswww-datago-aheadoptionalhostnamemybucketdownload.example.invalidnoreply@"index":acceptex48828125infinityavx512cdavx512bwavx512dqavx512vl
+%d requestsnot-writablelast-versionresponseBodyinvalid itemaccountNames%s="%s?v=%s"%d-day cycleCased_LetterOther_LetterOther_NumberOther_SymbolSpacing_MarkCypro_MinoanMeetei_MayekPahawh_HmongSora_SompengSyloti_NagriBidi_ControlJoin_Controlaihubmix.comcan not bothsimultaneousboth presentcomputer-usecodex modelsSessionStartNotificationSubagentStopTeammateIdleConfigChangemagpie-quotanot magpie'smagpie-imageMagpie Image.png?size=96neondatabaseHugging Facebrave-search^[\w./+@-]+$opencode.exeHERMES_HOME=codeberg.org.pi/mcp.jsonskill %s: %w      name: process.env.sessionStartsubagentStop  command =   timeout = library.jsonai.smithery//api/search?mcp_servers.tools/list: initialize: excludeToolsrtk-ai.rtk_*--auto-patch[rtk-ai.rtk]/Cellar/rtk//.linuxbrew/.magpie-link/src/branch//src/commit/xcrun: error?recursive=1copied from .magpie-nextnot a folderCODEBUDDY.md%s
+ stays a turn%d pattern%ssessions 
+  on %d day%sprofile namefetch modelsupdate skillsave profilemodel / ruletranslocated; exit 1; fia middlewarerejected: %s.gateway.mjsplugins.json.system-ca-*served_modelthread_titlecollab_spawnLuna Reserveusage-othersGateway pagesessions.cssPlugin tools has no name has no typereflect.Copycaller error/usr/bin/envunified_execLittleEndian> but have <with name %qSerializableLinearizableCircleMinus;CircleTimes;Equilibrium;GreaterLess;LeftCeiling;LessGreater;MediumSpace;NotPrecedes;NotSucceeds;OverBracket;RightVector;Rrightarrow;RuleDelayed;SmallCircle;SquareUnion;SubsetEqual;UpDownArrow;Updownarrow;VerticalBar;backepsilon;blacksquare;circledcirc;circleddash;curlyeqprec;curlyeqsucc;diamondsuit;eqslantless;expectation;nRightarrow;nrightarrow;preccurlyeq;precnapprox;quaternions;straightphi;succcurlyeq;succnapprox;thickapprox;updownarrow;NotLessLess;NotSuperset;ECDSA-SHA256ECDSA-SHA384ECDSA-SHA512keyAgreementencipherOnlydecipherOnlyExtKeyUsage(aliyuncs.commyqcloud.com
+ magpiePOST /api/cliPOST /api/set/api/sessions%d
+<skill name="sessions.jsoncodex resume pi --session omp --resume custom-openaicustom-geminifilter agentsfilter skillsfilter models
+ needs a value.messages.jsonstate_*.sqlitecodex-providermagpie-cursor-.settings.jsonapi_call_count FROM sessionsNew session - grok --resume omp --profile checking in
+only one headerboth be presentno model list: /apps/anthropicPostModelSwitchchrome-devtoolsChrome DevToolsmcp-server-timecloudflare-docsCloudflare Docsmicrosoft-learnMicrosoft Learnrtk hook claudertk-hook-geminirtk hook cursoran empty server.magpie-librarydisableAllHooksno hook called instructions.mdstreamable-http%s is too largecontext_serversstreamable_httpplugins.enabledGIT_SSH_COMMANDcore.sshCommand.codebuddy.jsonmcp_config.jsonopencode-claudemcp-config.jsonmagpie: remove an XML document-before-restoreheld by a Codex WHERE t.id = ?*.messages.jsoncodex-title-keyCURSOR_DATA_DIRmagpie-cursor-*claude-desktop|session_messagesessions-*.jsondroid --resume kimi --session claude-desktop:"<local-commandGEMINI_CLI_HOME
+cksetzung GET /api/sessionsMAGPIE_WEB_RUNKEY--enable-featuresGET /api/whatsnewinvalid route dayresponseTruncatedrequests a minuteomarchy bar icon:hooks/agents-someskills/agents-allskills/ignore-newskills/import-allinstructions/saveskills/remove-allskills/update-allassets/context.jsassets/index.htmlassets/omarchy.jsassets/plugins.jsClose_PunctuationFinal_PunctuationOther_PunctuationOld_North_ArabianOld_South_ArabianSentence_TerminalUnified_IdeographPermissionRequestElicitationResultFIRECRAWL_API_KEY^[\w.-]+/[\w.-]+$NPM_CONFIG_PREFIXnpm_config_prefix.factory/mcp.json.codebuddy/skillsrun_shell_commandafterMCPExecutionafterAgentThoughtno hook called %s%s isn't an imagepypi.org/project/hub.docker.com/r/hub.docker.com/_/mcp entries %d %s# <<< magpie <<<
+generation_result"magpie-roots-%d"it gave no reasonaux_usage_records.system_generatedassistant/messagearchived_sessionsCODEX_SQLITE_HOMECURSOR_CONFIG_DIRagent-transcriptssession_projcachecache_read_tokensContextCompaction WHERE id=?) AND sessions-wsl.jsonGemini compatiblenot installed 
+%squota-refresh.jsonno sessions yet 
+PI_DESKTOP_DATA_DIRsessions-index.jsonopencode --session codebuddy --resume shared instructions base URL unchanged
+ Beijinghttps://ydc-index.ioenterprise_cbp_trialworkbuddy-desktop-aiX-GitHub-Api-Version^[A-Za-z0-9\-_%&=]+$xiaomi-token-plan-cn-?\d[\d,]*(?:\.\d+)?/usr/local/bin/devinadd-generic-passwordANTHROPIC_AUTH_TOKENopenid profile emailbalance-history.jsondynamic_agent_clientOpenAI sent no tokenChatGPT sign-out: %sno Claude account %qCline answered %d %s%w; kept aside as %s\WindowsApps\OpenAI.prompt_cache_optionsfunction_call_outputwhich Codex account?free_limited_copilotIv1.b507a08c87ecfe98ai-gateway.vercel.sh~typesafe/jev-latesthttps://api.devin.aigoogle_accounts.jsonGOOGLE_CLOUD_PROJECT, ineligible %s (%s)PLATFORM_UNSPECIFIEDfetchAvailableModelsthe picture is emptycould not resolve %snot a magpie:// linkpaste the key to add%s: not a model listkiro-auth-token.json.amazonaws.com/tokenminimax-checkin.jsonI*7Cf%WZ#S&%1RlZJ&C2no plan in the replyX-Magpie-Videomakers%s needs its API keyThis sign-in is overpremium_interactions:generateAccessTokenimpersonating %s: %wVolcengine %s: %s %s/api/coding/paas/v4/activeOrganizationIdsafari-web-extension^[a-z0-9][a-z0-9-]*$settings:no-accountsMAGPIE_OTEL_SESSIONSMAGPIE_OTEL_ENDPOINTjson: Unmarshal(nil)json: Unmarshal(nil json: error calling  after array elementfloating point errorGC sweep terminationResetDebugLog (test)chan send (nil chan)flushing proc cachesclose of nil channelinconsistent lockedmnotetsleep not on g0bad system page size to unallocated span/gc/scan/stack:bytes/gc/scan/total:bytes/gc/heap/frees:bytes/gc/gomemlimit:bytesp mcache not flushed markroot jobs done
+invalid header valueunknown address typeRequest URI Too LongUnprocessable EntityInsufficient Storageinvalid DNS responsegetadaptersaddressesunexpected network: the page needs a keyPOST /api/agent-fastGET /api/caller-keysPOST /api/importappsGET /api/import/{id}providers-state.jsonGET /api/library/rtkGET /api/plugins/gitGET /api/plugins/npmGET /api/login/usageGET /api/signin/{id}POST /api/tune/applymagpie-requests-day-provider is requiredservers/remove-foundassets/icons/air.svgassets/icons/aws.svgassets/icons/omo.svgassets/icons/omp.svgassets/icons/poe.svgassets/icons/rtk.pngassets/icons/xai.svgassets/icons/zai.svgassets/icons/zed.svg2006-01-02 15:04 MSTEgyptian_HieroglyphsMeroitic_HieroglyphsIDS_Trinary_OperatorTerminal_Punctuationrun_terminal_commandmodelcontextprotocolbrave.com/search/apirtk hook antigravityhttps://context7.comhttps://deepwiki.com.qoder/settings.jsontag:yaml.org,2002:jsbearer_token_env_varEdit|Write|MultiEditbeforeShellExecutionskills.sh's list: %wMCP-Protocol-VersionRTK's install scripta group needs a namecouldn't run git: %wrepository not foundno servers to removeclaudecode/toolUseId<([A-Za-z_][\w.:-]*) instead of the fileX-Amz-Content-Sha256RequestTimeTooSkewedthe video failed: %sCOALESCE(w.path, '') FROM chat_threads t WHERE thread_id = ?[Request interruptedcodex rollout %s: %vclaude-code-sessionsqoderclicn --resume  API, at its address couldn't check in:  and run it yourself.app/Contents/MacOS/release %s has no %sopencode-gemini-authMAGPIE_PLUGIN_MARKETgit ls-remote %s: %wstarting plugins: %wthe plugin host quitkeywords:pi-package NODE_EXTRA_CA_CERTS=npm named no versionmemory_consolidation%s|%s|%s|%s|%s|%s|%d1 plugin gives toolsWarm-up and check-inreflect: cannot use  returned zero Valuereflect.Value.IsZeroreflect.Value.Methodreflect.Value.SetIntreflect.Value.Slice3expected digit (0-9)window size exceededinvalid <![ sequencegzip: invalid headermissing IPv6 addressunexpected characternegative Prefix bitssql: Rows are closedMAGPIE_GITHUB_MIRRORhttps://gh-proxy.comDoubleLongLeftArrow;DownLeftRightVector;LeftArrowRightArrow;NegativeMediumSpace;RightArrowLeftArrow;SquareSupersetEqual;leftrightsquigarrow;NotGreaterFullEqual;NotRightTriangleBar;invalid PCG encodingx509usefallbackrootsgetCert can't be nilinvalid UTF-8 stringx509: malformed spki2001:4860:4860::88882001:4860:4860::88442606:4700:4700::11112606:4700:4700::1001GetAdaptersAddressesNtSetInformationFileRtlIsDosDeviceName_UGetProcessMemoryInfobcryptprimitives.dll37252902984619140625ChangeServiceConfigWCheckTokenMembershipQueryServiceConfig2WQueryServiceStatusExRegisterEventSourceWCertFindChainInStoreGetWindowsDirectoryWProcessIdToSessionIdSetVolumeMountPointWRtlInitUnicodeStringEnumProcessModulesExGetModuleFileNameExWGetModuleInformationSetupDiOpenDevRegKeySHGetKnownFolderPathUnloadKeyboardLayoutconnect rejected: %sDHT has wrong lengthmultiple SOF markersnumber of componentsSOF has wrong lengthDQT has wrong lengthDRI has wrong lengthshort segment lengthSOS has wrong lengthBad chunk length: %dbad palette length: invalid image size: 
+magpie needs WebView2POST /api/proxy/checkGET /api/archive/fileGET /api/context/textPOST /api/import/iconGET /api/library/iconPOST /api/library/rtksandbox allow-scriptsGET /api/plugin-pagesGET /api/plugins/pageGET /api/gateway/callGET /api/icons/{name}GET /api/sessions/oneGET /api/update/notesGET /api/usage/quotasfrom and to are timesassets/pluginpages.jsassets/icons/ai21.svgassets/icons/alma.pngassets/icons/coze.svgassets/icons/curl.svgassets/icons/grok.svgassets/icons/groq.svgassets/icons/jina.svgassets/icons/kilo.svgassets/icons/kimi.svgassets/icons/lody.pngassets/icons/omlx.svgassets/icons/reka.svgassets/icons/snow.pngassets/icons/trae.svgassets/icons/yylx.svgassets/plugins/usage/unknown key action %qConnector_PunctuationAnatolian_HieroglyphsInscriptional_Pahlavi%s: no model list: %whttps://www.skills.sh^[A-Za-z0-9_-]{1,32}$Personal access token^[a-z][a-z0-9+.-]*://<!-- rtk-instructions.gemini/settings.jsona text for no set, %q    - id: magpie-mcp-GitHub answered %d %sGIT_TERMINAL_PROMPT=0authentication failedno skills to bring inno subagent called %sX-RateLimit-RemainingSignatureDoesNotMatchprofile name is emptylibrary written into image_generation_calltranscript_full.jsonlsessions codex configsession desktop titlegateway-conversationsgateway not running: %s 
+ partner (sponsor) (%d call%s unpriced) isn't there any morecatalog sync failed: back from the sessionhttps://api.npmjs.orgbun-linux-aarch64.zipopencode-copilot-authopencode-qoder-bridge/search/repositories?plugin-providers.jsonbun update %s: %s: %wbun update %s: %v: %scache_write_5m_tokenscache_write_1h_tokenssignal.NotifyContext({n} keys with a limitbad type in compare: unknown ABI part kind of unexported methodunexpected value stepreflect.Value.SetZeroreflect.Value.Pointerreflect.Value.SetUintexec: already startedunhandled kv part: %sunexpected block size, offset: INVALID (0)building table %v: %vuse of closed EncoderIPv4 address too longunexpected slice sizehttps://hf-mirror.comCapitalDifferentialD;DoubleLeftRightArrow;DoubleLongRightArrow;EmptyVerySmallSquare;NestedGreaterGreater;NotDoubleVerticalBar;NotLeftTriangleEqual;NotSquareSubsetEqual;OpenCurlyDoubleQuote;ReverseUpEquilibrium;NotGreaterSlantEqual;invalid NumericStringx509: invalid versioncloudflarestorage.comAIza[0-9A-Za-z_-]{35}AdjustTokenPrivilegesLookupPrivilegeValueWSetNamedSecurityInfoWNetUserGetLocalGroupsGetProfilesDirectoryW186264514923095703125931322574615478515625concurrent map writesAnthropicPBC.Claude_*CM_Get_DevNode_StatusChangeServiceConfig2WDeregisterEventSourceEnumServicesStatusExWGetNamedSecurityInfoWDwmGetWindowAttributeDwmSetWindowAttributeGetVolumeInformationWNtCreateNamedPipeFileSetupDiEnumDeviceInfoSetupUninstallOEMInfWWSALookupServiceNextWWTSEnumerateSessionsWinvalid character %#Uexpected character %cimage: unknown formatinvalid JPEG format: too many coefficientspng: invalid format: not enough pixel data chunk is too large: %s profile: total %d
+Image attachment: truemust be a number of USDhas a control characterthe video was cancelleddevice or resource busyinterrupted system callno space left on deviceoperation not supportedoperation not permittedCertGetCertificateChainFreeEnvironmentStringsWGetEnvironmentVariableWGetSystemTimeAsFileTimeSetEnvironmentVariableWbytes.Buffer: too largehttp2: handler panickedhttp: request too largenet/http: abort Handlertext/xml; charset=utf-8ENABLE_CONNECT_PROTOCOLhttp: invalid header %shttp: invalid method %qError reading directoryunknown error code 0x%xframe_goaway_has_streamframe_headers_pad_shortframe_rststream_bad_lennet/http context value unknown relationship %qmalformed HTTP responsemulti wildcard not lastnon-zero reserved fieldnetwork not implementedcommand not implementedVariant Also Negotiatesmissing protocol schemeinvalid URI for requestsyntax error in patternunexpected address typemissing port in addresscom.yetone.magpie.servetext/css; charset=utf-8Restart to Update to %smagpie braucht WebView2POST /api/agents/rescanGET /api/agents/installPOST /api/usage/arrangePOST /api/settings/corsPOST /api/settings/portPOST /api/backup/exportPOST /api/backup/importC:\Windows\explorer.exeGET /api/masking/recordGET /api/omarchy/widgetContent-Security-PolicyGET /api/plugins/githubGET /api/plugins/marketGET /api/plugins/searchPOST /api/plugins/checkPOST /api/plugin-signinPOST /api/privacy-modelPOST /api/icons/faviconPOST /api/keys/{action}POST /api/signin/importlody://provider/import?Software\Classes\magpieGET /api/sessions/statsGET /api/usage/requestsPOST /api/whatsnew/seentext/csv; charset=utf-8assets/icons/chutes.svgassets/icons/cursor.svgassets/icons/github.svgassets/icons/hanako.pngassets/icons/hermes.svgassets/icons/lambda.svgassets/icons/liquid.svgassets/icons/llmapi.svgassets/icons/magpie.svgassets/icons/nebius.svgassets/icons/ollama.svgassets/icons/openai.svgassets/icons/t3code.svgassets/icons/vercel.svgassets/icons/vscode.svgassets/icons/zenmux.svgassets/plugins/gateway/assets/plugins/library/assets/plugins/routing/Logical_Order_ExceptionNoncharacter_Code_Pointcopilot-instructions.md2006-01-02_15-04-05.000%s is the library's own%s: a command is needed/openai/codex/runtimes/%s is a project already--disable-interactivityWinGetPackageIdentifiercould not read usernamecould not read passwordCLINE_MCP_SETTINGS_PATHcline_mcp_settings.json\"sha\" wasn't suppliedunknown address type %dthread_settings_appliedno such deleted session*/chats/session-*.jsonlhttps://api.example.com in the library already%d models from its list 
+ %d more with --limit/v1/magpie/quotas?kept=1automatic updates are onmagpie-cli-windows-amd64no calls through magpie sessions 
+ConnContext returned nilRequest Entity Too LargePOST /api/settings/guidePOST /api/agents/arrangePOST /api/settings/login%s is counted on its own/?view=providers&import=POST /api/archive/exportGET /api/plugins/builtinPOST /api/library/revealGET /api/masking/summaryGET /api/masking/recordsPOST /api/omarchy/widgetOmarchy's bar isn't hereGET /api/plugins/updatesPOST /api/plugins/choosePOST /api/plugins/mirrorPOST /api/login/{action}cindy://provider/import?no address in the answerGET /api/sessions/manageGET /api/sessions/searchPOST /api/sessions/purgeGET /api/gateway/historyPOST /api/gateway/unrestreflect.Value.UnsafeAddr, %d with no known pricePOST /api/update/installPOST /api/whatsnew/todayskills/remove-found-someassets/icons/astrbot.svgassets/icons/baseten.svgassets/icons/factory.svgassets/icons/favicon.svgassets/icons/giteeai.svgassets/icons/longcat.svgassets/icons/raycast.svgassets/icons/roocode.svgassets/icons/zeroone.svgassets/plugins/sessions/magpie-community/plugins%s: unknown transport %qthe tools turned off: %welevated_windows_sandboxtaking rtk out of %s: %w%s failed (exit code %s)protocol.ext.allow=nevercouldn't find remote refGitHub sync: HTTP %d: %sGit Repository is empty.bringing back the %s: %w</?[A-Za-z][\w-]*[^<>]*>cache_write_input_tokensunknown WSL distributionexec ${SHELL:-sh} -lic 'magpie-instructions-*.mdpress d again to remove one model has to stay onfilter models and groupscan't pass %q to cmd.exethe plugin host quit: %vhttps://us.i.posthog.comsession desktop identity1 warm-up or check-in onreflect.MapIter.SetValuereflect.StructOf: field reflect.Value.SetComplexexec: Stdout already setexec: Stderr already setstreamSafe was not reset"$(bash -ic 'command -v decoder used after Closeencoder used after Closepanic while encoding: %vmaxSymbolValue too smallsymbolLen (%d) too smalladdress string too shortsql: statement is closedinvalid argument to IntNNotNestedGreaterGreater;x509: malformed validity116415321826934814453125582076609134674072265625htmlmetacontenturlescapeinvalid ChaCha8 encodingunrecognized file formatAllocateAndInitializeSidBuildSecurityDescriptorWGetUnicastIpAddressEntryGetUnicastIpAddressTableAssignProcessToJobObjectGenerateConsoleCtrlEventGetMaximumProcessorCountGetNamedPipeHandleStateWSetConsoleCursorPositionSetDefaultDllDirectoriesNtQuerySystemInformationSetupDiCreateDeviceInfoWSetupDiGetSelectedDeviceSetupDiSetSelectedDeviceGetWindowThreadProcessIdneed a character after \application/vnd.ms-excelgif: too much image datagif: invalid pixel valueinvalid interlace methoderror decrypting messagecertificate unobtainabletls: malformed ECHConfigtls: server rejected ECHmenu.selected-background-//ietf//dtd html 2.1e//flate: maxBits too largeinvalid argument to Intninvalid request :path %qidna: disallowed rune %Uresource length too longunpacking Question.ClassInvalid application callerror parsing parameterserror parsing event datahttp://wails.localhost/*missing Fetch request IDinconsistent chunk totalassembled body too largewails:non-client-region:failed to start drag: %wlinux:ApplicationStartuplinux:SystemThemeChangedlinux:WindowLoadFinishedmac:ApplicationDidUnhidemac:ApplicationDidUpdatemac:ApplicationWillSleepmac:MenuDidBeginTrackingmac:MenuDidHighlightItemmac:WindowDidChangeAlphamac:WindowDidChangeSpacemac:WindowDidChangeTitlemac:WindowDidMiniaturizemac:WindowDidUpdateAlphamac:WindowDidUpdateTitlemac:WindowWillBecomeMainmac:WindowWillBeginSheetmac:WindowWillResignMainwindows:APMResumeSuspendwindows:WindowDPIChangedwindows:WindowFullscreenwindows:WindowUnMinimisewindows:WindowUnMaximiseios:WindowTouchCancelleddownloading pf-serve: %wGdipCreateBitmapFromFileCreateIconFromResourceExChangeDisplaySettingsExWSetWindowDisplayAffinityinvalid unchecked bitmapGetClientRect(%d) failedUnknown / invalid methoddbus: invalid auth statedbus: invalid byte orderzlib: invalid dictionarynon-empty decoder bufferencodeArray: nil elementread coninput events: %wpeek coninput events: %w: cannot resolve module %q is outside the plugingithub.com/yetone/magpieGetPrivateProfileStringAbigmod: division by zeroinvalid pattern syntax: expected float; found %sunknown compression typenon-string-valued tag %vValue kind is %s, not %stext/yaml; charset=utf-8text/toml; charset=utf-8Unable to handle requestError finishing request.updater: create temp: %wupdater: tar.gz open: %wWAILS_UPDATER_HELPER_NEWWAILS_UPDATER_HELPER_PIDWAILS_UPDATER_HELPER_LOGreplace (attempt %d): %vremove broken target: %wwails:updater:installingwails-update-%d-%d.readyupdater: digest mismatchSafeArrayAllocDescriptordom.NewXmlDocument(): %wmaxEvents cannot be zerogetOwnPropertyDescriptorget [Symbol.toStringTag]internal: unknown opcode%s is not async iterableSet.prototype.differenceSet.prototype.isSubsetOf%s: invalid %s option %satob requires 1 argumentbtoa requires 1 argumentWeakMap.prototype.deleteWeakSet.prototype.delete is not a module bindingUnexpected reserved wordIllegal return statementUnexpected private fieldsha3: invalid hash stateunknown size for form 0xGODEBUG sys/cpu: value "", required CPU feature
+%ssync-server.magpie-backupno hex data for %x stringhttps://api.anthropic.comhttps://api.openai.com/v1refresh_token_invalidatedstealth/space-bunny-alpha@cf/cloudflare/clef-flashhttps://api.eu.factory.aiclaude-haiku-4-5-20251001user:sessions:claude_codehttps://www.kimi.com/codehttps://api.minimax.io/v1https://api.stepfun.ai/v1Enterprise plan 
+port number out of range invalid username/passwordnet/url: invalid userinfono answer from DNS serverinvalid network interfaceno suitable address foundunexpected '[' in addressunexpected ']' in address([^"<\s]+)(?:"|</string>)POST /api/agents/cli/{id}POST /api/settings/revealPOST /api/window/{action}POST /api/plugins/builtinPOST /api/gateway/restartPOST /api/groups/{action}github-copilot-enterpriseGET /api/plugins/listings1 reset unused, expiring POST /api/sessions/exportPOST /api/sessions/deleteassets/icons/app-alma.pngassets/icons/atomcode.pngassets/icons/cerebras.svgassets/icons/friendli.svgassets/icons/gmicloud.svgassets/icons/kilocode.svgassets/icons/lmstudio.svgassets/icons/mimocode.svgassets/icons/moonshot.svgassets/icons/opencode.svgassets/icons/parasail.svgassets/icons/typesafe.pngassets/icons/windsurf.svgassets/icons/zoo-code.pngA limit can't be negative%s: not a URL to page: %w^[A-Za-z_][A-Za-z0-9_-]*$https://mcp.neon.tech/mcpthe install was cancelledlocal-agent-mode-sessionsit has no event called %s%s: hooks.%s isn't a listthere is a set %q alreadynotifications/initializednot an MCP reply (%s): %schoose a project's folderrtk's hook is still in %sbrew info says no versioncouldn't reach GitHub: %wterminal prompts disabledgit couldn't fetch %s: %sadvice.detachedHead=falsecan't copy %s into itselfa subagent needs a prompt
+%ssystem prompt mode changedreasoning_summary_deliverythe reply ended incompletethe model wrote no summaryprevious_message_reasoningthe request isn't JSON: %vsay what to draw in prompt%s started no image task%sresponse.content_part.doneresponse.output_text.deltaGET /v1/magpie/concurrencyOPTIONS /v1/magpie/omarchyPOST /audio/transcriptionsx-deepseek-harness-compactsupported_reasoning_levelssupportedGenerationMethodsx-anthropic-billing-headerno plan usage in the replyno plan limit in the reply%s: no site to search withmagpie knows no model %q%sthe body could not be readsay what to film in promptmagpie's image recognition is a folder, not an imagestopped after 10 redirectsinvalid request descriptorno CSI structure availablerequired key not availableno message of desired typename not unique on networkCertFreeCertificateContextPostQueuedCompletionStatusSetFileInformationByHandlefailed to find ConnectEx: empty buffer in CopyBufferhttp: invalid cookie valueread from empty dataBuffernet/http: request canceledcannot release reservationduplicate pseudo-header %qhttp2: Framer %p: wrote %vframe_windowupdate_bad_lenframe_priority_zero_streaminternal error: bad Writerduplicate wildcard name %qliterals differ: %q and %qmalformed HTTP status codeaddress type not supportedHTTP Version Not SupportedreadLoopPeekFailLocked: %winvalid port %q after hostcannot marshal DNS messageunexpected type in connecttoo many colons in addressAs4 called on IPv6 addressunclosed criterion bracketcriterion lacks equal sign^[A-Za-z0-9._@:/ -]{1,80}$GET /api/agent-models/{id}POST /api/cli-behind/quietPOST /api/profile/{action}POST /api/settings/archivePOST /api/davsync/{action}POST /api/library/rtk/pathGET /api/sessions/overviewGET /api/sessions/progressGET /api/sessions/markdownPOST /api/sessions/restoreusage&tab=requests&period=assets/icons/anthropic.svgassets/icons/inference.svgassets/icons/mlx-serve.pngassets/icons/openwebui.svgassets/icons/replicate.svgThis key has no such limitchrome-devtools-mcp@latesthttps://mcp.sentry.dev/mcphttps://mcp.linear.app/mcphttps://mcp.notion.com/mcphttps://huggingface.co/mcpfirecrawl.dev/app/api-keys^[A-Za-z][A-Za-z0-9+.-]*::<!-- /rtk-instructions -->%s can't be narrowed to %sregistry.hub.docker.com/r/--accept-source-agreementsadding %s to your PATH: %w%s has no branch or tag %s%s names no default branchapplication/vnd.github.rawdecoding GitHub's file: %w in the GitHub repository %s %s on the S3 server: %sConditionalRequestConflictmcp image: unknown option Set-Location -LiteralPath _pragma=busy_timeout(5000)2006-01-02 15:04:05 -07:00https://api.example.com/v1in the library already 
+POST /api/agent-models/{id}max-age=31536000, immutablePOST /api/agents/stage/{id}POST /api/settings/bare-idsPOST /api/settings/allowipsHYPRLAND_INSTANCE_SIGNATUREGET /api/caller-keys/modelsPOST /api/gateway/take-overPOST /api/library/mcp/checkPOST /api/plugin-pages/readPOST /api/providers/arrangePOST /api/provider/{action}POST /api/sessions/terminal, couldn't be read just nowGET /api/usage/requests.csvPOST /api/usage/codex-resetassets/icons/kiro-color.svgassets/icons/meta-color.svgassets/icons/nova-color.svgassets/icons/openrouter.svgassets/icons/ppio-color.svgassets/icons/qwen-color.svgassets/icons/vllm-color.svgassets/icons/xiaomimimo.svghttps://models.dev/api.jsonhttps://linear.app/docs/mcphttps://docs.stripe.com/mcp@deepseek-ai/dsh-mcp-clientno hooks to give the agents%s is a folder: give a fileagent %q: not an agent's id%s has no skill %s any morenot an icon of the market's--accept-package-agreementswinget show says no versionapplication/vnd.github+json%s can't be given subagentsPI_CODING_AGENT_SESSION_DIRthere is no restore to undomagpie/magpie.magpie-backupfetching the video (%s): %s*/agent-transcripts/*.jsonl FROM sessions WHERE id = ?Set-Location -LiteralPath 'json_extract(data,'$.role')a URL, or a command it runsand %d more 
+invalid empty Content-Lengthnet/http: invalid trailer %sEvalSymlinks: too many linkscannot unmarshal DNS messageGET /api/agents/preview/{id}POST /api/settings/text-sizePOST /api/library/mcp-signinPOST /api/library/mcp/confignot a path the library showsPOST /api/signin/{id}/cancelGET /api/sessions/transcriptPOST /api/sessions/recordingPOST /api/usage/trae-checkinits cookie holds another keytext/markdown; charset=utf-8assets/icons/ai302-color.svgassets/icons/ai360-color.svgassets/icons/azure-color.svgassets/icons/baidu-color.svgassets/icons/codex-color.svgassets/icons/commandcode.svgassets/icons/gemma-color.svgassets/icons/kling-color.svgassets/icons/morph-color.svgassets/icons/openchamber.svgassets/icons/phala-color.svgassets/icons/prime-agent.svgassets/icons/qiniu-color.svgassets/icons/spark-color.svgassets/icons/zhipu-color.svgassets/plugins/usage/i18n.jsassets/plugins/usage/page.jshttps://mcp.context7.com/mcphttps://mcp.deepwiki.com/mcphttps://mcp.supabase.com/mcphttps://codeload.github.com/winget couldn't download RTK%s isn't a GitHub repositorya URL or a command is neededexperimental_windows_sandboxhost key verification failedno skills to give the agentsAuthorizationHeaderMalformedAWS4-HMAC-SHA256 Credential=How many images (default 1).socks connect tcp %s->%s: %wgateway-sessions-hidden.json's own app 
+*/agent-transcripts/*/*.jsonlinvalid Claude sessions index 
+<external_codex_apps_open_page>: no plugin that is on gives it%s's answer isn't a video's: %vthe video isn't ready: it is %vit redirects more than %d timescannot assign requested address.lib section in a.out corruptedmultipart/byteranges; boundary=http2: connection error: %v: %vframe_headers_prio_weight_shortPRIORITY frame with stream ID 0too many authentication methodsRequested Range Not SatisfiableRequest Header Fields Too LargeNetwork Authentication Requiredtoo many transfer encodings: %qnet/http: TLS handshake timeoutsotypeToNet unknown socket typePOST /api/settings/gateway-modePOST /api/settings/full-contextPOST /api/settings/codex-titlesPOST /api/settings/trae-checkinPOST /api/settings/redact-rulesPOST /api/settings/github-tokenPOST /api/settings/search-quota%s is not an agent magpie knowsGET /api/library/market/serversPOST /api/codex/daemon/{action}GET /api/usage/requests/contentPOST /api/usage/requests/exportPOST /api/usage/minimax-checkinassets/icons/aihubmix-color.svgassets/icons/anyscale-color.svgassets/icons/baichuan-color.svgassets/icons/cherryin-color.svgassets/icons/cometapi-color.svgassets/icons/deepmind-color.svgassets/icons/deepseek-color.svgassets/icons/internlm-color.svgassets/icons/leptonai-color.svgassets/icons/reasonix-color.svgassets/icons/submodel-color.svgassets/icons/tiangong-color.svgassets/icons/together-color.svgassets/icons/vertexai-color.svgassets/plugins/sessions/i18n.jstabwriter: panic during %s (%v)^(?:([\w.-]+)@)?([\w.-]+):(.+)$GitHub has no %s at %s any moreno agents to give the skills toGitHub answered %s for %s in %sapplication/vnd.github.raw+jsonasking after the video (%s): %sthe call has no place in a fileCOALESCE(t.is_incognito, 0) = 0unreadable gateway conversation OR COALESCE(compacted, 0) != 0magpie can't delete %s sessionsAnthropic compatible (Messages)a name, then a URL or a command url=
+POST /api/settings/plugin-checkinPOST /api/library/projects/choosePOST /api/library/{what}/{action}%d ungenutzte Resets verfallen %sPOST /api/sessions/codex-providerPOST /api/usage/workbuddy-checkinassets/icons/baiducloud-color.svgassets/icons/claudecode-color.svgassets/icons/cloudflare-color.svgassets/icons/hyperbolic-color.svgassets/icons/modelscope-color.svgassets/icons/perplexity-color.svgassets/icons/volcengine-color.svgassets/icons/xinference-color.svgassets/plugins/sessions/client.jsA key can list at most 500 models$%.2f of its $%.2f estimated cost^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$winget couldn't reach the network%s is an event of another agent'sthe library has it already, as %s%s has no SKILL.md at %s any moreGitHub has no %s that %s can read%s has no SKILL.md in the librarythe file in the GitHub repositoryCOALESCE(parent_tool_call_id, '')payload.latest_token_usage_record<details>
+too many references: cannot spliceSetFileCompletionNotificationModesbytes: Join output length overflowtimeout waiting for client prefacehttp2: aborting request body writehttp: connection has been hijackedhttp: persistConn.readLoop exitinghttp: read on closed response bodystream error: stream ID %d; %v; %vframe_settings_window_size_too_bigframe_windowupdate_zero_inc_streamnewWriterAndRequestNoBody(%+v): %v%s matches the same requests as %shttp: MultipartReader called twicehttp: invalid Content-Length of %qBaseContext returned a nil contextunsupported authentication method POST /api/settings/codex-agents-v1POST /api/settings/desktop-longestPOST /api/settings/disabled-modelsPOST /api/settings/minimax-checkinPOST /api/settings/checkin-accountPOST /api/sessions/relocate-claudeThat key is not this magpie web's.magpie: opening the WebView2 page:assets/icons/antigravity-color.svgassets/icons/featherless-color.svgassets/icons/googlecloud-color.svgassets/icons/huaweicloud-color.svgassets/icons/huggingface-color.svgassets/icons/infinigence-color.svgassets/icons/mistermorph-color.svgassets/plugins/library/library.cssassets/plugins/routing/routing.csshttps://aihubmix.com/api/v1/models\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}https://api.githubcopilot.com/mcp/Search Cloudflare's documentation.^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?$https://raw.githubusercontent.com/winget finds no rtk-ai.rtk packagethere is a group called %s alreadyapplication/vnd.github.object+jsonGitHub returned an incomplete fileIllegalLocationConstraintException(?s)<user_query>(.*?)</user_query>mode=ro&_pragma=busy_timeout(2000) FROM messages GROUP BY session_idWSL filesystem root is unavailablerelocation failed (backup: %s): %wasking the vendors for balances
+route history is no longer availableassets/plugins/sessions/sessions.cssinput, output and cache-write tokenshttps://github.com/MicrosoftDocs/mcpskills are given as %s or %s, not %qthe library gives skills as %s or %sGitHub has no repository %s any moreGIT_SSH_COMMAND=ssh -o BatchMode=yesgit couldn't reach %s (git said: %s)%s is %s, over the %s magpie fetchesThe model drew from this prompt: %s
+magpie can't delete this agent's sessionsno model %s to write Codex's descriptionsA key's account is at most 300 charactersRead, search and change Git repositories.winget has no newer RTK than this one yetio.modelcontextprotocol.registry/officiala repository's address can't start with -the library has a skill called %s alreadythis agent's conversations can't be shown(?s)<mode_notice\b[^>]*>.*?</mode_notice>cannot resolve the WSL index's Linux pathtarget storage appeared during relocationSELECT agent FROM session_v2 WHERE id = ?sessions-wsl.json wasn't written over: %vtoo big to install, over 200 MB a skill: skills in your agents, not in the librarythe reasoning levels agents are offered: returned %s, not an order of its %d seatsreturned null; a request can't be droppedsync/atomic: swap of nil value into Valuecan't call pointer on a non-pointer ValueMapIter.Next called on exhausted iteratorreflect: FieldByIndex of non-struct type reflect: OverflowFloat of non-float type reflect.Value.Addr of unaddressable value%s can't be read and couldn't be kept: %vcase "$p" in /mnt/*|"") continue;; esac; expecting colon between hours and minutescorrupted input (position=%d, expected 0)binary: varint overflows a 64-bit integercolon must be followed by more characterscrypto/md5: invalid hash state identifierx509: OID components must be non-negativex509: cannot parse URI %q: invalid domain%d candidate chains with invalid policiespacket is too large (only 1GB is allowed)34694469519536141888238489627838134765625strconv: illegal AppendInt/FormatInt base""" not allowed in multiline basic stringjpeg: fill called when unread bytes existtls: internal error: unsupported key (%T)tls: handshake has not yet been performedinvalid value length: expected %d, got %dtls: unsupported decryption key type (%T)tls: failed to parse client certificate: tls: internal error: failed to clone hashtls: internal error: unknown cipher suitetls: no supported elliptic curves offeredtls: internal error: empty verified chainidna: internal error in punycode encodingfailed to register global shortcut %q: %wcannot load icon from resource with id %vno components given to validateComponentsSetMenuItemInfo failed at position %d: %vmissing or invalid argument 'alwaysOnTop'system tray window handle not initializedShellNotifyIcon NIM_SETVERSION failed: %wfatal error in callback setWindowMask: %wmac:ApplicationDidChangeBackingPropertiesfailed to encode notification payload: %wunexpected character after quoted key: %q%s slice too big: %d elements of %d bytesgob: attempt to decode into a non-pointerhash/crc32: invalid hash state identifiertoml: expected %s to be a table, not a %sthere is no old row for INSERT operationsthere is no new row for DELETE operationsRSASSA-PKCS-v1.5 2048-bit sign and verifyasn1: internal error in parseTagAndLengthwrong type for value; expected %s; got %sinvalid ELF shstrndx contained in sh_linkduplicate architecture cpu=%v, subcpu=%#xfailure to read optional header magic: %vfailure to read PE32+ optional header: %vhtmlindex: this encoding is not supportedUnable to call close for request for uri.updater: ed25519 signature did not verifyuse GetResult for open single file dialogfailed to create WebView2 environment: %wSharedArrayBuffer.prototype.maxByteLengthtoString() radix must be between 2 and 36Bad Unicode escape in JSON at position %dPromise constructor returned a non-objectReflect.apply target %s is not a functionregexp search variant failed to compile: Super constructor may only be called onceSuper constructor %s is not a constructorCannot convert a Symbol value to a numberCannot convert a BigInt value to a numberCannot convert a Symbol value to a stringstack setter called on a non-error objectspecies constructor returned a non-objectRegExp String Iterator is already runningIdentifier '%s' has already been declared\8 and \9 are not allowed in strict mode.new.target expression is not allowed hereInvalid tagged template on optional chainCannot use 'import.meta' outside a modulefips140: unknown GODEBUG setting fips140=DW_FORM_addrx with no .debug_addr sectionline table end %d exceeds section size %dGODEBUG sys/cpu: no value specified for "encoding: rune not supported by encoding.running Codex sessions will be interruptedno saved %s account %q 
+the GitHub branch contains invalid characters FROM session_model_usage GROUP BY session_idWHERE s.id NOT IN (SELECT id FROM session_v2)SELECT data FROM message WHERE session_id = ?no Claude Code sessions found in this project 
+runtime: waitforsingleobject unexpected; result=CreateWaitableTimerEx when creating timer failedruntime.preemptM: duplicatehandle failed; errno=runtime: malformed profBuf buffer - invalid sizeruntime: taggedPointerPack invalid packing: ptr=attempt to trace invalid or unsupported P statusruntime: waitforsingleobject wait_failed; errno=Aside's provider configuration could not be readmagpie's provider source is gone from AstrBot's  again, or reinstall it the way you installed itCommand Code's modelProvider (settings.json) is %s runtime settings could not be read for %s: %v, so new sessions start on another of its modelsReasonix provider has a noncanonical magpie namelanguage_models.openai_compatible.magpie.api_urlhttps://downloads.claude.ai/claude-code-releasesClaude Code %s's manifest has no checksum for %s(^|[\s:"])Model [^"\s]+ is not supported("|\s*$)(?i)(?:isn't|is not|not) supported on this routeclaude: working in a folder of the run's own: %vevery account held: set not to spend its creditsinvalid request: model must be a nonempty stringthat key is set not to serve %s (Names & levels)syscall: string with NUL passed to StringToUTF16net/http: extended connect not supported by peerinternal error: should have a body in this statenet/http: Hijack called after ServeHTTP finished
+Jetzt neu starten und aktualisieren (%d laufend)in the browser magpie can't open folders: it is the repository is too big to install skills from@modelcontextprotocol/server-sequential-thinkinghttps://github.com/brave/brave-search-mcp-serverthe market has no server %s; search for it againThis application is licensed to you by its ownerthe library's folder already has a %s in it (%s)magpie gives no subagents to an agent in WSL yetanother magpie is syncing: try again in a momentGitHub returned a usage file without its versionno loopback port apart from the SOCKS proxy's %s LEFT JOIN workspaces w ON w.id = t.workspace_idClaude sessions index belongs to another project%s has no project cwd; cannot safely relocate itmagpie has no models yet 
+ two that would read the same keep their provider's%s has its own icon; only a custom provider takes one--days takes a number of days, such as 1 or 7, not %qthis run's key (MAGPIE_WEB_KEY keeps one across runs)https://www.googleapis.com/auth/experimentsandconfigshttps://open.bigmodel.cn/usercenter/proj-mgmt/apikeyshttps://qianfan.baidubce.com/anthropic/tokenplan/teamhttps://console.aws.amazon.com/bedrock/home#/api-keyshttps://openapi.qoder.com.cn/sash/api/v1/me/campaignsOpenAI turned the ChatGPT sign-in away; sign in again%s: take it out, or change it to make it yours, firstthe link names no provider: it needs preset= or name=that isn't what the bookmarklet copied: copy it againthey are for %s; Vertex AI is asked at googleapis.combufio.Scan: too many empty tokens without progressingnon-concurrent sweep failed to drain all sweep queuesruntime: NtCancelWaitCompletionPacket failed; errno= exited a goroutine internally locked to the OS threadcompileCallback: argument size is larger than uintptrCodex's model_catalog_json is no longer magpie's list rather than magpie's key, so it asks Google directly^[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?$did not find expected alphabetic or numeric characterpluginrt: setting %s is a %s, which a form can't drawNew agent types are now available for the Agent tool:(?i)^<(!doctype\s+html|html[\s>]|head[\s>]|body[\s>])the client went away during a turn it can't take back has run out: sign in to it again in magpie's Libraryhttp: putIdleConn: too many idle connections for hosthttp2: Framer %p: failed to decode just-written frameillegal use of AllowIllegalReads with ReadMetaHeadershttp2: Transport failed to get client conn for %s: %vnon-CONNECT pattern with unclean path can never matchdescribeConflict called with non-conflicting patternsnet/http: CloseNotify called after ServeHTTP finisheda masking rule needs a prefix or a regular expressioninstalled fonts are available only in the desktop appMAGPIE_WEB_KEY is %d characters; it needs at least %dhttps://github.com/ChromeDevTools/chrome-devtools-mcpScrape, crawl and search the web into clean Markdown.the first set can be renamed and emptied, not removed%s has no user-wide place for %s that magpie knows ofclaude MCP helper expects callback URL and tools filethere is no bucket %s at %s (%s): make it there firstGitHub sync refused a redirect outside api.github.comtransparent, opaque or auto, for models that take it.start the WSL distribution before relocating sessionsrtk 
+ sessions already running keep their account until restartedmagpie claude-code runs takes a number from 1, or auto, not %q  
+^[A-Za-z0-9][A-Za-z0-9_-]{0,63}(@wsl:[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$Repositories, issues, pull requests, Actions and code search on GitHub.Images the video's subjects are drawn from: file paths or http(s) URLs.SELECT id, title FROM sessions WHERE deleted_at IS NULL AND title != ''agents can be shown only some families: magpie visible <agent> <family>exec: command with a non-nil Cancel was not created with CommandContextx509: issuer has name constraints but leaf doesn't have a SAN extensionfont family and style must be nonempty names without control characterstoo many concurrent operations on a single file or socket (max 1048575)application/vnd.openxmlformats-officedocument.wordprocessingml.documentunknown color model: 4-component JPEG doesn't have Adobe APP14 metadatatls: peer doesn't support any of the certificate's signature algorithmsdynamic table size update MUST occur at the beginning of a header blockdecoding string array or slice: length exceeds input size (%d elements)decoding uint16 array or slice: length exceeds input size (%d elements)decoding uint32 array or slice: length exceeds input size (%d elements)decoding uint64 array or slice: length exceeds input size (%d elements)toml: cannot redefine table %s that has already been explicitly definedcrypto/ecdsa: use of custom curves is not allowed in FIPS 140-only modecannot fall back to WebView2 HWND controller without an environment: %wABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()%s: the constructor returned a TypedArray of length %d, shorter than %s
+ --json for the resume commands1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.comhttps://platform.minimaxi.com/user-center/basic-information/interface-keyhttps://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1not read yet: magpie reads Claude's usage by running Claude Code's /usage^((?:.*/)?grok-[0-9][^/]*?)-(?:minimal|low|medium|high|xhigh|extra-high)$antigravity %s: models not refreshed: %v; keeping the %d it listed beforeYou are currently using your subscription to power your Claude Code usagerule %d: its hours are the whole day, every day: give days or other hoursclaude: Claude Code sessions started from now on go through %s's proxy %sMuse Code's model (settings.json) is gone, so it no longer reaches magpie%s says version %s, not the 1 OpenPencil reads, so magpie leaves it aloneCompact the conversation, or turn on extra usage for the Claude account.)description: the model answered with no text, so Codex got no descriptiongo package net: GODEBUG=netdns contains an invalid dns mode, ignoring it
+Install GitHub Copilot Chat in {agent} to see magpie's models in its Chat.) has none of magpie's models, so sessions there list DeepSeek's own aloneno provider that can search the web, nor a search API, is set up in magpieits run went on with a turn this one doesn't follow, and wasn't taken back is not an enabled magpie gateway key: it is disabled, removed or mistypedmalformed response from server: malformed non-numeric status pseudo headernet/http: server replied with more than declared Content-Length; truncated^(\s*\[\s*hooks\s*\.\s*state\s*\.\s*)("(?:[^"\\]|\\.)*"|'[^']*')(\s*\].*)$^(sk-|sk_|ghp_|gho_|ghu_|github_pat_|xox[abpr]-|AIza|eyJ)|[A-Za-z0-9]{32,}crypto/rand: failed to read random data (see https://go.dev/issue/66821): crypto/rsa: use of keys with odd size is not allowed in FIPS 140-only modetls: certificate RSA key size too small for supported signature algorithmsApplication launched with argument, potentially a URL from custom protocolautostart identifier contains invalid character %q (allowed: A-Za-z0-9._-)invalid interruption level %q (want passive|active|timeSensitive|critical)decoding complex64 array or slice: length exceeds input size (%d elements)gcm: internal error: using generic implementation despite hardware supportoptional header size(%d) is less minimum size (%d) of PE32 optional headerAddAttrs unsafely called on copy of Record made without using Record.CloneThe number %s cannot be converted to a BigInt because it is not an integerCannot write private member %s to an object whose class did not declare ittrap result does not reflect extensibility of proxy target (which is '%v')String.prototype.%s called with a RegExp whose flags are null or undefinedawait is only valid in async functions and the top level bodies of modules
+ restart open dsh sessions to use this.fx reads its settings at start-up 
+ restart open fx sessions to use this.pick a model through magpie for Claude Code first; %s can then have its ownpick a model via magpie instead; that routes Gemini CLI through the gatewaycustom means whatever GOOGLE_GEMINI_BASE_URL is already in %s; set it thereUnsolicited response received on idle HTTP channel starting with %q; err=%vDeepSeek Harness takes a server name of at most 32 letters, digits, - and _Manage Supabase projects: tables, SQL, migrations, logs and edge functions.winget can't tell which version of RTK is installed, so it won't upgrade itthe GitHub folder must be a relative path without empty, . or .. componentsthe GitHub repository has no default branch: create an initial commit firstthe GitHub usage folder reached the Contents API's 1,000-file listing limiton Windows the command is added to the user's PATH, for every shell at oncethe masking rule %s matches nothing at all, so it would mask everywhere: %stls: internal error: attempted to read record with pending application datatls: client sent encrypted_client_hello extension with unsupported versionstls: client sent encrypted_client_hello extension but did not offer TLS 1.3
+ restart open omp sessions to use this.OpenChamber's %s isn't a preferences file it can read; fix or remove it first200K once Anthropic has said the account needs extra usage for long context. How much reasoning does a coding assistant need to handle the `message` well?%s draws %s from a prompt only: its config lists no model to edit images withTLS needs a certificate beside the key %s: give --tls-cert <file> (or %s) too isn't an image analyze_image can read (PNG, JPEG, GIF or WebP): it reads as invalid Body.Read call. After hijacked, the original Request must not be usedanother magpie serves the gateway at %s: set its port there, or quit it firstAsk questions about any public GitHub repository and read its generated wiki.a subagent needs a description: it is how the main agent knows when to use ita proxy is an address like http://127.0.0.1:7890 or socks5://127.0.0.1:1080%sthe community repo's dist branch names %q for %s@%s, not a tarball of its ownplugin: a stderr line over 4 MiB; the plugin's stderr is dropped from here onhttps://raw.githubusercontent.com/magpie-community/plugins/main/registry.jsonMapIter.Next called on an iterator that does not have an associated map Valuecrypto/tls: ExportKeyingMaterial is unavailable when renegotiation is enabled[DragDropDebug] processMessageWithAdditionalObjects: Raw WebView2 coordinatesinvalid function signature for %s: second return value should be error; is %sImmutable prototype object 'Object.prototype' cannot have their prototype settrap returned truish for property '%s' but the proxy target is non-extensibleon 
+ restart open ante sessions to use this.Command Code wants its own sign-in (cmd login) even for models through magpie.Devin reads its model at start-up 
+ restart open Devin sessions to use this.Empryo's magpie provider (config.json) is gone, so it no longer reaches magpie(?i)(?:encrypted content for item|item with id) '?([A-Za-z]+_[A-Za-z0-9_-]+)'?(?is)tools with reasoning_effort are not supported.*reasoning_effort to .?none%s run on %s let go: earlier messages changed while it waited for tool results(provider/model, or set it in magpie's Agents view), or let Codex reach OpenAIrefused %s %s from the web page %s: a localhost subdomain, with no gateway keyRespond with a single JSON value and nothing else, matching this JSON schema:
+ restart open droid sessions to use this.Empryo reads its config at start-up 
+ restart open empryo sessions to use this.jcode reads its settings at start-up 
+ restart open jcode sessions to use this.MothX reads its settings at start-up 
+ restart open mothx sessions to use this.Claude Code has ultracode only on a model that takes xhigh effort, and %s doesn'tcodex compaction: %s answered %d (%s); asking again with the conversation as textignoring invalid MAGPIE_PUBLIC_URL: expected an HTTP or HTTPS address with a hosttoo many failed authentications; slow down and send an enabled magpie gateway keythis link's key is not this magpie web's: use the link it printed when it started%s's CLI isn't installed here; nothing reads its %s until it is installed again%s%s is not set: magpie needs the home folder to find its own files and the agents'the S3 server says this computer's clock is off (%s): set it right and sync againthe video (%s) wasn't ready after %s; ask the gateway for GET /v1/videos/%s later and run it yourself, or turn Smart App Control off, then check for updates againModels that can't search the web search with a provider that can, or a search APIcrypto/rsa: use of public exponent <= 2
+ magpie model prices lists the ones you setClaude Code's, Codex's, OpenCode's and Pi's sessions on this computer show up heremagpie s3 on s3://<bucket>[/<prefix>] access-key-id=
+ restart open snow sessions to use this.%q is no Claude model: Claude Code's window for it is magpie's own, under Settingsthe most work: a new program, app or game, an architecture, a long multi-step planThis is one of Codex's own models, which goes to OpenAI with Codex's own sign-in: %s can't draw: magpie draws only through an OpenAI-compatible API, and %s has nonenative compaction's account held: at its usage cap or set not to spend its credits%s is %s's profile of its owner, not instructions alone: what is in it stays there# >>> magpie: library skills placed here (magpie adds and removes these lines) >>>sync needs a passphrase: the file is sealed with it before it leaves this computer%s isn't a magpie backup: it is %s (%d bytes). Point sync at another folder, or %sno calls in this time 
+ restart open Hermes sessions to use this.'s model list: pick one under Model list 
+ restart open kimi sessions to use this.Muse Code reads its settings at start-up 
+ restart open muse sessions to use this.OpenChamber takes the new model for new sessions; sessions already open keep theirs.Air takes only magpie's models here (its own agents are picked in Air): %s isn't oneAside's magpie provider belongs to another configuration; it will not be overwrittenultracode is a switch of Claude Code's beside its effort: magpie claude ultracode on%s, and %s. Try again and allow it, or run %s in a terminal opened as administrator.DeepSeek Harness has no thinking levels for %s: magpie knows of none the model takes(?i)\b(?:temperature|top_p|top_k)`?\W+is (?:deprecated|not supported) for this model(?i)rate.?limit|per (minute|hour|day)|\bTP[MD]\b|please wait|try again later|throttlThe advisor tool is no longer available; disregard the earlier advisor instructions.which goes to OpenAI with Codex's own sign-in: pick one of magpie's models in Codex this gateway key is held to a budget, models or accounts, so it may not report usageThe gateway key %q may not ask after this video: %s didn't say which model makes it.GitHub sync needs a token with Contents read and write permission for the repositorythe plugin sent more of a reply than the host credited; that request was given up onx509: signature algorithm specifies an %s public key, but have public key of type %T(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|glpat-[A-Za-z0-9_-]{20,})stack too short to match cached location; stk = %#x, l.pcs = %#x, original stk = %#xtls: downgrade attempt detected, possibly due to a MitM attack or a broken middleboxtrap returned truish for property '%s' which is non-configurable in the proxy targetSyntaxError: function too large for a direct eval is not supported yet (see TODO.md)'arguments' is not allowed in class field initializer or static initialization block
+ restart open Command Code sessions to use this.Grok Build reads its settings at start-up 
+ restart open grok sessions to use this. $(PATH="${p%/*}:$PATH" timeout 10 "$p" --version </dev/null 2>&1 | head -n1)";; esaccrypto/pbkdf2: use of keys shorter than 112 bits is not allowed in FIPS 140-only modeThe user sent (?:a new message while you were working|the following message):[ \t]*\n, and no other account that does could answer; pick a lower effort or another account%s: it sends the search on to %s, which isn't given its key; set that address insteadTLS: %s and %s changed but don't load (%v): still serving the certificate read beforehttp: WriteHeader called with both Transfer-Encoding of %q and a Content-Length of %dhttp: HTTP/2 implementation does not support NewClientConn (update golang.org/x/net?)Up-to-date documentation and code examples for any library, straight into the prompt.winget needs an administrator for this RTK, installed for every user of this computerwinget's RTK is %s so far; RTK %s is out, and winget usually has it within a few dayslibrary: %s changed %s in its copy; the library takes it, and the other agents get itSELECT value FROM cursorDiskKV WHERE key >= 'composerData:' AND key < 'composerData;'COALESCE((SELECT MAX(timestamp) FROM messages m WHERE m.session_id = sessions.id), 0)reflect.Value.Interface: cannot return value obtained from unexported field or method (text only: Accepts images is in its provider's Names & levels in magpie) via magpiecrypto/rsa: use of PSS salt longer than the hash is not allowed in FIPS 140-only modex509: failed to parse private key (use ParseECPrivateKey instead for this key format). Add a GitHub token in Settings 
+ restart open atomcode sessions to use this.Gemini CLI reads its settings at start-up 
+ restart open gemini sessions to see this.powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"Aside's magpie provider points to another gateway; reconnect explicitly to use this oneSnow CLI's light model goes to the gateway with its main model: pick one through magpieclaude: tool results go on in their run, the images before them taken out by the clientrefused %s %s from Origin: null: a sandboxed frame or a local page, with no gateway keyrequest body is over magpie's gateway limit of %s (decoded); the provider was not asked; Accepts images is turned off for it in magpie, in Providers 
+ restart open mcode sessions to use this.Image generation is configured, but Aside's image provider support has not been verifiedpick a model through magpie for Claude Code first; %s can then have an effort of its ownclaude: a conversation whose last turn the client rewrote goes on from its saved sessionbefore ttft_ms: the first text is content too, so it can't come before the first contentControl and inspect a live Chrome: console, network, performance traces and screenshots.magpie can't tell how the rtk at %s was installed 
+ MCP servers insteadtls: server sent encrypted client hello retry configs after accepting encrypted client helloInvalid property descriptor. Cannot both specify accessors and a value or writable attributecode generation from strings is not available: no compiler is installed (engine.SetCompiler)trap returned falsish for property '%s' which exists in the proxy target as non-configurablea signed-in subscription, a coding plan or a key whose vendor tells its balance shows up here  a newer version found is only said to be out; Download update or magpie update downloads itthis magpie was built from source; update it the way you built it, or get the release from %sclaude: %s's proxy %s is SOCKS, which Claude Code can't use; its sessions go the way they didthis is not a routing group shared from magpie: copy one with Copy to share in a group's menu%s doesn't parse (%v): magpie leaves it as it is and checks in no account of it until it doesClaude Desktop reads this at start-up 
+ restart open dsh sessions to use this.for d in "$HOME"/.omp/profiles/*; do [ -d "$d" ] && echo "profile:omp:$(basename "$d")"; done; command -v wslinfo >/dev/null 2>&1 && echo "net:$(wslinfo --networking-mode 2>/dev/null)"; truepick a model through magpie for Claude Code first; its subagents can then have one of their own(?i)unexpected values?(?:\(s\))?\s+((?:`[^`]+`[,\s]*(?:and\s+)?)+)for the\s+`anthropic[-_]beta`The GitHub repository is empty: leave Branch empty or use its default branch for the first syncthe S3 server says the bucket %s is at another endpoint (%s): check the endpoint and the region seconds: if it is still not ready, call this again with the same id (don't generate it again).WIDTHxHEIGHT (1024x1024, 1536x1024, 1024x1536) or an aspect ratio (16:9). Default: the model's.COALESCE(json_extract(CASE WHEN json_valid(t.metadata) THEN t.metadata END, '$.isCron'), 0) = 0no folder on your PATH can take the magpie command: add ~/.local/bin to a shell's profile belowPushing %d elements on an array-like of length %d is disallowed, as the total surpasses 2**53-1with more of its accounts on, Codex's requests go through magpie to fail over between them again%s magpie's CPU for %ds, until %s. Use magpie as you do when it is busy (run Codex) until then.
+ restart open mimo sessions to use this.{agent} in WSL {distro} reads its settings at start-up 
+ restart open fx sessions to use this.(?i)input length and .{0,3}max_tokens.{0,3} exceed context limit:\s*(\d+)\s*\+\s*\d+\s*>\s*(\d+)claude: a run on %s waiting on tool results since %s is let go to make room (%d may run at once)ChatGPT's Codex backend closed the connection before answering this %.1f MiB request (503: %s). that's neither a git repository's link (GitHub, GitLab or another host) nor a folder's full pathCOALESCE((SELECT MAX(last_seen) FROM session_model_usage u WHERE u.session_id = sessions.id), 0)crypto/rsa: use of hash functions other than SHA-2 or SHA-3 is not allowed in FIPS 140-only modeservices must be registered before running the application. Service '%s' will not be registered.b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aefaa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab73617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5fSource text of %d bytes is longer than the %d this realm compiles at run time (MaxDynamicSource)off 
+ restart open omp sessions to use this.{agent} in WSL {distro} reads its catalog at start-up 
+ restart open ante sessions to use this.{agent} in WSL {distro} reads its profile at start-up 
+ restart open snow sessions to use this.SELECT count(*) FROM custom_providers
+ restart open kimi sessions to use this.{agent} in WSL {distro} reads its settings at start-up 
+ restart open grok sessions to use this.{agent} in WSL {distro} reads its config at start-up 
+ restart open empryo sessions to use this.{agent} in WSL {distro} reads its settings at start-up 
+ restart open muse sessions to use this.pick a model through magpie for Codex first; its memories can then be written with one of magpie'sthen quit and reopen Codex. Until then, Disconnect from magpie puts Codex's config back as it was.Under WSL's NAT networking, Windows as WSL sees it reaches magpie only while something listens on You are the component that summarizes a conversation when its context window is about to overflow.Codex composer predictions are off in magpie's Settings: answered with no prediction, sent nowhereThe request archive goes to the S3 bucket sync keeps its backup in, and sync isn't set up with one^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9A-Za-z-]+?)(?:_[0-9A-Za-z-]+)?\.jsonl(?:\.zst)?$a mirror is an http(s) address put before the github.com URL, like https://mirror.example/, not %qNoClientCertRequestClientCertRequireAnyClientCertVerifyClientCertIfGivenRequireAndVerifyClientCertcrypto/ecdsa: use of hash functions other than SHA-2 or SHA-3 is not allowed in FIPS 140-only modeVT_FILETIMEVT_BLOBVT_STREAMVT_STORAGEVT_STREAMED_OBJECTVT_STORED_OBJECTVT_BLOB_OBJECTVT_CFVT_CLSIDUnshifting %d elements on an array-like of length %d is disallowed, as the total surpasses 2**53-1  they are %s's own models, not magpie's: setting one takes magpie out; magpie %s alone shows each
+ restart open crush sessions to use this.{agent} in WSL {distro} reads its settings at start-up 
+ restart open droid sessions to use this.{agent} in WSL {distro} reads its settings at start-up 
+ restart open mcode sessions to use this.{agent} in WSL {distro} reads its settings at start-up 
+ restart open mothx sessions to use this.%q is neither one of Gemini CLI's models nor an auth (google, api-key, vertex): nothing was changedcrypto/pbkdf2: use of hash functions other than SHA-2 or SHA-3 is not allowed in FIPS 140-only mode(?:^|[^a-z0-9])(?:claude-)?(opus|sonnet|haiku|fable|mythos)-(\d{1,2})(?:[-.](\d{1,2}))?(?:[^0-9]|$)(?i)insufficient.?(balance|credit|fund)|\bcredits? (are )?exhausted\b|
+ restart open opencode sessions to use this.{agent} in WSL {distro} reads its settings at start-up 
+ restart open Hermes sessions to use this.{agent} in WSL {distro} reads its settings at start-up 
+ restart open gemini sessions to see this.{agent} in WSL {distro} reads its settings at start-up 
+		FROM %s s LEFT JOIN %s m ON m.session_id = s.id %s GROUP BY s.idowner/repo, a GitHub or GitLab link, a git address (git@host:group/repo.git), or a folder's full pathSeveral models agents pick as one: each request goes to the right one, and to the next when one failsundefined symbols index in dynamic symbol table command is greater than symbol table length (%d > %d)  it is Anthropic's software, under Anthropic's terms; magpie runs it for the Claude subscription onlythe magpie at %s is older than this one and has no heap profile: update it, then run magpie heap againusage: magpie sessions [--days N|today|all] [--model <model>] [--folder <folder>] [--limit N] [--json]  
+ restart open atomcode sessions to use this.Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages%d requests a minute is its limit, and the next could go in %.0fs, longer than a request waits (%.0fs)http2: failed reading the frame payload: %w, note that the frame header looked like an HTTP/1.1 headerSELECT type,data FROM session_message WHERE session_id=? AND type IN ('user','assistant') ORDER BY seqThe routings besides Smart: In order, In turn, Least used first, Weekly pace, By weight and Free firstWarning: Menubars may be invisible when using translucent backgrounds with Mica/Acrylic/Tabbed effectsxtg-x-cel-gaulishen-GB-oxendicten-x-i-defaultund-x-i-enochiansee-x-i-mingonan-x-zh-minen-US-u-va-posix), and lists no model it may pick by hand that it serves; check the plan at github.com/settings/copilotSELECT directory, COALESCE(repo_owner,''), COALESCE(repo_name,''), COALESCE(repo_branch,'') FROM skills: here it reads only %s. Set cli_auth_credentials_store = "file" there and sign in again (codex login).const j=r.ok?await r.json():{},a=j.accessToken&&j.accessToken.raw,f=j.refreshToken&&j.refreshToken.raw;check the AccessKey ID and Secret in the provider's editor, and that the access key may query Ark (IAM)Zoo Code reads magpie's profile when it starts 
+ Claude Code's, Codex's, OpenCode's and Pi's sessions on this computer show up hereSource text of %d code units is longer than the %d bytes this realm compiles at run time (MaxDynamicSource)copilot has %d accounts of %s: %q 
+ open sessions keep the model they have; new ones use this.this AstrBot keeps no provider_sources in %s: update AstrBot to 4.10 or later, start it once, then connect it(?s)Invalid 'input\[\d+\]\.id'.{0,1000}?Expected an ID that contains letters, numbers, underscores, or dashes%s contains %s, not a magpie backup: check the backup file in the repository, or point sync at another folder): Smart App Control or another application control policy blocks magpie's unsigned builds; download it from 
+ a model two or more providers serve is a group of them (auto-<model>); magpie group auto off turns them offusage: magpie sessions relocate-claude --from <absolute-path> --to <absolute-path> [--confirm <preview-token>], not magpie's gateway: a Codex thread started on it goes there when reopened, a magpie model picked in it tooclaude: a run that went on with a side question could not be taken back to the conversation's turn, let go: %v and the last reply. Look at the workspace for where the work stands before going on.
+ restart open goose sessions to use magpie's models.%q is no model of Claude Code's: give a model id (claude-
+ quit and reopen Goose (and open goose sessions) to use magpie's models.{agent} in WSL {distro} reads a session's model at start-up 
+  magpie library skill update %s --replace-edits  takes the fetched one in its place, keeping yours with the backupsclaude auth login gave no link to open: %s printed nothing in %s; run `%s auth login` in a terminal to see what it does%s holds decision models, which answer System One, not a conversation: it can be %s's classifier, not one of its models%s is added with your own Google Cloud project, not from a link: magpie provider add %s project=<id>, or Add in the app%s can't carry Codex's native compaction: only a provider with a Responses API, a ChatGPT account or GitHub Copilot can{file} sets {var}, so Claude Code sends its requests to {cloud}, not to magpie: take it out there to go through magpie.: the desktop app reads the key from there, not from .env, and its sessions fail with no credential for provider route (?:\bYour limit will reset at|
+ restart open codebuddy sessions, or run /clear in them, to use this.{agent} in WSL {distro} reads its settings as a session starts 
+ open sessions keep the model they have; new ones use this.macOS runs magpie from a temporary copy until it is moved to Applications: move it there, open it again, then add the commandinvokeRequired for runMainLoop, the mainloop must be running on the same OSThread as the mainThreadWindow has been created onhttps://huggingface.co/LocalAI-io/privacy-filter-GGUF/resolve/935d86882f4b5dc6e0eef05aae48ae5ba0a82a7a/privacy-filter-q8.gguf  % is how much of a window is used 
+ magpie model compact offimpersonating %s: %w; the account signed in needs the Service Account Token Creator role (roles/iam.serviceAccountTokenCreator) on it) sets llm-pi-ai over every profile without magpie's route, so sessions list none of magpie's models; Apply again writes it there tooLittle to think about: a greeting, a question answered from what is already known, a mechanical or one-line change, running a command{agent} in WSL {distro} reads its model when a session starts 
+ restart open codebuddy sessions, or run /clear in them, to use this.Put the tool's whole free-form input, as it is to be run, in the `input` string; it is passed on as written, so it is not itself JSON.Zed has a server by this name from one of its extensions, which magpie leaves as it is: give the server another name to give it to ZedSELECT id, COALESCE(parent_id, ''), directory, title, COALESCE(title_source, ''), time_created, time_updated FROM session WHERE id = ?^(?:(?:global|us-gov|[a-z]{2,4})\.)?(?:anthropic|amazon|meta|mistral|cohere|ai21|deepseek|qwen|openai|google|moonshotai|minimax|zai)\.'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to themthe passphrase is the server's password: the server is sent the password, and could open the file with it. Pick a passphrase of its ownno node on the service's PATH: plugins, and the MCP servers they start, need Node.js; install it, then run `magpie daemon install` againthe ChatGPT plan's usage limit, shared with ChatGPT and the other apps it is used in, is reached; see https://chatgpt.com/settings/usage(?i)\buser location is not supported for the api use\b|unsupported_country_region_territory|country, region,? or territory not supportedto go on now, if an account holds credits, let it spend them (Usage 
+ restart the Codex app, open codex sessions and the app-server they share ({command}) to see this.~/.dsh/settings.yaml sets its own DeepSeek endpoint or key, which dsh puts over magpie's; clear it in dsh's Models page to go through magpie.its run waits under another key: the client offers %d tool(s) its Claude Code wasn't told of (%s), and a run is told its tools when it startsanyone with the link can change magpie and see its keys, and the network carries it unencrypted (--tls-cert and --tls-key serve it over https)magpie webdav on <address> keeps providers, settings, profiles, agents' models and the library the same on every computer (magpie webdav help)the routing group %s holds models that hold conversations; System One asks a group of decision models, or a decision model as "provider/model"%s is in the group by its pattern %s: change the pattern (models-=%s, then models+= what you want), or switch the model off in the Routing viewCline's desktop app keeps the model and effort picked in its own composer 
+ open sessions keep the model they have; new ones use this. Reload VS Code's window for its extension.Claude Code is not installed; install it and run `claude auth login`, or run `magpie claude-code install` to download Anthropic's own build for magpiethis gateway key is held to a budget, models or accounts, so it is told nothing of this magpie's accounts: GET /v1/magpie/limit tells it its own limit(?i:\b(?:ssh|scp|sftp|rsync|mosh|ssh-copy-id))\b[^\n@]{0,80}?[ \t"']([a-z_][a-z0-9_.-]{0,31})@([A-Za-z0-9][A-Za-z0-9-]{0,62}(?:\.[A-Za-z0-9-]{1,63})*)property '%s' is a non-configurable accessor property on the proxy target and does not have a getter function, but the trap did not return 'undefined'no free model of OpenCode Zen is listed for this API: the public key reaches only the free ones (refresh the model list, or add a Zen key for the rest)masking is on in magpie's Settings 
+ API keys), and that the key may read TokenHub (CAM)magpie restarted the app-server codex sessions share, which none was on, so new codex sessions have this; restart the Codex app, if it is open, to see it there.%s's model list has no %s: magpie provider refresh %s fetches the list again (or add the model to it in its editor), and magpie models %s lists what %s is shownCodex's config no longer sends its model through magpie (no openai_base_url or model_provider of magpie's), so Codex asks OpenAI for a model OpenAI doesn't havethat leaves no model exposed 
+ open sessions keep the model they have; new ones use this. Reload VS Code's window for its extension.(?i)(?:\bresets? at|
+ restart it, the app-server its sessions share ({command} there) and the Codex app's WSL connection to see this.oh wow, we're sorry about this! Amazingly, a hash collision was detected for method '%s' (it generates the same hash as '%s'). To use this method, please rename it. Sorry :(
+ restart open Command Code sessions to use this.(?i:\b(?:s3a?|s3n|gs|oss|cosn?|obs|r2|ks3|bos|tos|az|azure|wasbs?|abfss?)://)([A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9])?)(?:@([a-z0-9]{3,24})\.(?:blob|dfs)\.core\.windows\.net)?<!doctype html><meta charset="utf-8"><title>Magpie</title><body style="font:15px -apple-system,system-ui,sans-serif;max-width:32em;margin:4em auto;padding:0 1em;color:#222">%s</body>%s is a function, not a pointer to named type. Wails v2 has deprecated the binding of functions. Please define your functions as methods on a struct and bind a pointer to that struct%q is neither a model through magpie nor the model of one of Snow CLI's profiles: nothing was changed (magpie models snow lists them; magpie snow default goes back to your own profile)
+ Web search.%s, and %s. Update again and allow it, run %s in a terminal opened as administrator, or move npm's global folder to one of your own (npm config set prefix "%%APPDATA%%\npm") and install %s again.trap returned truish for defining non-configurable property '%s' which cannot be non-writable, unless there exists a corresponding non-configurable, non-writable own property of the target objectThe address and API key the other computer's magpie shows in Settings, under Share on local network. Its models and routing groups are listed here; each request goes on in the API the agent spoke.Codex builds its model list at start-up, and the app-server open codex sessions share started before this: restart it (Restart on magpie's Agents page, or {command}) and the Codex app to see this.Cannot change the default gateway key without updating settings.json: older Magpie versions may still accept its old credential. Make the settings file writable and retry; the key is unchanged: %wClaude Desktop keeps its instructions in its own settings, with your Claude account, not in a file magpie can write; its Code tab runs Claude Code, which reads Claude Code's 
+ open sessions keep the model they have; new ones use this. Reload VS Code's window for its extension; Cline's desktop app keeps the model picked in its own composer 
+ magpie daemon web [on|off] [--lan] [--addr host:port]New dsh sessions start on this. A session made before keeps its model, open now or reopened later, until you pick another in it with /model or the model button by its message box. A dsh started with -p or in a terminal reads it at start-up.<svg fill="currentColor" fill-rule="evenodd" height="1em" style="flex:none;line-height:1" viewBox="12 16 40 40" width="1em" xmlns="http://www.w3.org/2000/svg"><title>omp</title><path d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z"></path></svg>
+       magpie plugin builtin [on|off <id>]         list magpie's built-in plugins (Sessions, Library, routing groups
+/* Sessions: every session of an agent, by folder, to resume or delete (sessions.js) */
+/* Codex sessions made with another provider, hidden from Codex's history (#887) */
+/* a folder's next page of sessions, under the ones drawn */
+// sessions, each request, and what filled the context window.
+      <input class="sess-filter" id="ledQ" type="search" spellcheck="false" autocomplete="off" placeholder="Search models, providers, sessions" data-tp>
+  <div class="usage-pane sess-pane" id="sessionsPane" hidden>
+      <span class="label" data-t>Latest sessions</span>
+      <button class="text sess-all" id="sessAll" type="button" data-feature="sessions" data-t>All sessions</button>
+      <input class="sess-filter" id="sessQ" type="search" spellcheck="false" autocomplete="off" placeholder="Search sessions" data-tp>
+                                  --gateway: gateway mode, no Agents, Sessions or Library (on by itself with no agents here; Settings 
+  magpie sessions [--model <m>] [--folder <f>] [--json]   the latest Claude Code, Codex, OpenCode and Pi sessions, with what each cost
+  magpie sessions --days N|today|all [--model <m>] [--folder <f>] [--json]
+<link rel="stylesheet" href="plugins/sessions/sessions.css">
+    <button data-view="sessions" data-feature="sessions"><svg class="nav-ic" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12v8H9l-4 3v-3H4z"/></g></svg><span data-t>Sessions</span></button>
+        <div class="who"><div class="name" data-t>Detect agents in WSL</div><div class="sub" data-t>Looks in running WSL distros for agents to set up, their sessions and Claude Code; off, WSL is never asked anything and the agents found there are no longer shown</div></div>
+      <div class="row pref" id="sessionTerminalRow" data-feature="sessions" hidden>
+<script src="plugins/sessions/i18n.js"></script>
+<script src="plugins/sessions/client.js"></script>
+// The Sessions page's words in each language, the English the key: the
+    "Close Claude Code and its editor sessions first. This moves the entire project's sessions, not just filtered or selected rows. Existing target storage is never overwritten. Desktop-only sessions are not changed.": "
+    "Move {n} sessions ({size}) from {from} to {to}. Originals are retained outside Claude's project list. Historical message text is unchanged.": "
+    "Off: gateway sessions show only what they used. Turned on, their text is kept on this computer only, for up to 7 days (256 MiB)": "
+    "Claude Code's, Codex's, Hermes's, OpenCode's and Pi's sessions on this computer show up here, by the folder they ran in.": "
+    "magpie can list {agent}'s sessions and resume them, but not delete them: they aren't kept as files of their own.": "
+    "magpie can list {agent}'s sessions, but cannot resume or delete them.": "
+    "These {agent} sessions are read only; magpie can list them, but cannot resume or delete them.": "
+    "Some {agent} sessions are read only and cannot be deleted.": "
+    "Delete {n} sessions?": "
+    "Delete all {n} sessions in {folder}?": "
+    "Delete all {n} sessions in {k} folders?": "
+    "These {agent} sessions were seen only through magpie's gateway: {agent}'s own files of them aren't on this computer (it may run on another one, in a container or with another config folder), so they can't be resumed here. Delete takes one off this list and moves any conversation magpie recorded of it to its trash; Usage keeps what it spent.": "
+    "Sessions under \"Seen through the gateway\" have no {agent} files on this computer, so they can't be resumed here. Delete takes one off this list and moves any conversation magpie recorded of it to its trash; Usage keeps what it spent.": "
+    "1 Codex session was made with another provider ({from}): Codex lists only {to}'s sessions in its history now, so it doesn't show there.": "
+    "{n} Codex sessions were made with another provider ({from}): Codex lists only {to}'s sessions in its history now, so they don't show there.": "
+    "Moved {n} sessions to {to}": "
+    "Moved {n} sessions back": "
+    "Move sessions to {to}?": "
+    "Made with {from}: Codex's history lists only {to}'s sessions now": "
+    "{n} sessions moved to magpie's trash": "{n} 
+    "{n} sessions are still being written to; close them in {agent} and try again in a minute": "{n} 
+    "Sessions deleted here wait in magpie's trash, to be restored.": "
+    "Deleted sessions are kept in {dir} until you erase them here; magpie never erases them by itself.": "
+    "{n} sessions erased for good": "
+    "{agent}'s own files of its sessions can't be read here, so only what magpie recorded through the gateway is searched.": "
+    "Searched what was said in the latest {n} of {total} sessions.": "
+    "Move {n} sessions ({size}) from {from} to {to}. Originals are retained outside Claude's project list. Historical message text is unchanged.": "{n} 
+    "magpie can list {agent}'s sessions and resume them, but not delete them: they aren't kept as files of their own.": "magpie 
+    "magpie can list {agent}'s sessions, but cannot resume or delete them.": "magpie 
+    "Delete {n} sessions?": "{n} 
+    "Delete all {n} sessions in {folder}?": "{folder} 
+    "Delete all {n} sessions in {k} folders?": "{k} 
+    "1 Codex session was made with another provider ({from}): Codex lists only {to}'s sessions in its history now, so it doesn't show there.": "1 
+    "{n} Codex sessions were made with another provider ({from}): Codex lists only {to}'s sessions in its history now, so they don't show there.": "{n} 
+    "Moved {n} sessions to {to}": "{n} 
+    "Moved {n} sessions back": "{n} 
+    "Made with {from}: Codex's history lists only {to}'s sessions now": "{from} 
+    "{n} sessions erased for good": "{n} 
+    "{agent}'s own files of its sessions can't be read here, so only what magpie recorded through the gateway is searched.": "{agent} 
+    "Close Claude Code and its editor sessions first. This moves the entire project's sessions, not just filtered or selected rows. Existing target storage is never overwritten. Desktop-only sessions are not changed.": "Schlie
+    "Move {n} sessions ({size}) from {from} to {to}. Originals are retained outside Claude's project list. Historical message text is unchanged.": "{n} Sitzungen ({size}) von {from} nach {to} verschieben. Die Originale bleiben au
+    "Off: gateway sessions show only what they used. Turned on, their text is kept on this computer only, for up to 7 days (256 MiB)": "Aus: Gateway-Sitzungen zeigen nur ihren Verbrauch. Eingeschaltet wird ihr Text nur auf diesem Computer gespeichert, bis zu 7 Tage (256 MiB)",
+    "Claude Code's, Codex's, Hermes's, OpenCode's and Pi's sessions on this computer show up here, by the folder they ran in.": "Sitzungen von Claude Code, Codex, Hermes, OpenCode und Pi auf diesem Computer erscheinen hier, gruppiert nach dem Ordner, in dem sie liefen.",
+    "magpie can list {agent}'s sessions and resume them, but not delete them: they aren't kept as files of their own.": "magpie kann die Sitzungen von {agent} auflisten und fortsetzen, aber nicht l
+    "magpie can list {agent}'s sessions, but cannot resume or delete them.": "magpie kann die Sitzungen von {agent} auflisten, aber weder fortsetzen noch l
+    "These {agent} sessions are read only; magpie can list them, but cannot resume or delete them.": "Diese Sitzungen von {agent} sind schreibgesch
+    "Some {agent} sessions are read only and cannot be deleted.": "Einige Sitzungen von {agent} sind schreibgesch
+    "Delete {n} sessions?": "{n} Sitzungen l
+    "Delete all {n} sessions in {folder}?": "Alle {n} Sitzungen in {folder} l
+    "Delete all {n} sessions in {k} folders?": "Alle {n} Sitzungen in {k} Ordnern l
+    "These {agent} sessions were seen only through magpie's gateway: {agent}'s own files of them aren't on this computer (it may run on another one, in a container or with another config folder), so they can't be resumed here. Delete takes one off this list and moves any conversation magpie recorded of it to its trash; Usage keeps what it spent.": "Diese Sitzungen von {agent} wurden nur 
+    "Sessions under \"Seen through the gateway\" have no {agent} files on this computer, so they can't be resumed here. Delete takes one off this list and moves any conversation magpie recorded of it to its trash; Usage keeps what it spent.": "Sitzungen unter 
+    "1 Codex session was made with another provider ({from}): Codex lists only {to}'s sessions in its history now, so it doesn't show there.": "1 Codex-Sitzung wurde mit einem anderen Anbieter ({from}) erstellt: Codex zeigt in seinem Verlauf jetzt nur Sitzungen von {to}, daher erscheint sie dort nicht.",
+    "{n} Codex sessions were made with another provider ({from}): Codex lists only {to}'s sessions in its history now, so they don't show there.": "{n} Codex-Sitzungen wurden mit einem anderen Anbieter ({from}) erstellt: Codex zeigt in seinem Verlauf jetzt nur Sitzungen von {to}, daher erscheinen sie dort nicht.",
+    "Moved {n} sessions to {to}": "{n} Sitzungen zu {to} umgezogen",
+    "Moved {n} sessions back": "{n} Sitzungen zur
+    "Move sessions to {to}?": "Sitzungen zu {to} umziehen?",
+    "Made with {from}: Codex's history lists only {to}'s sessions now": "Mit {from} erstellt: Der Verlauf von Codex zeigt jetzt nur Sitzungen von {to}",
+    "{n} sessions moved to magpie's trash": "{n} Sitzungen in den Papierkorb von magpie verschoben",
+    "{n} sessions are still being written to; close them in {agent} and try again in a minute": "In {n} Sitzungen wird noch geschrieben; schlie
+    "Sessions deleted here wait in magpie's trash, to be restored.": "Hier gel
+    "Deleted sessions are kept in {dir} until you erase them here; magpie never erases them by itself.": "Gel
+    "{n} sessions erased for good": "{n} Sitzungen endg
+    "{agent}'s own files of its sessions can't be read here, so only what magpie recorded through the gateway is searched.": "Die eigenen Sitzungsdateien von {agent} sind hier nicht lesbar, daher wird nur durchsucht, was magpie 
+    "Searched what was said in the latest {n} of {total} sessions.": "Gespr
+// Sessions: every session of an agent on this computer, by the folder it
+// here (#752). Everything comes from /api/sessions/manage.
+// A page the Sessions plugin adds to the window (kernel.js), its words in
+magpie.plugin("sessions", (ctx) => {
+  let data = null;        // /api/sessions/manage
+  try { agent = localStorage.getItem("magpie.sessionsAgent") || ""; } catch {}
+  const talkOpen = new Set(); // sessions whose conversation is shown, by agent/id
+  // threads that name it as their parent_session, which are sessions of
+  // sessions unfolded, by agent/id; kidsOf is the sessions shown under
+  // An open folder draws its latest SM_PAGE sessions and a "Show N more"
+  // of sessions, switching to the page or to another agent, a keystroke in
+  // elements for 1,000 sessions, and scrolling stuttered). drawnIn is how
+  // many of each folder's sessions are drawn, by cwd; it starts again at a
+  // another config folder): such sessions are grouped by that, not under
+      const d = await api("sessions/manage?agent=" + encodeURIComponent(name ?? agent));
+      data = { ...d, agents: d?.agents || [], sessions: (d?.sessions || []).map((s) => ({ ...s, models: s.models || [] })), trash: d?.trash || [], agent: d?.agent || "" };
+      if (query) searchSoon(); // the same words, in this agent's sessions
+    if (view === "sessions") draw();
+  // reveal: the Sessions page, from the Usage page's list (#752):
+      try { localStorage.setItem("magpie.sessionsAgent", agent); } catch {}
+      if (data) data = { ...data, agent, sessions: null };
+    show("sessions");
+    if (!focus || focus.agent !== data?.agent || !data.sessions) return;
+    const list = data?.sessions || [];
+        const r = await api(`sessions/search?agent=${encodeURIComponent(mine.agent)}&q=${encodeURIComponent(needle)}`, undefined, undefined, ctl.signal);
+      if (view === "sessions" && !trashOn) { drawnIn.clear(); redrawList(); }
+    else if (f.unread) text = t("{agent}'s own files of its sessions can't be read here, so only what magpie recorded through the gateway is searched.", { agent: current()?.name || f.agent });
+    else if (f.cut) text = t("Searched what was said in the latest {n} of {total} sessions.", { n: f.searched, total: f.total });
+    page.classList.toggle("loading", !data?.sessions && !failed);
+    try { localStorage.setItem("magpie.sessionsAgent", name); } catch {}
+    data = { ...data, agent: name, sessions: null };
+ when this agent has sessions seen through the
+    && (data.recording || data.recorded || (typeof gatewayMode !== "undefined" && gatewayMode) || !!data.sessions?.some((s) => s.gateway));
+      : "Off: gateway sessions show only what they used. Turned on, their text is kept on this computer only, for up to 7 days (256 MiB)")));
+        const result = await api("sessions/recording", { on: !on });
+        try { await api("sessions/recording", { clear: true }); talks.clear(); await load(); }
+    q.placeholder = t("Search sessions");
+    if (!data || (!trashOn && !data.sessions)) {
+      e.append(el("b", "", t("No sessions yet")), el("span", "", t("Claude Code's, Codex's, Hermes's, OpenCode's and Pi's sessions on this computer show up here, by the folder they ran in.")));
+    // what can't be deleted says so; the gateway's sessions, which can,
+    const locked = data.sessions.filter((s) => !s.deletable);
+          ? "Some {agent} sessions are read only and cannot be deleted."
+          : "These {agent} sessions are read only; magpie can list them, but cannot resume or delete them."
+          ? "magpie can list {agent}'s sessions and resume them, but not delete them: they aren't kept as files of their own."
+          : "magpie can list {agent}'s sessions, but cannot resume or delete them.";
+    if (a && data.sessions.some((s) => s.gateway)) {
+      box.append(el("p", "usage-note sm-note sm-gw-note", t(data.sessions.every((s) => s.gateway)
+        ? "These {agent} sessions were seen only through magpie's gateway: {agent}'s own files of them aren't on this computer (it may run on another one, in a container or with another config folder), so they can't be resumed here. Delete takes one off this list and moves any conversation magpie recorded of it to its trash; Usage keeps what it spent."
+        : "Sessions under \"Seen through the gateway\" have no {agent} files on this computer, so they can't be resumed here. Delete takes one off this list and moves any conversation magpie recorded of it to its trash; Usage keeps what it spent.", { agent: a.name })));
+  // Codex lists in its history only the sessions made with the provider it
+    const hidden = data.sessions.filter(otherProvider);
+        ? "1 Codex session was made with another provider ({from}): Codex lists only {to}'s sessions in its history now, so it doesn't show there."
+        : "{n} Codex sessions were made with another provider ({from}): Codex lists only {to}'s sessions in its history now, so they don't show there.", { n: hidden.length, from, to })));
+      bar.append(el("span", "sm-provider-text", t(undo.moved.length === 1 ? "Moved 1 session to {to}" : "Moved {n} sessions to {to}", { n: undo.moved.length, to: undo.moved[0].to })), el("span", "grow"));
+        if (!out.refused.length) status(t(out.moved.length === 1 ? "Moved 1 session back" : "Moved {n} sessions back", { n: out.moved.length }), "ok");
+      out = await api("sessions/codex-provider", { moves });
+      const first = out.refused[0], s = data.sessions.find((x) => x.id === first.id);
+      status(active.length ? t(active.length === 1 ? "{title} is still being written to; close it in {agent} and try again in a minute" : "{n} sessions are still being written to; close them in {agent} and try again in a minute", { title: s?.title || first.id, n: active.length, agent: "Codex" })
+  // askProvider: the sessions to move, each ticked, to untick before Move
+    h.append(icon(current()?.icon || "generic"), el("b", "", t("Move sessions to {to}?", { to })));
+      if (!out.refused.length) status(t(out.moved.length === 1 ? "Moved 1 session to {to}" : "Moved {n} sessions to {to}", { n: out.moved.length, to }), "ok");
+    const n = el("span", "note sm-count", picked.size ? t("{n} selected", { n: picked.size }) : t(list.length === 1 ? "{n} session" : "{n} sessions", { n: list.length }));
+    const all = data?.sessions || [];
+      if (!search()?.busy) tree.append(el("div", "empty-state", query ? t("No session matches.") : t("No sessions yet")));
+  // nest finds the sessions shown that are under another one shown: a
+  // a folder's sessions
+    // the sessions under those on top are the folder's too
+    // for the bar's Delete; the bar still counts sessions (#527)
+    r.append(fold, el("span", "sub sm-path", path), el("span", "grow"), el("span", "note", t(members.length === 1 ? "{n} session" : "{n} sessions", { n: members.length })));
+    const allInFolder = (data.sessions || []).filter((s) => s.cwd === cwd);
+  // moreRow adds the folder's next page of sessions above itself, leaving
+      p.title = t("Made with {from}: Codex's history lists only {to}'s sessions now", { from: s.provider, to: s.uses_provider });
+          api("sessions/terminal", { agent: s.agent, id: s.id }).then(() => status(t("Opening in session terminal"), "ok"), (err) => status(err.message, "err"));
+        const prev = data.sessions.find((x) => x.id === was);
+  // Codex threads it started, drawn as sessions
+        a.href = "/api/sessions/markdown?" + q;
+        const r = await api("sessions/export?" + q, {});
+  // agentOf is an agent as the page names it: of those with sessions, else
+        else api("sessions/terminal", { agent: s.agent, id: s.id, in: to }).then(() => status(t("Opening in session terminal"), "ok"), (err) => status(err.message, "err"));
+      api("sessions/transcript?agent=" + encodeURIComponent(s.agent) + "&id=" + encodeURIComponent(s.id) + (sub ? "&sub=" + encodeURIComponent(sub) : ""))
+    ed.append(el("p", "lib-confirm", t("Close Claude Code and its editor sessions first. This moves the entire project's sessions, not just filtered or selected rows. Existing target storage is never overwritten. Desktop-only sessions are not changed.")));
+        const out = await api("sessions/relocate-claude", { from, to: input.value, wsl, token: preview?.token || "" });
+          info.textContent = t("Move {n} sessions ({size}) from {from} to {to}. Originals are retained outside Claude's project list. Historical message text is unchanged.", {
+            n: out.sessions, size: fmtBytes(out.bytes), from: out.from, to: out.to,
+  // askDelete asks in magpie's dialog before the sessions go to its trash;
+    const byID = new Map((data?.sessions || []).map((s) => [s.id, s]));
+    // picked folders each whole: how many folders, as well as sessions
+    const folders = !whole && cwds.size > 1 && (data?.sessions || []).every((s) => !cwds.has(groupOf(s)) || ids.includes(s.id)) ? cwds.size : 0;
+      : whole ? t("Delete all {n} sessions in {folder}?", { n: list.length, folder: groupName(folder) })
+      : folders ? t("Delete all {n} sessions in {k} folders?", { n: list.length, k: folders })
+      : t("Delete {n} sessions?", { n: list.length })));
+        out = await api("sessions/delete", { agent: data.agent, ids: list.map((s) => s.id) });
+        status(active.length ? t(active.length === 1 ? "{title} is still being written to; close it in {agent} and try again in a minute" : "{n} sessions are still being written to; close them in {agent} and try again in a minute", { title: s?.title || first.id, n: active.length, agent: a.name })
+        status(t(out.deleted.length === 1 ? "Moved to magpie's trash" : "{n} sessions moved to magpie's trash", { n: out.deleted.length }), "ok");
+  // askPurge asks in magpie's dialog before trashed sessions are erased for
+        out = await api("sessions/purge", all ? { all: true } : { keys: list.map((x) => x.key) });
+        status(t(out.purged.length === 1 ? "Erased for good" : "{n} sessions erased for good", { n: out.purged.length }), "ok");
+      bar.append(el("span", "note sm-count", t(items.length === 1 ? "{n} session" : "{n} sessions", { n: items.length })), el("span", "grow"), empty);
+      e.append(el("b", "", t("Trash is empty")), el("span", "", t("Sessions deleted here wait in magpie's trash, to be restored.")));
+            await api("sessions/restore", { key: x.key });
+    out.push(el("p", "usage-note", t("Deleted sessions are kept in {dir} until you erase them here; magpie never erases them by itself.", { dir: data.trashDir })));
+    key: "sessions",
+    title: "Sessions",
+// lists its sessions' fill request by request.
+    const meta = el("div", "ctx-who-sub", [count(a.requests, "1 request", "{n} requests"), count(a.sessions, "1 session", "{n} sessions")].join(" 
+      pane.append(el("p", "usage-note", t("Working it out from your sessions
+    const agents = [...new Set(ctxData.sessions.map((s) => s.agent))];
+    head.append(el("span", "label", t("Sessions")), el("span", "grow"));
+    const shown = ctxData.sessions.filter((s) => ctxAgent === "all" || s.agent === ctxAgent);
+    if (!shown.length) list.append(el("p", "usage-note", t("No sessions in this range")));
+    "Seen only through the gateway: the agent kept no session file magpie can read. Turn on Record gateway conversations in Sessions to keep its prompts.": "
+    "Search models, providers, sessions": "
+    "Totals count native sessions and gateway requests with a session ID": "
+    "Indexing your sessions": "
+    "Latest sessions": "
+    "Open in Sessions": "
+    "Top sessions": "
+ Height: sessions": "
+    "The time the sessions were at work: the pauses between one message and the next, each under five minutes": "
+    "Seen only through the gateway: the agent kept no session file magpie can read. Turn on Record gateway conversations in Sessions to keep its prompts.": "Nur 
+    "Search models, providers, sessions": "Modelle, Anbieter, Sitzungen durchsuchen",
+    "Totals count native sessions and gateway requests with a session ID": "Summen z
+    "Indexing your sessions": "Ihre Sitzungen werden indiziert",
+    "Latest sessions": "Neueste Sitzungen",
+    "Open in Sessions": "In 
+    "Top sessions": "Top-Sitzungen",
+ Height: sessions": "Horizontal: {axis} 
+    "The time the sessions were at work: the pauses between one message and the next, each under five minutes": "Die aktive Zeit der Sitzungen: die Pausen zwischen zwei Nachrichten, jeweils unter f
+  // Built-in: magpie's own plugins (Sessions, Library, routing groups
+  const PAGES = { sessions: "Sessions", library: "Library", routing: "Routing", usage: "Usage" };
+  if (usageTab === "sessions") return loadSessions();
+  if (sessions) renderSessions();
+// Sessions pages, or on its own again (as ""), and draws the page again
+// isn't checked against real sessions, and tells none.
+// ---------- sessions ----------
+// The agents' own sessions, read from their session files: what each cost,
+const USAGE_TABS = [["usage", "Overview"], ["requests", "Requests"], ["sessions", "Sessions"], ["context", "Context"]];
+// list is the latest sessions within it. [id, name, days (0: all)]
+const SESS_METRICS = [["tokens", "Tokens"], ["output", "Output tokens"], ["messages", "Messages"], ["sessions", "Sessions"], ["cost", "Cost"], ["active", "Active"]];
+// what the top sessions are the top by
+// the sessions of the range summed up under the filters, by the server:
+let sessListOpen = ""; // with the Sessions page switched off, the listed session opened here to its details (#2311)
+  const on = usageTab === "sessions";
+  $("#sessionsPane").hidden = !on;
+async function loadSessions() {
+  const first = !sessions || !sessStats;
+  if (first) renderSessionsLoading();
+    [s, st, o] = await Promise.all([api("sessions"), api("sessions/stats?days=" + sessDays()), sessOverview(q)]);
+  if (sessions && sessStats && JSON.stringify(s) === JSON.stringify(sessions) && JSON.stringify(st) === JSON.stringify(sessStats) &&
+  sessions = s;
+  if (view === "usage" && usageTab === "sessions") renderSessions();
+    read = api("sessions/overview?" + q).finally(() => sessOverReads.delete(q));
+    if (view === "usage" && usageTab === "sessions" && sessions && sessStats) renderSessions();
+function renderSessionsLoading() {
+    try { p = await api("sessions/progress"); } catch {}
+    if (p && (long || shown) && view === "usage" && usageTab === "sessions") {
+  head.append(el("i", "si-spin"), el("span", "si-title", t("Indexing your sessions")));
+      loadSessions().catch((e) => status(e.message, "err"));
+function renderSessions() {
+  const all = sessions?.sessions || [];
+  // one segment per agent that has sessions, or usage in the range
+      b.onclick = () => { sessAgent = id; renderSessions(); };
+  sessPick($("#sessModel"), "All models", sessModel, models, "Model", (v) => { sessModel = v; renderSessions(); });
+  sessPick($("#sessFolder"), "All folders", sessFolder, folders, "Folder", (v) => { sessFolder = v; renderSessions(); });
+  // the list: the sessions at work in the range, under every filter. Which
+  // ones were at work is the range's own answer (st.keys, the sessions
+    stats.append(el("div", "none", !all.length && !rows.length ? t("No sessions yet. Claude Code's, Codex's, OpenCode's and Pi's sessions on this computer show up here, with what each cost and the command that resumes it.") : filtered ? t("No session matches.") : t("Nothing in this range.")));
+      stats.firstChild.textContent = t("No sessions in this range");
+      const history = el("button", "text sess-show-history", t("All sessions"));
+        loadSessions().catch((e) => status(e.message, "err"));
+    // how many sessions, and what the middle one and the one in ten spent
+" : fmtN(ov.count), t("sessions"), ov.count ? t("median {m} 
+      t("The time the sessions were at work: the pauses between one message and the next, each under five minutes"), "dur");
+    sessBars($("#sessProjects"), "Projects", sessSums(rows.filter((r) => byAgent(r) && byModel(r)), "cwd"), sessFolder, (v) => { sessFolder = v; renderSessions(); }, baseName);
+    sessBars($("#sessModels"), "Models", sessSums(rows.filter((r) => byAgent(r) && byFolder(r)), "model"), sessModel, (v) => { sessModel = v; renderSessions(); }, (v) => v);
+      more.onclick = () => { sessShown += SESS_PAGE; renderSessions(); };
+  const dirs = (sessions?.dirs || []).join(" 
+  // reader uses: one session is a session, not "1 sessions".
+  const parts = [t("Totals count native sessions and gateway requests with a session ID")];
+      : t(sessTotal === 1 ? "{n} session" : "{n} sessions", { n: sessTotal }));
+// messages, sessions at work, cost or active time.
+    const x = { day: new Date(d), input: 0, output: 0, cost: 0, unpriced: 0, sessions: perDay?.length === n ? perDay[i] : 0,
+  const off = { sessions: perDay?.length === n ? "" : t("Still counting"), messages: msgs?.length === n ? "" : t("Still counting"), active: acts ? "" : t("not kept by model") };
+  const value = (x) => metric === "cost" ? x.cost : metric === "sessions" ? x.sessions : metric === "messages" ? x.messages :
+      x.sessions ? t(x.sessions === 1 ? "{n} session" : "{n} sessions", { n: x.sessions }) : "", x.active ? t("{d} active", { d: fmtDur(x.active) }) : ""].filter(Boolean);
+  // the page reads the sessions again every few seconds, and while an agent
+    const b = { day: days[i].day, input: 0, output: 0, cost: 0, unpriced: 0, sessions: 0, messages: 0, active: 0 };
+    for (const x of days.slice(i, i + step)) for (const k of ["input", "output", "cost", "unpriced", "sessions", "messages", "active"]) b[k] += x[k];
+  const busy = (x) => x.input + x.output || x.active || x.sessions;
+// renderSessTop lists the sessions that spent the most in the range, under
+  const head = sessCardHead("Top sessions");
+  const icons = new Map((sessions?.sessions || []).map((s) => [s.agent, s.icon]));
+    sub.title = s.cwd || (s.gateway ? t("Seen only through the gateway: the agent kept no session file magpie can read. Turn on Record gateway conversations in Sessions to keep its prompts.") : "");
+        api("sessions/one?key=" + encodeURIComponent(s.key)).then((full) => sessFull.set(s.key, full), (e) => sessFull.set(s.key, { error: e.message }))
+          .then(() => { if (sessTopOpen === s.key && view === "usage" && usageTab === "sessions") renderSessTop(); });
+// renderSessShape counts the range's sessions by how long they ran: by
+  head.append(seg, el("span", "grow"), el("span", "tz", sh ? t(sh.total === 1 ? "{n} session" : "{n} sessions", { n: fmtN(sh.total) }) : ""));
+ " + t(c === 1 ? "{n} session" : "{n} sessions", { n: fmtN(c) }) + ` (${pct}%)`;
+ Height: sessions", { axis: t(axis) })));
+// renderSessTools is what the sessions called their tools for: the most
+ " + t(tu.sessions === 1 ? "{n} session" : "{n} sessions", { n: fmtN(tu.sessions) })));
+  // the most called, each with its kind's dot, calls, sessions and share
+    r.append(n, track, el("span", "v", fmtN(x.calls)), el("span", "s", t(x.sessions === 1 ? "{n} session" : "{n} sessions", { n: fmtN(x.sessions) })),
+// renderSessSkills lists the skills the sessions called up, the most first
+    const sub = el("div", "sub", [t(x.sessions === 1 ? "{n} session" : "{n} sessions", { n: fmtN(x.sessions) }),
+// of its row: the Usage page's list and the Sessions page's (#752)
+// Sessions page, where it is resumed, read in full and deleted (#752: the
+// A row opens its session on the Sessions page. With that page switched off
+  const here = featuresOff.has("sessions");
+    r.title = t("Open in Sessions");
+    if (!featuresOff.has("sessions")) return magpie.call("sessions", "reveal", s, e);
+    // Sessions is switched off: there is no page to open it on
+// All sessions: the Sessions page, on the agent picked here if one is
+$("#sessAll").onclick = (e) => magpie.call("sessions", "reveal", sessAgent === "all" ? {} : { agent: sessAgent }, e);
+$("#sessQ").oninput = (e) => { sessQuery = e.target.value; if (sessions) renderSessions(); };
+$("#sessQ").onkeydown = (e) => { if (e.key === "Escape" && e.target.value) { e.stopPropagation(); e.target.value = ""; sessQuery = ""; if (sessions) renderSessions(); } };
+// answers being cached behind them, and the sessions each 15 s) 
+let usageLast = 0, usageReadAt = 0, sessionsAt = 0, quotasAsked = 0;
+// reads the page it is on too, and the sessions and the allowances.
+  if (usageTab === "sessions") return !!(sessions && sessStats);
+      if (usageTab === "sessions") {
+        if (sessions && (want || performance.now() - sessionsAt > 15e3)) { sessionsAt = performance.now(); await loadSessions(); }
+.nav-morph #nav button[data-view="sessions"] { view-transition-name: nav-sessions; }
+   other (#860); Routing, Usage and Sessions too, so a large screen doesn't
+body.window :is(#view-agents, #view-sessions, #view-providers, #view-routing, #view-gateway, #view-usage, #view-library, #view-plugins, #view-settings) { padding-left: max(16px, calc(50% - 600px)); padding-right: max(16px, calc(50% - 600px)); }
+   the window or not. Their square-celled grids (the year heatmap, Sessions'
+/* ---- sessions, a segment of usage ------------------------------------------ */
+/* a row of the Usage page's list opens on the Sessions page (#752) */
+/* with the Sessions page off it unfolds in place instead (#2311) */
+ Sessions' agents,
+   Discord: the Sessions page's white boxes stood out in dark mode); a
+  const closedSessions = new Set();
+  // Other agents' sessions are named from their own files, by the id the
+    const res = await fetch("/api/gateway/session-titles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: [], routeIds: [], sessions: keys }) });
+          if (closedSessions.has(g.key)) closedSessions.delete(g.key); else closedSessions.add(g.key);
+      const open = !closedSessions.has(g.key);
+    for (const key of sessionRows.keys()) if (!groups.has(key)) { sessionRows.delete(key); closedSessions.delete(key); }
+      closedSessions.clear();
+    // the requests, with their sessions' heads between them when grouped:
+  // fill all three, and the providers other sessions used were left off
+ Agents, Sessions, Library 
+  if (data && typeof data === "object" && !/^(sessions|library|skills|plugins|market)/.test(path)) noteAccounts(data);
+ new sessions take it"));
+ {new} show in new {agent} sessions", { n: a.models.shown, agent: a.name }).split("{new}");
+    if (a.id === "claude") parts.push(said("New sessions take it; switch the tiers in {cmd}.", "/model"));
+        // sessions of Codex 0.162 reconnect to the new one)
+    kv(t(a.id === "cursor-local" ? "Settings" : "New sessions"), line(fields));
+  if (a.id === "codex") ed.append(el("p", "ag-note", t("magpie's provider table stays, so sessions opened on magpie's models still open")));
+      ed.append(...field(t("Accounts"), renderAccounts(a, p), via + (p.routing ? t("Tick every account to use; Routing says how requests spread over them.") : subOf(a.agent).single ? t("{agent} keeps one account; the gateway runs it for every request. Signing in to another replaces it.", { agent: a.agentName }) : subOf(a.agent).own && (a.logins || []).some((l) => l.own) ? t("The gateway uses the first. Tick more and it moves on to the next when the one before it is out of quota. {agent} itself stays signed in as it is.", { agent: a.agentName && a.agentName !== a.agent ? a.agentName : p.name }) : subOf(a.agent).own || subOf(a.agent).plugin ? t("The gateway uses the first. Tick more and it moves on to the next when the one before it is out of quota.") : t("{agent} signs in to the first. Tick more and the gateway moves on to the next when the one before it is out of quota. Sessions already running keep theirs until restarted.", { agent: a.agentName }))));
+// started, so after a switch the Codex sessions that attach to it are still
+// unasked: that ends the Codex sessions running on it.
+    el("span", "s", t("Restart it to use the new account. Running Codex sessions will be interrupted.")));
+let sessions = null; // { sessions, terminal, dirs }
+  row("otelSessionsRow", "Trace agent conversations", "Reads all local sessions from Codex, Pi, Oh My Pi, Claude Code, Cowork, OpenCode and Gemini CLI, including calls not routed through Magpie. When content is included below, exports prompts, replies, tool arguments and tool output (including file contents and command output), with secrets masked",
+    segs([["off", t("Off")], ["on", t("On")]], config.sessions ? "on" : "off", (v) => save({ sessions: v === "on" })));
+  // lingting-react-ui on Usage's Sessions is no account lingting (#1973);
+  // Usage's Sessions and Context are read from the agents' own logs, which
+  const NAMELESS = "#sessionsPane, #contextPane";
+    "Working it out from your sessions
+    "No sessions in this range": "
+ new sessions take it": "
+ {new} show in new {agent} sessions": "
+    "New sessions take it; switch the tiers in {cmd}.": "
+    "New sessions": "
+    "magpie's provider table stays, so sessions opened on magpie's models still open": "
+    "Looks in running WSL distros for agents to set up, their sessions and Claude Code; off, WSL is never asked anything and the agents found there are no longer shown": "
+    "Reads all local sessions from Codex, Pi, Oh My Pi, Claude Code, Cowork, OpenCode and Gemini CLI, including calls not routed through Magpie. When content is included below, exports prompts, replies, tool arguments and tool output (including file contents and command output), with secrets masked": "
+    "{agent} and the gateway use the one in use. Sessions already running keep theirs until restarted.": "{agent} 
+    "{agent} signs in to the first. Tick more and the gateway moves on to the next when the one before it is out of quota. Sessions already running keep theirs until restarted.": "{agent} 
+    "Restart it to use the new account. Running Codex sessions will be interrupted.": "
+    // sessions
+    "Sessions": "
+    "Search sessions": "
+    // the Sessions page (sessions.js)
+    "Filter sessions": "
+    "No sessions yet": "
+    "sessions": "
+    "No sessions yet. Claude Code's, Codex's, Hermes, OpenCode's and Pi's sessions on this computer show up here, with what each cost and the command that resumes it.": "
+    "{n} sessions": "{n} 
+    "All sessions": "
+    "{n} sessions used a model with no known price; their share is not counted": "{n} 
+ restart open ante sessions to use this.": "Ante 
+ restart open atomcode sessions to use this.": "AtomCode 
+ open sessions keep the model they have; new ones use this. Reload VS Code's window for its extension.": "Cline 
+ restart open codebuddy sessions, or run /clear in them, to use this.": "CodeBuddy Code 
+ restart the Codex app, open codex sessions and the app-server they share ({command}) to see this.": "Codex 
+    "Codex builds its model list at start-up, and the app-server open codex sessions share started before this: restart it (Restart on magpie's Agents page, or {command}) and the Codex app to see this.": "Codex 
+ restart open Devin sessions to use this.": "Devin 
+ restart open droid sessions to use this.": "Droid 
+ restart open empryo sessions to use this.": "Empryo 
+ restart open gemini sessions to see this.": "Gemini CLI 
+ quit and reopen Goose (and open goose sessions) to use magpie's models.": "Goose 
+ restart open grok sessions to use this.": "Grok Build 
+ restart open Hermes sessions to use this.": "Hermes 
+ restart open Command Code sessions to use this.": "
+ restart open kimi sessions to use this.": "Kimi Code 
+ restart open mothx sessions to use this.": "MothX 
+ restart open jcode sessions to use this.": "jcode 
+ restart open mcode sessions to use this.": "MiniMax Code 
+ restart open muse sessions to use this.": "Muse Code 
+    "New dsh sessions start on this. A session made before keeps its model, open now or reopened later, until you pick another in it with /model or the model button by its message box. A dsh started with -p or in a terminal reads it at start-up.": "
+    "OpenChamber takes the new model for new sessions; sessions already open keep theirs.": "OpenChamber 
+ restart open snow sessions to use this.": "Snow CLI 
+ restart open dsh sessions to use this.": "dsh 
+ restart open fx sessions to use this.": "fx 
+    "magpie restarted the app-server codex sessions share, which none was on, so new codex sessions have this; restart the Codex app, if it is open, to see it there.": "magpie 
+ restart open omp sessions to use this.": "omp 
+ restart it, the app-server its sessions share ({command} there) and the Codex app's WSL connection to see this.": "WSL {distro} 
+ restart open goose sessions to use magpie's models.": "WSL {distro} 
+ restart open ante sessions to use this.": "WSL {distro} 
+ restart open dsh sessions to use this.": "WSL {distro} 
+ restart open empryo sessions to use this.": "WSL {distro} 
+ restart open mimo sessions to use this.": "WSL {distro} 
+ restart open opencode sessions to use this.": "WSL {distro} 
+ restart open codebuddy sessions, or run /clear in them, to use this.": "WSL {distro} 
+ restart open snow sessions to use this.": "WSL {distro} 
+ open sessions keep the model they have; new ones use this. Reload VS Code's window for its extension.": "WSL {distro} 
+ open sessions keep the model they have; new ones use this.": "WSL {distro} 
+ restart open Hermes sessions to use this.": "WSL {distro} 
+ restart open atomcode sessions to use this.": "WSL {distro} 
+ restart open crush sessions to use this.": "WSL {distro} 
+ restart open droid sessions to use this.": "WSL {distro} 
+ restart open fx sessions to use this.": "WSL {distro} 
+ restart open gemini sessions to see this.": "WSL {distro} 
+ restart open grok sessions to use this.": "WSL {distro} 
+ restart open kimi sessions to use this.": "WSL {distro} 
+ restart open mothx sessions to use this.": "WSL {distro} 
+ restart open mcode sessions to use this.": "WSL {distro} 
+ restart open muse sessions to use this.": "WSL {distro} 
+ restart open omp sessions to use this.": "WSL {distro} 
+ open sessions keep the model they have; new ones use this.": "{agent} 
+    "magpie's provider table stays, so sessions opened on magpie's models still open": "magpie 
+    "Reads all local sessions from Codex, Pi, Oh My Pi, Claude Code, Cowork, OpenCode and Gemini CLI, including calls not routed through Magpie. When content is included below, exports prompts, replies, tool arguments and tool output (including file contents and command output), with secrets masked": "Codex
+ restart open Command Code sessions to use this.": "WSL {distro} 
+    "No sessions in this range": "Keine Sitzungen in diesem Zeitraum",
+ new sessions take it": "Verbunden 
+ {new} show in new {agent} sessions": "Verbunden 
+    "New sessions take it; switch the tiers in {cmd}.": "Gilt f
+    "New sessions": "Neue Sitzungen",
+    "magpie's provider table stays, so sessions opened on magpie's models still open": "Die Anbietertabelle von magpie bleibt, damit Sitzungen mit magpie-Modellen weiter ge
+    "Looks in running WSL distros for agents to set up, their sessions and Claude Code; off, WSL is never asked anything and the agents found there are no longer shown": "Sucht in laufenden WSL-Distributionen nach einrichtbaren Agenten, ihren Sitzungen und Claude Code; aus, wird WSL nie etwas gefragt, und die dort gefundenen Agenten werden nicht mehr angezeigt",
+    "Reads all local sessions from Codex, Pi, Oh My Pi, Claude Code, Cowork, OpenCode and Gemini CLI, including calls not routed through Magpie. When content is included below, exports prompts, replies, tool arguments and tool output (including file contents and command output), with secrets masked": "Liest alle lokalen Sitzungen von Codex, Pi, Oh My Pi, Claude Code, Cowork, OpenCode und Gemini CLI, auch Aufrufe, die nicht 
+    "{agent} and the gateway use the one in use. Sessions already running keep theirs until restarted.": "{agent} und der Zugangspunkt verwenden das Konto 
+    "{agent} signs in to the first. Tick more and the gateway moves on to the next when the one before it is out of quota. Sessions already running keep theirs until restarted.": "{agent} meldet sich beim ersten an. Haken Sie weitere an, wechselt der Zugangspunkt zum n
+    "Restart it to use the new account. Running Codex sessions will be interrupted.": "Starten Sie ihn neu, um das neue Konto zu verwenden. Laufende Codex-Sitzungen werden unterbrochen.",
+    "Sessions": "Sitzungen",
+    "Search sessions": "Sitzungen durchsuchen",
+    "Filter sessions": "Sitzungen filtern",
+    "No sessions yet": "Noch keine Sitzungen",
+    "sessions": "Sitzungen",
+    "No sessions yet. Claude Code's, Codex's, Hermes, OpenCode's and Pi's sessions on this computer show up here, with what each cost and the command that resumes it.": "Noch keine Sitzungen. Sitzungen von Claude Code, Codex, Hermes, OpenCode und Pi auf diesem Computer erscheinen hier, jeweils mit Kosten und dem Befehl zum Fortsetzen.",
+    "{n} sessions": "{n} Sitzungen",
+    "All sessions": "Alle Sitzungen",
+    "{n} sessions used a model with no known price; their share is not counted": "{n} Sitzungen nutzten ein Modell ohne bekannten Preis; ihr Anteil wird nicht gez
+ restart open ante sessions to use this.": "Ante liest seinen Katalog beim Start 
+ restart open atomcode sessions to use this.": "AtomCode liest seine Einstellungen beim Start 
+ open sessions keep the model they have; new ones use this. Reload VS Code's window for its extension.": "Cline liest seinen Anbieter beim Start einer Sitzung 
+ restart open codebuddy sessions, or run /clear in them, to use this.": "CodeBuddy Code liest sein Modell beim Start einer Sitzung 
+ restart the Codex app, open codex sessions and the app-server they share ({command}) to see this.": "Codex baut seine Modellliste beim Start 
+    "Codex builds its model list at start-up, and the app-server open codex sessions share started before this: restart it (Restart on magpie's Agents page, or {command}) and the Codex app to see this.": "Codex baut seine Modellliste beim Start, und der App-Server, den offene codex-Sitzungen teilen, lief schon vor dieser 
+ restart open Devin sessions to use this.": "Devin liest sein Modell beim Start 
+ restart open droid sessions to use this.": "Droid liest seine Einstellungen beim Start 
+ restart open empryo sessions to use this.": "Empryo liest seine Konfiguration beim Start 
+ restart open gemini sessions to see this.": "Gemini CLI liest seine Einstellungen beim Start 
+ quit and reopen Goose (and open goose sessions) to use magpie's models.": "Goose l
+ restart open grok sessions to use this.": "Grok Build liest seine Einstellungen beim Start 
+ restart open Hermes sessions to use this.": "Hermes liest seine Einstellungen beim Start 
+ restart open Command Code sessions to use this.": "Es liest seine Einstellungen beim Start 
+ restart open kimi sessions to use this.": "Kimi Code liest seine Einstellungen beim Start 
+ restart open mothx sessions to use this.": "MothX liest seine Einstellungen beim Start 
+ restart open jcode sessions to use this.": "jcode liest seine Einstellungen beim Start 
+ restart open mcode sessions to use this.": "MiniMax Code liest seine Einstellungen beim Start 
+ restart open muse sessions to use this.": "Muse Code liest seine Einstellungen beim Start 
+    "New dsh sessions start on this. A session made before keeps its model, open now or reopened later, until you pick another in it with /model or the model button by its message box. A dsh started with -p or in a terminal reads it at start-up.": "Neue dsh-Sitzungen starten damit. Eine vorher angelegte Sitzung beh
+    "OpenChamber takes the new model for new sessions; sessions already open keep theirs.": "OpenChamber nimmt das neue Modell f
+ restart open snow sessions to use this.": "Snow CLI liest sein Profil beim Start 
+ restart open dsh sessions to use this.": "dsh liest seine Konfiguration beim Start 
+ restart open fx sessions to use this.": "fx liest seine Einstellungen beim Start 
+    "magpie restarted the app-server codex sessions share, which none was on, so new codex sessions have this; restart the Codex app, if it is open, to see it there.": "magpie hat den App-Server, den codex-Sitzungen teilen, neu gestartet (keine war verbunden), neue codex-Sitzungen haben es also; die Codex-App, falls offen, neu starten, um es dort zu sehen.",
+ restart open omp sessions to use this.": "omp liest seine Einstellungen beim Start 
+ restart it, the app-server its sessions share ({command} there) and the Codex app's WSL connection to see this.": "{agent} in WSL {distro} baut seine Modellliste beim Start 
+ restart open goose sessions to use magpie's models.": "{agent} in WSL {distro} l
+ restart open ante sessions to use this.": "{agent} in WSL {distro} liest seinen Katalog beim Start 
+ restart open dsh sessions to use this.": "{agent} in WSL {distro} liest seine Konfiguration beim Start 
+ restart open empryo sessions to use this.": "{agent} in WSL {distro} liest seine Konfiguration beim Start 
+ restart open mimo sessions to use this.": "{agent} in WSL {distro} liest seine Konfiguration beim Start 
+ restart open opencode sessions to use this.": "{agent} in WSL {distro} liest seine Konfiguration beim Start 
+ restart open codebuddy sessions, or run /clear in them, to use this.": "{agent} in WSL {distro} liest sein Modell beim Start einer Sitzung 
+ restart open snow sessions to use this.": "{agent} in WSL {distro} liest sein Profil beim Start 
+ open sessions keep the model they have; new ones use this. Reload VS Code's window for its extension.": "{agent} in WSL {distro} liest seinen Anbieter beim Start einer Sitzung 
+ open sessions keep the model they have; new ones use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start einer Sitzung 
+ restart open Hermes sessions to use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open atomcode sessions to use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open crush sessions to use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open droid sessions to use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open fx sessions to use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open gemini sessions to see this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open grok sessions to use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open kimi sessions to use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open mothx sessions to use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open mcode sessions to use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open muse sessions to use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open omp sessions to use this.": "{agent} in WSL {distro} liest seine Einstellungen beim Start 
+ restart open Command Code sessions to use this.": "{agent} in WSL {distro} verlangt dort auch f
+ open sessions keep the model they have; new ones use this.": "{agent} liest seine Einstellungen beim Start einer Sitzung 
+ restart open ante sessions to use this.",
+ restart open atomcode sessions to use this.",
+ open sessions keep the model they have; new ones use this. Reload VS Code's window for its extension.",
+ restart open codebuddy sessions, or run /clear in them, to use this.",
+ restart the Codex app, open codex sessions and the app-server they share ({command}) to see this.",
+  "Codex builds its model list at start-up, and the app-server open codex sessions share started before this: restart it (Restart on magpie's Agents page, or {command}) and the Codex app to see this.",
+ restart open Devin sessions to use this.",
+ restart open droid sessions to use this.",
+ restart open empryo sessions to use this.",
+ restart open gemini sessions to see this.",
+ quit and reopen Goose (and open goose sessions) to use magpie's models.",
+ restart open grok sessions to use this.",
+ restart open Hermes sessions to use this.",
+ restart open Command Code sessions to use this.",
+ restart open kimi sessions to use this.",
+ restart open mothx sessions to use this.",
+ restart open jcode sessions to use this.",
+ restart open mcode sessions to use this.",
+ restart open muse sessions to use this.",
+  "New dsh sessions start on this. A session made before keeps its model, open now or reopened later, until you pick another in it with /model or the model button by its message box. A dsh started with -p or in a terminal reads it at start-up.",
+  "OpenChamber takes the new model for new sessions; sessions already open keep theirs.",
+ restart open snow sessions to use this.",
+ restart open dsh sessions to use this.",
+ restart open fx sessions to use this.",
+  "magpie restarted the app-server codex sessions share, which none was on, so new codex sessions have this; restart the Codex app, if it is open, to see it there.",
+ restart open omp sessions to use this.",
+ restart it, the app-server its sessions share ({command} there) and the Codex app's WSL connection to see this.",
+ restart open goose sessions to use magpie's models.",
+ restart open mimo sessions to use this.",
+ restart open opencode sessions to use this.",
+ open sessions keep the model they have; new ones use this.",
+ restart open crush sessions to use this.",
+crypto/tls.(*SessionState).Bytes
+crypto/tls.(*SessionState).Bytes.func4
+crypto/tls.(*SessionState).Bytes.func3
+crypto/tls.(*SessionState).Bytes.func3.1
+crypto/tls.(*SessionState).Bytes.func3.1.1
+crypto/tls.(*SessionState).Bytes.marshalCertificate.func5
+crypto/tls.(*SessionState).Bytes.marshalCertificate.func5.2
+crypto/tls.(*SessionState).Bytes.marshalCertificate.func5.2.2
+crypto/tls.(*SessionState).Bytes.marshalCertificate.func5.2.2.1
+crypto/tls.(*SessionState).Bytes.marshalCertificate.func5.2.2.1.1
+crypto/tls.(*SessionState).Bytes.marshalCertificate.func5.2.1
+crypto/tls.(*SessionState).Bytes.marshalCertificate.func5.2.1.1
+crypto/tls.(*SessionState).Bytes.marshalCertificate.func5.1
+crypto/tls.(*SessionState).Bytes.func2
+crypto/tls.(*SessionState).Bytes.func2.1
+crypto/tls.(*SessionState).Bytes.func1
+crypto/tls.ParseSessionState
+crypto/tls.(*Conn).sessionState
+crypto/tls.(*ClientSessionState).ResumptionState
+github.com/yetone/magpie/internal/sessions.init
+github.com/yetone/magpie/internal/sessions.quietReaders
+github.com/yetone/magpie/internal/sessions.init.func1
+github.com/yetone/magpie/internal/sessions.init.func2
+github.com/yetone/magpie/internal/sessions.init.func3
+github.com/yetone/magpie/internal/sessions.init.func3.WithDecoderLowmem.2
+github.com/yetone/magpie/internal/sessions.init.func3.WithDecoderConcurrency.1
+github.com/yetone/magpie/internal/sessions.init.func4
+github.com/yetone/magpie/internal/sessions.init.func5
+github.com/yetone/magpie/internal/sessions.init.func5.WithDecoderLowmem.2
+github.com/yetone/magpie/internal/sessions.init.func5.WithDecoderConcurrency.1
+github.com/yetone/magpie/internal/sessions.map.init.0
+github.com/yetone/magpie/internal/sessions.map.init.1
+github.com/yetone/magpie/internal/sessions.AlmaDir
+github.com/yetone/magpie/internal/sessions.almaDB
+github.com/yetone/magpie/internal/sessions.almaTime
+github.com/yetone/magpie/internal/sessions.almaFiles
+github.com/yetone/magpie/internal/sessions.almaExpr
+github.com/yetone/magpie/internal/sessions.almaColumn
+github.com/yetone/magpie/internal/sessions.almaFiles.deferwrap1
+github.com/yetone/magpie/internal/sessions.almaModel
+github.com/yetone/magpie/internal/sessions.parseAlma
+github.com/yetone/magpie/internal/sessions.hermesExpr
+github.com/yetone/magpie/internal/sessions.(*state).day
+github.com/yetone/magpie/internal/sessions.parseAlma.deferwrap1
+github.com/yetone/magpie/internal/sessions.callCacheDir
+github.com/yetone/magpie/internal/sessions.callCachePath
+github.com/yetone/magpie/internal/sessions.resetCalls
+github.com/yetone/magpie/internal/sessions.resetCalls.deferwrap1
+github.com/yetone/magpie/internal/sessions.pruneCalls
+github.com/yetone/magpie/internal/sessions.keepCalls
+github.com/yetone/magpie/internal/sessions.keepCalls.deferwrap1
+github.com/yetone/magpie/internal/sessions.callLock
+github.com/yetone/magpie/internal/sessions.readCalls
+github.com/yetone/magpie/internal/sessions.readBegin
+github.com/yetone/magpie/internal/sessions.(*callFile).withoutRevisions
+github.com/yetone/magpie/internal/sessions.readCalls.func2
+github.com/yetone/magpie/internal/sessions.readCalls.func1
+github.com/yetone/magpie/internal/sessions.readCalls.deferwrap1
+github.com/yetone/magpie/internal/sessions.callsAlong
+github.com/yetone/magpie/internal/sessions.packed
+github.com/yetone/magpie/internal/sessions.(*callsRide).release
+github.com/yetone/magpie/internal/sessions.(*callsRide).finish
+github.com/yetone/magpie/internal/sessions.diskCallState
+github.com/yetone/magpie/internal/sessions.callDiskState.restore
+github.com/yetone/magpie/internal/sessions.loadCalls
+slices.Grow[go.shape.[]github.com/yetone/magpie/internal/sessions.Call,go.shape.b47b789ed6166e58cc0e7ec257e6a314448b157f09cb272a7f247a0acec43107]
+github.com/yetone/magpie/internal/sessions.loadCalls.deferwrap1
+github.com/yetone/magpie/internal/sessions.writeCalls
+github.com/yetone/magpie/internal/sessions.writeCalls.func1
+github.com/yetone/magpie/internal/sessions.writeCalls.deferwrap1
+github.com/yetone/magpie/internal/sessions.keepCallContinuation
+github.com/yetone/magpie/internal/sessions.revisionCandidate.eligible
+github.com/yetone/magpie/internal/sessions.keepCallContinuation.deferwrap1
+github.com/yetone/magpie/internal/sessions.restoreCallContinuation
+github.com/yetone/magpie/internal/sessions.Calls
+github.com/yetone/magpie/internal/sessions.sharedCalls
+slices.Clone[go.shape.[]github.com/yetone/magpie/internal/sessions.Call,go.shape.b47b789ed6166e58cc0e7ec257e6a314448b157f09cb272a7f247a0acec43107]
+github.com/yetone/magpie/internal/sessions.sharedCalls.func2
+github.com/yetone/magpie/internal/sessions.sharedCalls.func2.deferwrap1
+github.com/yetone/magpie/internal/sessions.sharedCalls.func1
+github.com/yetone/magpie/internal/sessions.callsFor
+slices.Clone[go.shape.[]github.com/yetone/magpie/internal/sessions.file,go.shape.c22f43012561c0fcc533a445302085acc0f17297204fd828ee1249cd9ad123ce]
+github.com/yetone/magpie/internal/sessions.callsFor.func3
+github.com/yetone/magpie/internal/sessions.callsFor.func2
+github.com/yetone/magpie/internal/sessions.callsFor.func1
+github.com/yetone/magpie/internal/sessions.callFiles
+github.com/yetone/magpie/internal/sessions.ClaudeDir
+github.com/yetone/magpie/internal/sessions.callFiles.func1
+github.com/yetone/magpie/internal/sessions.callSources
+github.com/yetone/magpie/internal/sessions.dshCallFiles
+github.com/yetone/magpie/internal/sessions.codebuddyCallFiles
+github.com/yetone/magpie/internal/sessions.workbuddyCallFiles
+github.com/yetone/magpie/internal/sessions.desktopDataDirs
+github.com/yetone/magpie/internal/sessions.headOf
+github.com/yetone/magpie/internal/sessions.headOf.deferwrap1
+github.com/yetone/magpie/internal/sessions.prepareCalls
+github.com/yetone/magpie/internal/sessions.sameHead
+github.com/yetone/magpie/internal/sessions.(*callFile).clone
+maps.Clone[go.shape.map[string]github.com/yetone/magpie/internal/sessions.cxOpen,go.shape.string,go.shape.struct { N int; First int; Duration int64; FirstToken int64; Complete bool }]
+maps.Clone[go.shape.map[string]github.com/yetone/magpie/internal/sessions.cxContext,go.shape.string,go.shape.struct { Model string; Effort string; Cwd string; Upstream string; LastIn time.Time }]
+github.com/yetone/magpie/internal/sessions.cxAnswerItem
+github.com/yetone/magpie/internal/sessions.callHead
+github.com/yetone/magpie/internal/sessions.sessionOfPath
+github.com/yetone/magpie/internal/sessions.SubagentOf
+github.com/yetone/magpie/internal/sessions.SubagentParent
+github.com/yetone/magpie/internal/sessions.(*ccStr).UnmarshalJSON
+github.com/yetone/magpie/internal/sessions.claudeCallLine
+github.com/yetone/magpie/internal/sessions.(*callFile).str
+github.com/yetone/magpie/internal/sessions.ccUsageState
+github.com/yetone/magpie/internal/sessions.firstChars
+github.com/yetone/magpie/internal/sessions.ccTokens
+github.com/yetone/magpie/internal/sessions.Tokens.zero
+github.com/yetone/magpie/internal/sessions.claudeCallLine.func1
+github.com/yetone/magpie/internal/sessions.claudeCallLine.deferwrap1
+github.com/yetone/magpie/internal/sessions.codexCallLine
+github.com/yetone/magpie/internal/sessions.(*codexUsageState).context
+github.com/yetone/magpie/internal/sessions.(*codexUsageState).beginSnapshot
+github.com/yetone/magpie/internal/sessions.(*callFile).codexCompact
+github.com/yetone/magpie/internal/sessions.(*callFile).markCall
+github.com/yetone/magpie/internal/sessions.(*cxRun).saveContext
+github.com/yetone/magpie/internal/sessions.(*callFile).codexChanged
+github.com/yetone/magpie/internal/sessions.cxUsage.raw
+github.com/yetone/magpie/internal/sessions.spent
+github.com/yetone/magpie/internal/sessions.(*callFile).codexTiming
+github.com/yetone/magpie/internal/sessions.hashHead
+github.com/yetone/magpie/internal/sessions.prefixHash
+github.com/yetone/magpie/internal/sessions.prefixHash.deferwrap2
+github.com/yetone/magpie/internal/sessions.prefixHash.deferwrap1
+github.com/yetone/magpie/internal/sessions.CallSources
+github.com/yetone/magpie/internal/sessions.ReadCallSource
+github.com/yetone/magpie/internal/sessions.AgyDir
+github.com/yetone/magpie/internal/sessions.agyCallFiles
+github.com/yetone/magpie/internal/sessions.readAgyCalls
+github.com/yetone/magpie/internal/sessions.readAgyCalls.deferwrap1
+github.com/yetone/magpie/internal/sessions.agyCall
+github.com/yetone/magpie/internal/sessions.readDshCalls
+github.com/yetone/magpie/internal/sessions.readDshCalls.func2
+github.com/yetone/magpie/internal/sessions.readDshCalls.func1
+github.com/yetone/magpie/internal/sessions.dshCall
+github.com/yetone/magpie/internal/sessions.ms
+github.com/yetone/magpie/internal/sessions.dshGatewayProvider
+github.com/yetone/magpie/internal/sessions.dshUpstream
+github.com/yetone/magpie/internal/sessions.dshServed
+github.com/yetone/magpie/internal/sessions.KimiCodeDir
+github.com/yetone/magpie/internal/sessions.kimiSessions
+github.com/yetone/magpie/internal/sessions.kimiCallFiles
+github.com/yetone/magpie/internal/sessions.kimiCallsBegin
+github.com/yetone/magpie/internal/sessions.kimiCallLine
+github.com/yetone/magpie/internal/sessions.kimiCall
+github.com/yetone/magpie/internal/sessions.kimiCallKey
+github.com/yetone/magpie/internal/sessions.MiniMaxDir
+github.com/yetone/magpie/internal/sessions.minimaxSessions
+github.com/yetone/magpie/internal/sessions.minimaxCallFiles
+github.com/yetone/magpie/internal/sessions.minimaxCallFiles.func1
+github.com/yetone/magpie/internal/sessions.minimaxSessionID
+github.com/yetone/magpie/internal/sessions.readMiniMaxCalls
+github.com/yetone/magpie/internal/sessions.readMiniMaxCalls.deferwrap1
+github.com/yetone/magpie/internal/sessions.minimaxCall
+github.com/yetone/magpie/internal/sessions.(*piUsage).tokens
+github.com/yetone/magpie/internal/sessions.openCodeCallFiles
+github.com/yetone/magpie/internal/sessions.openCodeCallFiles.func1
+github.com/yetone/magpie/internal/sessions.openCodeCallFiles.deferwrap1
+github.com/yetone/magpie/internal/sessions.ocStamp
+github.com/yetone/magpie/internal/sessions.withOCCallDB
+github.com/yetone/magpie/internal/sessions.withOCCallDB.func1
+github.com/yetone/magpie/internal/sessions.withOCCallDB.func1.1
+github.com/yetone/magpie/internal/sessions.withOCCallDB.func1.1.deferwrap1
+github.com/yetone/magpie/internal/sessions.withOCCallDB.func1.deferwrap1
+github.com/yetone/magpie/internal/sessions.resetOCCalls
+github.com/yetone/magpie/internal/sessions.resetOCCalls.deferwrap1
+github.com/yetone/magpie/internal/sessions.readOpenCodeCalls
+github.com/yetone/magpie/internal/sessions.ocGatewayProvider
+github.com/yetone/magpie/internal/sessions.readOpenCodeCalls.func2
+github.com/yetone/magpie/internal/sessions.readOpenCodeCalls.func1
+github.com/yetone/magpie/internal/sessions.ocCall
+github.com/yetone/magpie/internal/sessions.ocError
+github.com/yetone/magpie/internal/sessions.piCallFiles
+github.com/yetone/magpie/internal/sessions.piCallsBegin
+github.com/yetone/magpie/internal/sessions.piCallsKept
+github.com/yetone/magpie/internal/sessions.readPiCallLine
