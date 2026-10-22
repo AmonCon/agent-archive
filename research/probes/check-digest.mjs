@@ -142,7 +142,27 @@ try {
   push('内容哈希不同则不命中', miss === null);
   push('hashText 稳定', hashText('abc') === hashText('abc') && hashText('abc') !== hashText('abd'));
 
-  // 9. 错误处理：密钥错误时不能静默失败，必须把原因带出来
+  // 9. 读取已有摘要（网页和 MCP 用的入口）
+  const { latestProjectDigest, latestSessionSummary, projectSubject } = await import(
+    '../../src/digest.js'
+  );
+  const ld = latestProjectDigest(PROJECT);
+  push('能取到最新项目摘要', !!ld && typeof ld.text === 'string', ld && ld.text.slice(0, 20));
+  push('摘要带生成时间与模型', !!ld && !!ld.createdAt && !!ld.model, ld && ld.model);
+  push('项目键可复算', typeof projectSubject(PROJECT) === 'string' && !!ld && ld.subject === projectSubject(PROJECT));
+
+  const { findSessions } = await import('../../src/query.js');
+  const { matches } = findSessions({ project: PROJECT, limit: 1 });
+  if (matches.length) {
+    const ls = latestSessionSummary(matches[0]);
+    push('能取到会话摘要', !!ls && typeof ls.text === 'string', ls && ls.text.slice(0, 16));
+  }
+
+  // 没生成过的项目应当返回 null，而不是编一个
+  const none = latestProjectDigest('E:/agent-archive');
+  push('未生成的项目返回 null', none === null);
+
+  // 10. 错误处理：密钥错误时不能静默失败，必须把原因带出来
   process.env.AGENT_ARCHIVE_LLM_API_KEY = '';
   const r5 = await digestProject(PROJECT, { limit: 1, force: true });
   push('缺密钥时明确报错', r5.ready === false && /API Key/.test(String(r5.message || '')), String(r5.message || '').slice(0, 60));
