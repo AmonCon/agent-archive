@@ -503,9 +503,33 @@ AppData）和 macOS（Library/Applications/Movies…）的系统目录；
 Linux 严格区分（在 Linux 上忽略大小写是个真实的绕过口子）。
 
 > **验证状态**：Windows 上 10 家 Agent 全部实测通过。macOS 与 Linux 的
-> 路径约定已实现，但**没有在真机上跑过**——只有 `check-platform.mjs`
-> 用模拟平台值验证了"给定平台，选出的路径形状是对的"。真机首次运行时
-> 请先跑 `node src/cli.js doctor` 看存储位置那一节。
+> 路径约定已实现，但**没有在真机上跑过**——自动化测试只用模拟平台值
+> 验证了"给定平台，选出的路径形状是对的"。
+>
+> **在 Mac / Linux 上首次使用，先跑这个：**
+>
+> ```bash
+> node research/probes/verify-mac.mjs
+> ```
+>
+> 它做实际验证：每个 Agent 的目录在不在、解析出多少会话、正文能不能读、
+> 项目路径形状对不对。脚本末尾会说明怎么判断结果。某个 Agent 显示 0 场
+> 但你确实用过它，把输出发回来即可。
+
+### Cursor 的路径反解是个特例
+
+Cursor 的项目目录名是「绝对路径把所有分隔符换成 `-`」——
+`/Users/alice/my-repo` → `Users-alice-my-repo`。这个编码**有损**：
+`Users-a-my-app` 可能是 `/Users/a/my-app`，也可能是 `/Users/a/my/app`。
+
+所以取项目路径有明确的优先级：
+
+1. `workspaceStorage/<hash>/workspace.json` 里的真实路径（权威来源）
+2. 目录名反解，且**只在能确定形状时**（Windows 盘符 / `Users-` / `home-` 前缀）
+3. 其余情况返回 `null`
+
+第 3 条是关键：**宁可留空，也不给一个看起来合理、实际错误的路径。**
+错的路径会静默污染项目归集，比缺数据难发现得多。
 
 ## 为何只有 10 家
 
@@ -579,7 +603,7 @@ export function readMessages(session) { /* 返回统一消息数组 */ }
 
 ## 下一步（还没做）
 
-- 真机验证 macOS / Linux 的路径解析（见「跨平台」一节的说明）
+- 在 Mac / Linux 上跑一次 `research/probes/verify-mac.mjs`，按输出修正平台差异
 - 批量刷新多项目：现在 `refresh` 一次处理全部，但缺一个"只刷最近活跃项目"的过滤
 
 只有等这个档案馆在你手上真正用起来之后，才值得往上加蒸馏和交接摘要。

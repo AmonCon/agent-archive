@@ -78,6 +78,31 @@ function makeAdder(out) {
   };
 }
 
+/**
+ * VS Code 系编辑器的应用数据目录候选。
+ *
+ * 与通用 userDataCandidates 的区别：这类编辑器有多条产品线
+ * （Code / Code - Insiders / VSCodium / Cursor / Trae…），
+ * 每条在 macOS 上的目录名都不一样，用户可能装的是任意一条。
+ *
+ * @param {string[]} appNames 产品名，按优先级
+ */
+export function editorDataCandidates(appNames) {
+  const out = [];
+  for (const name of appNames) {
+    for (const p of userDataCandidates(name)) {
+      if (!out.some((x) => samePath(x, p))) out.push(p);
+    }
+  }
+  return out;
+}
+
+/** 比较两个路径是否指向同一位置（跟随平台的大小写敏感性）。 */
+function samePath(a, b) {
+  const ci = process.platform === 'win32' || process.platform === 'darwin';
+  return ci ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
 function appDataRoaming(home) {
   return process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
 }

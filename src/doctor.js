@@ -224,10 +224,11 @@ export function detectGaps() {
       agent: 'trae',
       paths: [
         ...appPaths('Trae', 'User/globalStorage/state.vscdb').map((p) => ({ p, kind: 'vscdb' })),
-        {
-          p: path.join(appDataRoaming(), 'Trae', 'ModularData', 'ai-chat', 'database.db'),
+        // Trae 另把会话存在 ModularData 下（加密库），只用来判断"有没有"
+        ...userDataCandidates('Trae').map((root) => ({
+          p: path.join(root, 'ModularData', 'ai-chat', 'database.db'),
           kind: 'sqlite',
-        },
+        })),
       ],
       // state.vscdb 里只有 localAgentData（自定义 Agent 的提示词配置），
       // 真正的会话在 ModularData/ai-chat/database.db，实测熵 7.999、
@@ -317,11 +318,6 @@ export function detectGaps() {
   }
 
   return out;
-}
-
-function appDataRoaming() {
-  const home = os.homedir();
-  return process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
 }
 
 export { projectKey };
