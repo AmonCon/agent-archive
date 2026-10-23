@@ -266,7 +266,11 @@ export function detectGaps() {
     {
       name: 'Qoder',
       agent: 'qoder',
-      paths: [{ p: homePath('.qoder/cache/projects'), kind: 'dir' }],
+      // 国际版和中国版是两套独立安装，各存一份会话
+      paths: [
+        { p: homePath('.qoder/cache/projects'), kind: 'dir' },
+        { p: homePath('.qoder-cn/cache/projects'), kind: 'dir' },
+      ],
     },
     {
       name: 'Hermes',
