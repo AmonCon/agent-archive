@@ -4,6 +4,10 @@
 
 给定一个项目路径，把所有 Agent 在这个项目里发生过的会话，按时间合并成一条线。
 
+> 许可证：MIT（见 [LICENSE](./LICENSE)）。
+> `research/reference-src/` 下是第三方项目的源码副本（MIT），
+> 版权与许可声明见 [NOTICE.md](./NOTICE.md)。
+
 ## 为什么只做这一件事
 
 跨 Agent 的记忆、蒸馏、交接摘要都建立在"你首先得知道发生过什么"之上。

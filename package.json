@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "跨 Agent 的项目级会话档案馆",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "agent-archive": "./src/cli.js",
