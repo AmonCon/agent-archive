@@ -273,17 +273,57 @@ function reasonText(status) {
 }
 
 /**
- * 需要重算的项目列表。
+ * 快速新鲜度检查（不读会话正文）。
  *
- * 会话摘要是项目摘要的输入，所以要按依赖顺序来：先会话，后项目。
- * 但只要调用 digestProject，它内部就会先处理会话摘要（四元组会自动
- * miss 掉过期的），所以这里只需要返回项目清单。
+ * 网页每次请求都要调，所以不能像 auditDerived 那样读全部会话算哈希
+ * （全量 33 秒）。这里只做三项**零成本**检查：
+ *
+ *   1. 模型是否还是生成它的那个
+ *   2. 提示词版本是否还是生成它的那个
+ *   3. 生成之后这个项目有没有**新增会话**
+ *
+ * 查不了的那项必须说清楚：**会话内容变了但数量没变**（同一场又聊了几轮）
+ * 这个检查发现不了，要准确结果得跑 `agent-archive refresh`。
+ * 宁可承认能力边界，也不要给一个看起来确定、实际会漏的结论。
  */
-export function projectsToRefresh(audit) {
-  const out = [];
-  for (const p of audit.projects) {
-    if (p.status === 'current') continue;
-    out.push(p.project);
+export function quickFreshness({ kind, artifact, projectSessions }) {
+  if (!artifact) return { status: 'none' };
+
+  const cfg = loadConfig();
+  const issues = [];
+
+  if (cfg.model && artifact.model !== cfg.model) {
+    issues.push({ type: 'model-changed', detail: `生成时用的是 ${artifact.model}` });
   }
-  return out;
+
+  if (kind === 'project') {
+    if (artifact.promptVersion !== PROJECT_PROMPT_VERSION) {
+      issues.push({
+        type: 'prompt-changed',
+        detail: `生成时提示词版本 ${artifact.promptVersion}，当前 ${PROJECT_PROMPT_VERSION}`,
+      });
+    }
+  } else if (artifact.promptVersion !== SESSION_PROMPT_VERSION) {
+    issues.push({
+      type: 'prompt-changed',
+      detail: `生成时提示词版本 ${artifact.promptVersion}，当前 ${SESSION_PROMPT_VERSION}`,
+    });
+  }
+
+  // 生成之后有会话新增，说明材料肯定变了
+  if (Array.isArray(projectSessions) && artifact.createdAt) {
+    const t = artifact.createdAt.getTime();
+    const newer = projectSessions.filter((s) => s.start && s.start.getTime() > t).length;
+    if (newer > 0) {
+      issues.push({ type: 'new-sessions', detail: `生成之后新增了 ${newer} 场会话` });
+    }
+  }
+
+  return {
+    status: issues.length ? 'possibly-stale' : 'likely-current',
+    issues,
+    // 让调用方能把"我查过了"和"我查不了"分开说
+    unchecked: ['会话内容有变化但数量没变（同一场又聊了几轮）'],
+    checkedAt: new Date(),
+  };
 }

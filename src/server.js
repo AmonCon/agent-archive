@@ -3,6 +3,7 @@ import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionC
 import { search, indexStats } from './search.js';
 import { timelineMarkdown, sessionMarkdown, bundleMarkdown } from './export.js';
 import { latestProjectDigest, latestSessionSummary } from './digest.js';
+import { quickFreshness } from './refresh.js';
 import { projectKey, durationMs, tildify } from './model.js';
 
 /**
@@ -184,6 +185,20 @@ async function handle(req, res) {
         tokensIn: d.tokensIn,
         tokensOut: d.tokensOut,
         digest: d.text,
+        // 快速新鲜度：只查模型/提示词/新增会话，读不了正文内容的变化。
+        // 调用方要准确结论就去跑 refresh。
+        freshness: (() => {
+          const f = quickFreshness({
+            kind: 'project',
+            artifact: d,
+            projectSessions: projectTimeline(target, {}).sessions,
+          });
+          return {
+            status: f.status,
+            issues: f.issues,
+            unchecked: f.unchecked,
+          };
+        })(),
       });
     }
 
@@ -486,6 +501,68 @@ function inline(s) {
     .replace(/`([^`]+)`/g, '<code>$1</code>');
 }
 
+/**
+ * 项目摘要块。
+ *
+ * 除内容外还带一个「新鲜度」提示。这是必要的：摘要一旦生成就一直显示，
+ * 但会话还在变、模型也会换。不提示的话，用户会把一份半年前的摘要
+ * 当成现在的事实。
+ */
+function renderProjectDigest(dg, sessions, target) {
+  const fresh = quickFreshness({ kind: 'project', artifact: dg, projectSessions: sessions });
+  const badge = renderFreshness(fresh, target);
+
+  return `<details class="digest">
+    <summary>项目摘要 <span class="dim">· ${esc(dg.model)} · ${esc(fmtDate(dg.createdAt))} 生成</span>${badge}</summary>
+    <div class="digest-body">${renderMarkdownLite(dg.text)}</div>
+    <p class="hint">模型生成的视图，不是原始事实。核对细节请点开下面的会话。</p>
+    ${renderFreshnessDetail(fresh, target)}
+  </details>`;
+}
+
+function digestMissingHint(target) {
+  return `<p class="hint">还没有项目摘要。在终端运行
+    <code>agent-archive digest "${esc(target)}"</code> 先看预估成本，
+    确认后加 <code>--run</code> 生成。</p>`;
+}
+
+/** 摘要标题上的小徽标：只有确定有问题时才出现，否则保持安静。 */
+function renderFreshness(fresh, target) {
+  if (!fresh || fresh.status === 'none') return '';
+  if (fresh.status === 'possibly-stale') {
+    return ` <span class="stale-badge">可能已过期</span>`;
+  }
+  return '';
+}
+
+/** 展开后的详细说明。包括"我查不了什么"，这比假装确定更诚实。 */
+function renderFreshnessDetail(fresh, target) {
+  if (!fresh || fresh.status === 'none') return '';
+
+  const rows = [];
+  if (fresh.status === 'possibly-stale') {
+    rows.push(`<p class="stale-head">这份摘要可能已经不准了：</p>`);
+    rows.push(
+      `<ul class="stale-list">${fresh.issues
+        .map((i) => `<li>${esc(i.detail)}</li>`)
+        .join('')}</ul>`
+    );
+  } else {
+    rows.push(`<p class="dim">按目前能查到的信息看，这份摘要是新的。</p>`);
+  }
+
+  // 明确说出没查的那一项，并给出准确的检查方式
+  if (fresh.unchecked && fresh.unchecked.length) {
+    rows.push(
+      `<p class="hint">网页上只做了不花钱的检查（模型、提示词版本、生成后有没有新会话）。` +
+        `${esc(fresh.unchecked[0])}这一项查不了——需要准确结果请运行 ` +
+        `<code>agent-archive refresh --project "${esc(target)}"</code>。</p>`
+    );
+  }
+
+  return rows.join('');
+}
+
 function pageTimeline(target, openAll) {
   if (!target) return pageNotFound('缺少项目路径');
 
@@ -540,15 +617,7 @@ function pageTimeline(target, openAll) {
   // 项目摘要：有就展示，没有就给一句怎么生成。
   // 这是视图层（模型写的），和下面的时间线（事实）分开摆，视觉上也要分开。
   const dg = latestProjectDigest(r.target);
-  const digestHtml = dg
-    ? `<details class="digest">
-         <summary>项目摘要 <span class="dim">· ${esc(dg.model)} · ${esc(fmtDate(dg.createdAt))} 生成</span></summary>
-         <div class="digest-body">${renderMarkdownLite(dg.text)}</div>
-         <p class="hint">模型生成的视图，不是原始事实。核对细节请点开下面的会话。</p>
-       </details>`
-    : `<p class="hint">还没有项目摘要。在终端运行
-       <code>agent-archive digest "${esc(r.target)}"</code> 先看预估成本，
-       确认后加 <code>--run</code> 生成。</p>`;
+  const digestHtml = dg ? renderProjectDigest(dg, r.sessions, r.target) : digestMissingHint(r.target);
 
   return layout(
     tildify(r.target),
@@ -612,11 +681,17 @@ async function pageSession(agent, id) {
   // 会话级摘要：有就折起来放最上面，方便先扫一眼再决定读不读全文
   const ss = latestSessionSummary(session);
   const digestHtml = ss
-    ? `<details class="digest" open>
-         <summary>会话摘要 <span class="dim">· ${esc(ss.model)} · ${esc(fmtDate(ss.createdAt))} 生成</span></summary>
-         <div class="digest-body">${renderMarkdownLite(ss.text)}</div>
-         <p class="hint">模型生成的视图。下面是原始对话，核对细节用下面的。</p>
-       </details>`
+    ? (() => {
+        // 会话摘要的新鲜度只看模型和提示词——单场会话新增内容的判断
+        // 需要重读正文，那是 refresh 的事
+        const fresh = quickFreshness({ kind: 'session', artifact: ss });
+        return `<details class="digest" open>
+          <summary>会话摘要 <span class="dim">· ${esc(ss.model)} · ${esc(fmtDate(ss.createdAt))} 生成</span>${renderFreshness(fresh)}</summary>
+          <div class="digest-body">${renderMarkdownLite(ss.text)}</div>
+          <p class="hint">模型生成的视图。下面是原始对话，核对细节用下面的。</p>
+          ${renderFreshnessDetail(fresh, session.project || '')}
+        </details>`;
+      })()
     : '';
 
   return layout(
@@ -840,6 +915,14 @@ td.dim, .dim { color: var(--dim); }
 .digest-body p { margin: 0 0 8px; }
 .digest-body ul, .digest-body ol { margin: 6px 0 10px; padding-left: 22px; }
 .digest-body li { margin: 3px 0; }
+.stale-badge { display: inline-block; font-size: 11px; color: #8a5a00; background: rgba(255,190,0,.16);
+               border: 1px solid rgba(255,190,0,.4); border-radius: 999px; padding: 0 8px;
+               margin-left: 6px; font-weight: 500; }
+@media (prefers-color-scheme: dark) {
+  .stale-badge { color: #e0b463; background: rgba(255,190,0,.12); border-color: rgba(255,190,0,.3); }
+}
+.stale-head { margin: 8px 0 4px; font-size: 13px; color: var(--fg); font-weight: 500; }
+.stale-list { margin: 0 0 10px; padding-left: 20px; font-size: 13px; color: var(--dim); }
 
 /* 搜索 */
 .search { display: flex; gap: 8px; margin: 0 0 18px; }
