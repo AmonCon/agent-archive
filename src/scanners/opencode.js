@@ -1,14 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
+import { dataCandidates, findUnder } from '../platform.js';
 
 /**
  * OpenCode 会话扫描。
  *
- * 存储：~/.local/share/opencode/opencode.db
+ * 存储（XDG 数据目录，各平台不同）：
+ *   Linux    ~/.local/share/opencode/opencode.db
+ *   Windows  %LOCALAPPDATA%/opencode/opencode.db
+ *   macOS    ~/Library/Application Support/opencode/opencode.db
  *
  * 结构与 ZCode 几乎同源（都是 OpenCode 系），session / message / part
  * 三张表，正文在 part.data 的 JSON 里。区别有两个：
@@ -26,7 +29,11 @@ import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
 export const name = 'opencode';
 
 function dbPath() {
-  return path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
+  // XDG 数据目录：Linux 是 ~/.local/share，Windows 是 %LOCALAPPDATA%，
+  // macOS 多数程序退回 Application Support。候选列表见 platform.js。
+  const found = findUnder(dataCandidates('opencode'), 'opencode.db');
+  if (found) return found;
+  return path.join(dataCandidates('opencode')[0], 'opencode.db');
 }
 
 export function discover() {

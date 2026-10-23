@@ -245,7 +245,18 @@ const COMBINE_PROJECT_PROMPT = `下面是同一个项目的分批摘要。请合
 ---
 `;
 
-export async function digestProject(project, { limit = DEFAULT_SESSION_LIMIT, force = false } = {}) {
+/**
+ * 生成项目摘要。
+ *
+ * force          强制重算项目摘要（忽略项目层的缓存）
+ * forceSessions  强制重算会话摘要；默认跟随 force。
+ *                refresh 场景要 false——会话层靠四元组自动 miss 就够了，
+ *                强制重算会把没变化的会话也重跑一遍，白花钱。
+ */
+export async function digestProject(
+  project,
+  { limit = DEFAULT_SESSION_LIMIT, force = false, forceSessions = force } = {}
+) {
   const r = projectTimeline(project, {});
   const cfg = loadConfig();
 
@@ -266,7 +277,7 @@ export async function digestProject(project, { limit = DEFAULT_SESSION_LIMIT, fo
 
   for (const s of picked) {
     try {
-      const one = await summarizeSession(s, { force });
+      const one = await summarizeSession(s, { force: forceSessions });
       if (!one.cached) cacheMiss++;
       tokensIn += one.tokensIn;
       tokensOut += one.tokensOut;

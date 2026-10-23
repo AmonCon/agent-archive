@@ -51,6 +51,7 @@ function usage() {
   agent-archive secrets                        扫描归档里的明文凭证
   agent-archive llm                            配置模型接入（查看/设置）
   agent-archive digest <项目>                  生成项目摘要（默认只估算）
+  agent-archive refresh                        审计/刷新已过期的摘要
   agent-archive cat [会话]                     读一场会话的正文
   agent-archive index                          建/更新全文索引
   agent-archive search <词>                    全文搜索
@@ -77,7 +78,7 @@ cat 的会话参数:
   --session               导出单场会话（export）
   --bundle                导出项目全部会话（export）
   --out <文件>            写入文件而不是 stdout（export / digest）
-  --run                   真的执行模型调用（digest，默认只估算）
+  --run                   真的执行模型调用（digest / refresh）
   --key <值>              设置 API Key（llm）
   --model <值>            设置模型名（llm）
   --base-url <值>         设置接口地址（llm）
@@ -740,8 +741,10 @@ async function cmdDoctor(opts) {
   );
   console.log('');
 
-  // 采集缺口：有目录但没有 scanner
-  const missing = gaps.filter((g) => g.present && !g.supported);
+  // 采集缺口：有目录但没有 scanner。
+  // 分成两类——"还没做"要行动，"已确认读不了"是结论，不该继续挂在待办里。
+  const missing = gaps.filter((g) => g.present && !g.supported && !g.blocked);
+  const blocked = gaps.filter((g) => g.present && !g.supported && g.blocked);
   const unused = gaps.filter((g) => g.present && g.supported);
 
   console.log(c(C.bold, '存储位置'));
@@ -749,6 +752,12 @@ async function cmdDoctor(opts) {
     console.log(c(C.warn, `  ✗ ${missing.length} 个 Agent 有数据但还没接入：`));
     for (const g of missing) {
       console.log(`     ${g.name.padEnd(14)} ${c(C.dim, g.hits[0].path)}`);
+    }
+  }
+  if (blocked.length) {
+    console.log(c(C.dim, `  · 已调研、确认读不了 ${blocked.length} 个：`));
+    for (const g of blocked) {
+      console.log(c(C.dim, `     ${g.name.padEnd(14)} ${g.blocked}`));
     }
   }
   if (unused.length) {
@@ -1052,6 +1061,181 @@ function fmtNum(n) {
   return v >= 1000 ? (v / 1000).toFixed(1) + 'k' : String(v);
 }
 
+/**
+ * 增量刷新已有的派生数据。
+ *
+ * 默认只审计：哪些过期了、为什么、大概要花多少。加 --run 才真的重算。
+ *
+ * 一个刻意的边界：**只刷新已经存在的摘要，不给没有摘要的项目新建**。
+ * 否则一条 refresh 命令可能悄悄花掉一大笔，而用户以为只是"更新一下"。
+ */
+async function cmdRefresh(opts) {
+  const { auditDerived } = await import('./refresh.js');
+  const { summarizeSession, digestProject } = await import('./digest.js');
+  const { scanAll } = await import('./registry.js');
+  const { loadConfig } = await import('./llm.js');
+
+  const cfg = loadConfig();
+  const project = opts.project;
+  const limit = opts.limit ? Number(opts.limit) : 60;
+
+  const audit = await auditDerived({ project, limit });
+
+  if (opts.json && !opts.flags.has('--run')) {
+    console.log(JSON.stringify({ dryRun: true, ...audit }, null, 2));
+    return;
+  }
+
+  const staleSessions = audit.sessions.filter((r) => r.status !== 'current');
+  const staleProjects = audit.projects.filter((r) => r.status !== 'current');
+
+  if (!opts.flags.has('--run')) {
+    console.log(c(C.bold, '派生数据审计'));
+    console.log(
+      c(
+        C.dim,
+        `  模型 ${audit.model} · 提示词 ${audit.promptVersions.session}/${audit.promptVersions.project}`
+      )
+    );
+    console.log('');
+    console.log(
+      `  会话摘要  ${audit.summary.sessions.current}/${audit.summary.sessions.total} 最新` +
+        (staleSessions.length ? c(C.when, `，${staleSessions.length} 份过期`) : '')
+    );
+    console.log(
+      `  项目摘要  ${audit.summary.projects.current}/${audit.summary.projects.total} 最新` +
+        (staleProjects.length ? c(C.when, `，${staleProjects.length} 份过期`) : '')
+    );
+
+    // 按原因汇总，处置方式不同，所以要分开列
+    const byReason = new Map();
+    for (const r of [...staleSessions, ...staleProjects]) {
+      byReason.set(r.status, (byReason.get(r.status) || 0) + 1);
+    }
+    if (byReason.size) {
+      console.log('');
+      console.log(c(C.bold, '过期原因'));
+      for (const [st, n] of byReason) {
+        console.log(`  ${reasonLabel(st).padEnd(16)} ${n}`);
+      }
+    }
+
+    if (!staleSessions.length && !staleProjects.length) {
+      console.log('');
+      console.log(c(C.ok, '全部是最新的') + c(C.dim, '，不需要重算。'));
+      return;
+    }
+
+    console.log('');
+    console.log(
+      c(C.dim, `预估输入约 ${fmtNum(audit.summary.estTokensIn)} token · 输出约 ${fmtNum(audit.summary.estTokensOut)} token`)
+    );
+    console.log('');
+    console.log(c(C.when, '这是审计，没有调用任何模型。') + '确认后加 ' + c(C.bold, '--run') + '：');
+    console.log(c(C.dim, '  agent-archive refresh --run' + (project ? ` --project "${project}"` : '')));
+    return;
+  }
+
+  if (!cfg.apiKey || !cfg.model) {
+    console.error(c(C.warn, '重算需要先配置模型。'));
+    process.exit(2);
+  }
+
+  if (!staleSessions.length && !staleProjects.length) {
+    console.log(c(C.ok, '全部是最新的') + c(C.dim, '，没有需要重算的。'));
+    return;
+  }
+
+  // 有项目摘要要重算的项目，其会话摘要会被 digestProject 一并处理，不必重复做
+  const covered = new Set(staleProjects.map((p) => p.project));
+  const sessionsByKey = new Map();
+  for (const s of scanAll({}).sessions) sessionsByKey.set(`${s.agent}|${s.id}`, s);
+
+  let doneSessions = 0;
+  let doneProjects = 0;
+  let tokensIn = 0;
+  let tokensOut = 0;
+  const failures = [];
+
+  const showProgress = process.stderr.isTTY;
+  let idx = 0;
+  const total = staleSessions.length + staleProjects.length;
+
+  for (const row of staleSessions) {
+    idx++;
+    const key = projectKeyForRow(row);
+    if (key && covered.has(key)) continue; // 交给项目摘要那一轮
+
+    const s = sessionsByKey.get(`${row.agent}|${row.id}`);
+    if (!s) continue;
+    try {
+      const r = await summarizeSession(s, { force: true });
+      tokensIn += r.tokensIn;
+      tokensOut += r.tokensOut;
+      doneSessions++;
+    } catch (e) {
+      failures.push(`${row.agent}|${row.id.slice(0, 12)}: ${e && e.message ? e.message : e}`);
+    }
+    if (showProgress) process.stderr.write(`\r  重算 ${idx}/${total}  `);
+  }
+
+  for (const p of staleProjects) {
+    idx++;
+    try {
+      const r = await digestProject(p.project, { limit, force: true, forceSessions: false });
+      tokensIn += r.tokensIn || 0;
+      tokensOut += r.tokensOut || 0;
+      doneProjects++;
+      for (const f of r.failures || []) failures.push(`${f.id.slice(0, 12)}: ${f.error}`);
+    } catch (e) {
+      failures.push(`${p.project}: ${e && e.message ? e.message : e}`);
+    }
+    if (showProgress) process.stderr.write(`\r  重算 ${idx}/${total}  `);
+  }
+  if (showProgress) process.stderr.write(' '.repeat(24) + '\r');
+
+  if (opts.json) {
+    console.log(JSON.stringify({ refreshed: { sessions: doneSessions, projects: doneProjects }, tokensIn, tokensOut, failures }, null, 2));
+    return;
+  }
+
+  console.log(c(C.ok, '刷新完成'));
+  console.log(`  会话摘要  ${doneSessions} 份`);
+  console.log(`  项目摘要  ${doneProjects} 份`);
+  console.log(c(C.dim, `  ${fmtNum(tokensIn)} in / ${fmtNum(tokensOut)} out`));
+  if (failures.length) {
+    console.log(c(C.when, `  ${failures.length} 项失败`));
+    for (const f of failures.slice(0, 5)) console.log(c(C.dim, `    ${f}`));
+  }
+}
+
+/** 从审计行里取项目键（会话行里存的是原始路径）。 */
+function projectKeyForRow(row) {
+  if (!row.project) return null;
+  return String(row.project).replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
+}
+
+function reasonLabel(status) {
+  switch (status) {
+    case 'source-changed':
+      return '内容变了';
+    case 'model-changed':
+      return '模型换了';
+    case 'prompt-changed':
+      return '提示词改过';
+    case 'dependency-stale':
+      return '依赖的摘要过期';
+    case 'missing-dependency':
+      return '缺会话摘要';
+    case 'orphan':
+      return '源数据已不在';
+    case 'unreadable':
+      return '正文读不出';
+    default:
+      return status;
+  }
+}
+
 async function cmdStats(opts) {
   const { projects, stats, totalSessions } = listProjects({ noCache: opts.noCache });
   if (opts.json) {
@@ -1187,6 +1371,8 @@ async function main() {
     case 'digest':
     case 'summarize':
       return cmdDigest(first, opts);
+    case 'refresh':
+      return cmdRefresh(opts);
     case 'serve':
     case 'web':
       return cmdServe(opts);

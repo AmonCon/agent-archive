@@ -1,16 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
+import { userDataCandidates, findUnder } from '../platform.js';
 
 /**
  * Cursor 会话扫描。
  *
- * 存储：<APPDATA>/Cursor/User/globalStorage/state.vscdb（VSCode 的 SQLite 键值库）
+ * 存储（各平台位置不同，由 platform.userDataCandidates 统一处理）：
+ *   Windows  %APPDATA%/Cursor/User/globalStorage/state.vscdb
+ *   macOS    ~/Library/Application Support/Cursor/User/globalStorage/state.vscdb
+ *   Linux    ~/.config/Cursor/User/globalStorage/state.vscdb
  *
- * 两张关键表/键：
+ * 这是个 VSCode 的 SQLite 键值库，两张关键表/键：
  *   composerHeaders     一场会话一行（composerId, createdAt, isArchived, isSubagent）
  *   cursorDiskKV        composerData:<id>  会话元信息（名字、消息顺序）
  *                       bubbleId:<id>:<bid> 单条消息
@@ -29,9 +32,14 @@ import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
 
 export const name = 'cursor';
 
+const DB_REL = 'User/globalStorage/state.vscdb';
+
 function dbPath() {
-  const base = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
-  return path.join(base, 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  // 先找真实存在的；都没有就用当前平台的标准位置（便于报错信息可读）
+  const found = findUnder(userDataCandidates('Cursor'), DB_REL);
+  if (found) return found;
+  const first = userDataCandidates('Cursor')[0];
+  return path.join(first, 'User', 'globalStorage', 'state.vscdb');
 }
 
 export function discover() {
