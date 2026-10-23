@@ -7,7 +7,13 @@ import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../
 /**
  * Qoder 会话扫描。
  *
- * 存储：~/.qoder/cache/projects/<项目名>-<hash>/conversation-history/<id>/<id>.jsonl
+ * 存储（按应用变体分多个目录）：
+ *   ~/.qoder/cache/projects/<项目名>-<hash>/conversation-history/<id>/<id>.jsonl
+ *   ~/.qoder-cn/cache/projects/…      国际版 / 中国版是两套独立安装
+ *   macOS 上还可能在 ~/Library/Application Support/ 下的 Qoder 变体目录
+ *
+ * **实测教训**：本机同时装了 `.qoder` 和 `.qoder-cn`，前者 7 场、
+ * 后者 12 场。只读 `.qoder` 会漏掉一半。所以这里遍历所有变体目录。
  *
  * 格式极简：一行一个 {role, message:{content:[{type,text}]}}。
  * 与 Claude Code 相似，但**没有时间戳、没有 cwd**——这是它最大的短板：
@@ -21,36 +27,64 @@ import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../
 
 export const name = 'qoder';
 
+/** 所有可能的 Qoder 数据根目录（已存在的）。 */
+function cacheRoots() {
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, '.qoder', 'cache', 'projects'),
+    path.join(home, '.qoder-cn', 'cache', 'projects'),
+    path.join(home, 'Library', 'Application Support', 'Qoder', 'cache', 'projects'),
+    path.join(home, 'Library', 'Application Support', 'QoderCN', 'cache', 'projects'),
+    path.join(home, 'Library', 'Application Support', 'Qoder CN', 'cache', 'projects'),
+    path.join(home, 'Library', 'Application Support', 'QoderWork', 'cache', 'projects'),
+    path.join(home, 'Library', 'Application Support', 'com.qoder.app.stable', 'cache', 'projects'),
+    path.join(home, 'Library', 'Application Support', 'com.qodercn.app.stable', 'cache', 'projects'),
+    path.join(home, '.config', 'Qoder', 'cache', 'projects'),
+  ];
+
+  const out = [];
+  for (const c of candidates) {
+    try {
+      if (fs.statSync(c).isDirectory()) out.push(c);
+    } catch {
+      /* 不存在 */
+    }
+  }
+  return out;
+}
+
+/** 兼容旧调用：返回第一个存在的根目录。 */
 function cacheRoot() {
-  return path.join(os.homedir(), '.qoder', 'cache', 'projects');
+  return cacheRoots()[0] || path.join(os.homedir(), '.qoder', 'cache', 'projects');
 }
 
 export function discover() {
-  const root = cacheRoot();
   const out = [];
-  let projects;
-  try {
-    projects = fs.readdirSync(root, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-
-  for (const p of projects) {
-    if (!p.isDirectory()) continue;
-    const history = path.join(root, p.name, 'conversation-history');
-    let convs;
+  for (const root of cacheRoots()) {
+    let projects;
     try {
-      convs = fs.readdirSync(history, { withFileTypes: true });
+      projects = fs.readdirSync(root, { withFileTypes: true });
     } catch {
       continue;
     }
-    for (const c of convs) {
-      if (!c.isDirectory()) continue;
-      const file = path.join(history, c.name, `${c.name}.jsonl`);
+
+    for (const p of projects) {
+      if (!p.isDirectory()) continue;
+      const history = path.join(root, p.name, 'conversation-history');
+      let convs;
       try {
-        if (fs.statSync(file).isFile()) out.push(file);
+        convs = fs.readdirSync(history, { withFileTypes: true });
       } catch {
-        /* 目录存在但 jsonl 不在，跳过 */
+        continue;
+      }
+      for (const c of convs) {
+        if (!c.isDirectory()) continue;
+        const file = path.join(history, c.name, `${c.name}.jsonl`);
+        try {
+          if (fs.statSync(file).isFile()) out.push(file);
+        } catch {
+          /* 目录存在但 jsonl 不在，跳过 */
+        }
       }
     }
   }
@@ -175,12 +209,30 @@ export function stripQoderContext(text) {
 /**
  * 读一场会话的完整正文。
  *
- * Qoder 的 part 类型只有 text 见过（tool 调用记录在 agent-tools/*.txt 里，
- * 是给人看的纯文本，不是结构化数据），所以这里主要处理 text。
- * 遇到别的类型就跳过，不猜。
+ * 越界校验要对**所有**根目录逐个试：会话可能来自 .qoder，也可能来自
+ * .qoder-cn，事先不知道是哪个。全部都不匹配才抛错——这里不做"第一个
+ * 根目录"的假设，否则中国版的会话会被拒绝读取。
+ *
+ * part 类型只见过 text（tool 调用记录在 agent-tools/*.txt 里，是给人看的
+ * 纯文本，不是结构化数据），所以主要处理 text，遇到别的类型跳过、不猜。
  */
 export function readMessages(session) {
-  const real = assertUnder(cacheRoot(), session.source);
+  const roots = cacheRoots();
+  if (!roots.length) throw new Error('没有找到 Qoder 数据目录');
+
+  let real = null;
+  let lastErr = null;
+  for (const root of roots) {
+    try {
+      real = assertUnder(root, session.source);
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!real) {
+    throw lastErr || new Error(`拒绝读取根目录之外的路径: ${session.source}`);
+  }
   const text = fs.readFileSync(real, 'utf8');
   const out = [];
 
