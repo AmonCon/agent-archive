@@ -92,13 +92,26 @@ export function isProjectPath(p) {
   // 家目录本身
   if (low === home) return false;
 
-  // 家目录下这些是"临时落脚点"，不是项目
+  // 家目录下这些是"临时落脚点"，不是项目。
+  // 名单同时涵盖 Windows 和 macOS 的系统目录——不认识的那些在别的平台
+  // 上匹配不到，留着无害。
   const transient = [
+    // Windows
     'desktop',
     'documents',
     'downloads',
     'onedrive',
     'appdata',
+    // macOS：~/Library 里存的是应用数据（含 Application Support），不是项目
+    'library',
+    'applications',
+    'movies',
+    'music',
+    'pictures',
+    'public',
+    // Linux 桌面
+    'snap',
+    // 各 Agent 的临时工作区
     '.codex/worktrees',
     '.zcode/workspace',
     'documents/codex',

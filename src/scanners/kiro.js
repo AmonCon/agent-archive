@@ -1,13 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, assertUnder } from '../messages.js';
+import { userDataCandidates, findUnder } from '../platform.js';
 
 /**
  * Kiro 会话扫描。
  *
- * 存储：%APPDATA%/Kiro/User/globalStorage/kiro.kiroagent/
+ * 存储（各平台位置由 platform.userDataCandidates 处理）：
+ *   Windows  %APPDATA%/Kiro/User/globalStorage/kiro.kiroagent/
+ *   macOS    ~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent/
+ *   Linux    ~/.config/Kiro/User/globalStorage/kiro.kiroagent/
  *
  *   sessions/sessions.json              全局会话索引
  *   sessions/<id>.json                  单场会话
@@ -25,9 +28,12 @@ import { makeMessage, textPart, toolPart, assertUnder } from '../messages.js';
 
 export const name = 'kiro';
 
+const AGENT_REL = 'User/globalStorage/kiro.kiroagent';
+
 function agentRoot() {
-  const base = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
-  return path.join(base, 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent');
+  const found = findUnder(userDataCandidates('Kiro'), AGENT_REL);
+  if (found) return found;
+  return path.join(userDataCandidates('Kiro')[0], 'User', 'globalStorage', 'kiro.kiroagent');
 }
 
 export function discover() {

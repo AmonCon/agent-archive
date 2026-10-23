@@ -187,6 +187,20 @@ export function latestArtifact({ kind, subject }) {
   }
 }
 
+const SQL_DELETE = `delete from artifact where kind = ? and subject = ?`;
+
+/** 删掉某个主题下的衍生数据（所有模型/版本）。 */
+export function removeArtifact({ kind, subject }) {
+  const db = open({ create: false });
+  if (!db) return 0;
+  try {
+    const r = db.prepare(SQL_DELETE).run(kind, subject);
+    return Number(r && r.changes) || 0;
+  } finally {
+    db.close();
+  }
+}
+
 const SQL_STATS = `select kind, model, prompt_version, count(*) c, sum(tokens_in) ti, sum(tokens_out) tout
                    from artifact group by kind, model, prompt_version`;
 

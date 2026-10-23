@@ -74,7 +74,14 @@ export function assertUnder(root, target) {
   const r = realpathLoose(root);
   const t = realpathLoose(target);
   if (!r || !t) throw new Error(`路径不可访问: ${target}`);
-  if (t !== r && !t.toLowerCase().startsWith(r.toLowerCase() + path.sep)) {
+
+  // 大小写敏感性跟随文件系统：Windows/macOS 默认不敏感，Linux 敏感。
+  // 在 Linux 上忽略大小写会让 /a/Foo 通过 /a/foo 的校验，那是个真实的绕过口子。
+  const fold = process.platform === 'win32' || process.platform === 'darwin' ? (s) => s.toLowerCase() : (s) => s;
+  const rr = fold(r);
+  const tt = fold(t);
+
+  if (tt !== rr && !tt.startsWith(rr + path.sep)) {
     throw new Error(`拒绝读取根目录之外的路径: ${target}`);
   }
   return t;

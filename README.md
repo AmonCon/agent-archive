@@ -52,6 +52,10 @@ node src/cli.js llm --key sk-xxx --model deepseek-chat --base-url https://api.de
 node src/cli.js digest E:\my-app
 node src/cli.js digest E:\my-app --run --out digest.md
 
+# 审计/刷新已过期的摘要（默认只审计，加 --run 才重算）
+node src/cli.js refresh
+node src/cli.js refresh --run
+
 # 建全文索引（第一次约一分钟，之后只处理变过的会话）
 node src/cli.js index
 node src/cli.js index --force             # 全部重建
@@ -160,16 +164,29 @@ node src/cli.js mcp --json   # 只要配置 JSON
 **零依赖实现。** MCP 的 stdio 传输就是「stdin/stdout 上一行一条
 JSON-RPC」，手写足够，不需要引入任何 npm 包。
 
-### 六个工具
+### 八个工具
 
 | 工具 | 作用 |
 |---|---|
 | `list_projects` | 有哪些项目、多少会话、哪些 Agent |
 | `project_timeline` | 某项目的会话清单（只有元数据） |
 | `search_sessions` | 全文搜索，返回命中处摘录 |
+| `read_digest` | 读**已生成**的项目摘要；没有就提示怎么生成，不现编 |
+| `read_session_summary` | 读某场会话已有的摘要，用来判断值不值得深挖 |
 | `read_session` | 读正文，**分段**，默认 8000 字 |
-| `session_stats` | 采集质量与索引规模 |
+| `session_stats` | 采集质量、索引规模、已有摘要数量 |
 | `export_timeline` | 导出 Markdown |
+
+`read_digest` 和 `read_session_summary` 是视图层的入口。它们**只读已有的
+摘要，不会替你调模型**——生成要花钱，必须由用户在终端显式执行。
+推荐给 Agent 的调用顺序也写在 `initialize` 的 instructions 里：
+
+```
+list_projects → read_digest（有现成交接材料吗）→
+  没有就 search_sessions / project_timeline 定位 → read_session 读正文
+```
+
+翻 984 场会话的成本，因此可以降一个数量级。
 
 ### 为什么要默认截断
 
@@ -291,6 +308,37 @@ node src/cli.js digest E:\my-app --limit 20 --run --out digest.md
 API key、客户信息、内部 URL，上传即不可撤销。（这不是假设：
 `secrets` 命令在本机 960 场会话里扫出了 14 条真实凭证。）
 
+### 增量刷新：`refresh`
+
+```bash
+node src/cli.js refresh            # 审计：哪些过期了、为什么、要花多少
+node src/cli.js refresh --run      # 真的重算
+node src/cli.js refresh --project E:\my-app
+```
+
+四元组缓存本来就让"变了才重算"成立——换模型、改提示词、会话追加内容，
+键自然 miss。所以 `refresh` **不负责重算逻辑**，它解决的是另一个问题：
+**花钱之前看得见哪些过期了**。
+
+之前只能对整个项目盲跑 `digest --run`，跑完才知道花了多少。项目一多就
+变成"不知道要不要跑、跑了也不知道值不值"。
+
+过期原因分五类，处置方式完全不同：
+
+| 原因 | 含义 | 该不该重算 |
+|---|---|---|
+| `current` | 四元组全对得上 | 不用 |
+| `source-changed` | 会话有新内容 | 应该 |
+| `model-changed` | 换了模型 | 想用新模型口径才重算 |
+| `prompt-changed` | 提示词改过 | 确认改进过才重算 |
+| `dependency-stale` | 本项目里有会话摘要过期 | 跟着重算 |
+| `orphan` | 源会话已不在 | 可以清掉 |
+
+一个刻意的边界：**只刷新已经存在的摘要，不给没有摘要的项目新建**。
+否则一条 `refresh` 命令可能悄悄花掉一大笔，而用户以为只是"更新一下"。
+
+审计本身一次模型都不调用——它只读本地缓存、重算哈希、比对四元组。
+
 ## 本地网页查看器
 
 `serve` 起一个**只读**的本地服务，同一个进程同时提供页面和 JSON：
@@ -305,7 +353,16 @@ API key、客户信息、内部 URL，上传即不可撤销。（这不是假设
 | `/api/timeline?path=` | 时间线 |
 | `/api/agents?path=` | 各 Agent 分布 |
 | `/api/search?q=&agent=&project=&limit=` | 搜索结果 |
+| `/api/digest?path=` | 项目摘要（如果有） |
 | `/api/session?agent=&id=&message=` | 会话正文，`message` 取单条 |
+
+项目页顶部会展示已生成的摘要（折叠块），会话页顶部展示会话摘要。
+摘要是**视图层**，和下面的时间线（事实层）在视觉上分开摆——
+点开摘要旁边永远有一句「模型生成的视图，核对细节请点开下面的会话」。
+
+摘要用极简的 Markdown 渲染（标题/列表/加粗/行内代码，约 40 行），
+先整体转义再套标签，所以摘要里即使混进 HTML 也不会执行。
+为了这点需求引入一个 markdown 解析器不值得。
 
 三个硬约束：
 
@@ -407,6 +464,52 @@ node src/cli.js doctor
 
 所以"待办"里只列真的该修的东西，不会长期挂着已经查清的正常项。
 
+## 跨平台
+
+各 Agent 的存储位置在不同系统上遵循不同约定，`src/platform.js` 统一处理：
+
+| 类型 | Windows | macOS | Linux |
+|---|---|---|---|
+| VS Code 系应用数据 | `%APPDATA%\<App>` | `~/Library/Application Support/<App>` | `~/.config/<App>` |
+| XDG 数据目录 | `%LOCALAPPDATA%\<app>` | 多为 Application Support | `~/.local/share/<app>` |
+| 家目录点目录 | `~/.claude` 等，三平台一致 | 同左 | 同左 |
+
+受影响的是 **Cursor / Kiro / Copilot Chat / OpenCode** 四家；
+Claude Code、Codex、ZCode、Qoder、Hermes、Antigravity 都用家目录点目录，
+本来就跨平台。
+
+实现上**不用 `process.platform` 硬分支选路径**，而是给出候选列表、
+按顺序挑第一个真实存在的。这样换机、跨平台拷贝备份、或者某个应用
+在某平台上没按约定写盘时，都能命中而不是静默失败。
+
+`isProjectPath` 的临时目录名单同时涵盖 Windows（Desktop/Documents/
+AppData）和 macOS（Library/Applications/Movies…）的系统目录；
+`assertUnder` 的大小写比较跟随文件系统——Windows/macOS 忽略大小写，
+Linux 严格区分（在 Linux 上忽略大小写是个真实的绕过口子）。
+
+> **验证状态**：Windows 上 10 家 Agent 全部实测通过。macOS 与 Linux 的
+> 路径约定已实现，但**没有在真机上跑过**——只有 `check-platform.mjs`
+> 用模拟平台值验证了"给定平台，选出的路径形状是对的"。真机首次运行时
+> 请先跑 `node src/cli.js doctor` 看存储位置那一节。
+
+## 为何只有 10 家
+
+本机装了 13 个 Agent，其中三个**确认读不了**，`doctor` 会把它们单独列成
+「已调研、确认读不了」而不是待办：
+
+| Agent | 结论 | 证据 |
+|---|---|---|
+| Trae | 会话库加密 | `ModularData/ai-chat/database.db` 熵 7.999 bits/byte，无 `SQLite format 3` 头，是 SQLCipher 或类似加密 |
+| Windsurf | 会话文件加密 | `.codeium/windsurf/cascade/*.pb` 熵 7.998，无 protobuf 可读结构，`database/` 为空 |
+| Cline | 本机无数据 | 所有库 0 行，`-wal` 的几十 KB 全是建表 schema 页，扩展本身也没装 |
+
+**不去破解加密。** 那既不可靠，也会产出错误内容。`doctor` 把「还没做」
+和「做不了」分开报，待办里只留前者——否则清单永远挂着几个不可能完成项。
+
+Antigravity 是中间态：21 场里 3 场有明文 `transcript_full.jsonl`，
+另 18 场是加密 `.pb`。所以它的元数据能搜、正文只能读 3 场，
+`readMessages` 会直接抛错说明原因，`doctor` 的正文抽样如实报 1/3。
+
 ## 设计要点
 
 **统一模型**（`src/model.js`）：所有 scanner 产出
@@ -461,8 +564,7 @@ export function readMessages(session) { /* 返回统一消息数组 */ }
 
 ## 下一步（还没做）
 
-- 摘要可视化：把 `digest` 的结果显示在网页上，按项目缓存
-- MCP 增加 `read_digest` 工具，让 Agent 先读摘要再决定深挖哪场会话
-- 更多 Agent：Windsurf、Trae —— Cline 已确认无数据（库全空 + 扩展未装）
+- 网页上显示摘要的生成时间与模型，并给出「该重算了」的提示（现在只显示已有摘要）
+- 真机验证 macOS / Linux 的路径解析（见「跨平台」一节的说明）
 
 只有等这个档案馆在你手上真正用起来之后，才值得往上加蒸馏和交接摘要。

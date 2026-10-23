@@ -16,9 +16,12 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { scanAll, scanners } from './registry.js';
 import { readSessionContent } from './query.js';
 import { projectKey, isProjectPath } from './model.js';
+import { userDataCandidates, dataCandidates, candidatesWith } from './platform.js';
 
 /** 各 Agent 的存储根目录是否存在于本机。 */
 export function detectAgents() {
@@ -194,58 +197,96 @@ function pickSpread(list, n) {
  * 有目录却没有对应 scanner，就是明确的采集缺口。
  */
 export function detectGaps() {
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  const appData = process.env.APPDATA || '';
-  const localAppData = process.env.LOCALAPPDATA || '';
+  const home = os.homedir();
+
+  // 两个路径来源：应用数据目录（VS Code 系，各平台不同）用候选列表探，
+  // 家目录点文件（~/.claude 之类）在各平台一致，直接用。
+  const appPaths = (appName, rel) => candidatesWith(userDataCandidates(appName), rel);
+  const dataPaths = (appName, rel) => candidatesWith(dataCandidates(appName), rel);
+  const homePath = (rel) => path.join(home, ...rel.split('/'));
 
   const candidates = [
     {
       name: 'Cursor',
       agent: 'cursor',
-      paths: [
-        { p: appData + '\\Cursor\\User\\globalStorage\\state.vscdb', kind: 'vscdb' },
-      ],
+      paths: appPaths('Cursor', 'User/globalStorage/state.vscdb').map((p) => ({ p, kind: 'vscdb' })),
     },
-    { name: 'Windsurf', agent: 'windsurf', paths: [{ p: home + '\\.codeium\\windsurf', kind: 'dir' }] },
+    {
+      name: 'Windsurf',
+      agent: 'windsurf',
+      paths: [{ p: homePath('.codeium/windsurf/cascade'), kind: 'dir' }],
+      // 实测 2026-10：cascade/*.pb 熵 7.998 bits/byte，无 protobuf 可读结构，
+      // 是加密或压缩后的不透明格式。database/ 是空目录。
+      blocked: '会话文件是加密的 .pb（熵 7.998）',
+    },
     {
       name: 'Trae',
       agent: 'trae',
-      paths: [{ p: appData + '\\Trae\\User\\globalStorage\\state.vscdb', kind: 'vscdb' }],
+      paths: [
+        ...appPaths('Trae', 'User/globalStorage/state.vscdb').map((p) => ({ p, kind: 'vscdb' })),
+        {
+          p: path.join(appDataRoaming(), 'Trae', 'ModularData', 'ai-chat', 'database.db'),
+          kind: 'sqlite',
+        },
+      ],
+      // state.vscdb 里只有 localAgentData（自定义 Agent 的提示词配置），
+      // 真正的会话在 ModularData/ai-chat/database.db，实测熵 7.999、
+      // 无 "SQLite format 3" 头——是 SQLCipher 或类似加密。
+      blocked: '会话库是加密的（熵 7.999，非明文 SQLite）',
     },
     {
       name: 'Kiro',
       agent: 'kiro',
-      paths: [{ p: appData + '\\Kiro\\User\\globalStorage\\kiro.kiroagent', kind: 'dir' }],
+      paths: appPaths('Kiro', 'User/globalStorage/kiro.kiroagent').map((p) => ({ p, kind: 'dir' })),
     },
     {
       name: 'Copilot Chat',
       agent: 'copilot',
-      paths: [{ p: appData + '\\Code\\User\\workspaceStorage', kind: 'dir' }],
+      paths: appPaths('Code', 'User/workspaceStorage').map((p) => ({ p, kind: 'dir' })),
     },
     {
       name: 'Cline',
       agent: 'cline',
-      paths: [{ p: home + '\\.cline\\data\\db\\sessions.db', kind: 'sqlite' }],
+      paths: [{ p: homePath('.cline/data/db/sessions.db'), kind: 'sqlite' }],
+      // 实测 2026-10：所有库 0 行，-wal 的几十 KB 全是建表 schema 页，
+      // 扩展本身也没装。不是"没找到"，是确实没有对话数据。
+      blocked: '本机无数据（库全空，扩展未安装）',
     },
     {
       name: 'OpenCode',
       agent: 'opencode',
-      paths: [{ p: home + '\\.local\\share\\opencode\\opencode.db', kind: 'sqlite' }],
+      paths: dataPaths('opencode', 'opencode.db').map((p) => ({ p, kind: 'sqlite' })),
     },
     {
       name: 'Antigravity',
       agent: 'antigravity',
-      paths: [{ p: home + '\\.gemini\\antigravity\\conversation_summaries.db', kind: 'sqlite' }],
+      paths: [{ p: homePath('.gemini/antigravity/conversation_summaries.db'), kind: 'sqlite' }],
     },
-    { name: 'Qoder', agent: 'qoder', paths: [{ p: home + '\\.qoder\\cache\\projects', kind: 'dir' }] },
-    { name: 'Hermes', agent: 'hermes', paths: [{ p: home + '\\.hermes\\sessions', kind: 'dir' }] },
+    {
+      name: 'Qoder',
+      agent: 'qoder',
+      paths: [{ p: homePath('.qoder/cache/projects'), kind: 'dir' }],
+    },
+    {
+      name: 'Hermes',
+      agent: 'hermes',
+      paths: [{ p: homePath('.hermes/sessions'), kind: 'dir' }],
+    },
     {
       name: 'Claude Code',
       agent: 'claude-code',
-      paths: [{ p: home + '\\.claude\\projects', kind: 'dir' }],
+      paths: [{ p: homePath('.claude/projects'), kind: 'dir' }],
     },
-    { name: 'Codex', agent: 'codex', paths: [{ p: home + '\\.codex\\sessions', kind: 'dir' }] },
-    { name: 'ZCode', agent: 'zcode', paths: [{ p: home + '\\.zcode\\cli\\db', kind: 'dir' }] },
+    {
+      name: 'Codex',
+      agent: 'codex',
+      paths: [{ p: homePath('.codex/sessions'), kind: 'dir' }],
+    },
+    {
+      name: 'ZCode',
+      agent: 'zcode',
+      paths: [{ p: homePath('.zcode/cli/db'), kind: 'dir' }],
+    },
   ];
 
   const known = new Set(scanners.map((s) => s.name));
@@ -268,11 +309,19 @@ export function detectGaps() {
       agent: c.agent,
       present: hits.length > 0,
       supported: known.has(c.agent),
+      // 已调研过、确认读不了的（加密格式），与"还没做"要分开报，
+      // 否则待办里永远挂着几个做不了的项目
+      blocked: c.blocked || null,
       hits,
     });
   }
 
   return out;
+}
+
+function appDataRoaming() {
+  const home = os.homedir();
+  return process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
 }
 
 export { projectKey };

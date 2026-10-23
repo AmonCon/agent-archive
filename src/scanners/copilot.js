@@ -1,13 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { makeSession } from '../model.js';
-import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
+import { makeMessage, textPart, toolPart, assertUnder } from '../messages.js';
+import { userDataCandidates, findUnder } from '../platform.js';
 
 /**
  * GitHub Copilot Chat 会话扫描。
  *
- * 存储：%APPDATA%/Code/User/workspaceStorage/<hash>/chatSessions/*.json
+ * 存储（VS Code 的用户数据目录，各平台不同）：
+ *   Windows  %APPDATA%/Code/User/workspaceStorage/<hash>/chatSessions/*.json
+ *   macOS    ~/Library/Application Support/Code/User/workspaceStorage/...
+ *   Linux    ~/.config/Code/User/workspaceStorage/...
  *
  * 会话按工作区目录散放，每个 workspaceStorage/<hash>/ 对应一个工作区，
  * 路径写在同级的 workspace.json 的 folder 字段（file:///e%3A/my-app）。
@@ -27,9 +30,12 @@ import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../
 
 export const name = 'copilot';
 
+const WS_REL = 'User/workspaceStorage';
+
 function workspaceRoot() {
-  const base = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
-  return path.join(base, 'Code', 'User', 'workspaceStorage');
+  const found = findUnder(userDataCandidates('Code'), WS_REL);
+  if (found) return found;
+  return path.join(userDataCandidates('Code')[0], 'User', 'workspaceStorage');
 }
 
 export function discover() {
@@ -247,5 +253,3 @@ export function readMessages(session) {
 
   return out;
 }
-
-export { reasoningPart };
