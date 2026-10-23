@@ -3,7 +3,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
-import { userDataCandidates, findUnder } from '../platform.js';
+import { editorDataCandidates, findUnder } from '../platform.js';
 
 /**
  * Cursor 会话扫描。
@@ -34,12 +34,22 @@ export const name = 'cursor';
 
 const DB_REL = 'User/globalStorage/state.vscdb';
 
+/**
+ * Cursor 的产品目录名。
+ *
+ * macOS 上是 "Cursor"，但用户也可能装的是预发布版或其他分发渠道，
+ * 目录名会不同。按候选顺序找。
+ */
+const CURSOR_APPS = ['Cursor', 'Cursor - Insiders', 'Cursor Nightly'];
+
+function cursorRoots() {
+  return editorDataCandidates(CURSOR_APPS);
+}
+
 function dbPath() {
-  // 先找真实存在的；都没有就用当前平台的标准位置（便于报错信息可读）
-  const found = findUnder(userDataCandidates('Cursor'), DB_REL);
+  const found = findUnder(cursorRoots(), DB_REL);
   if (found) return found;
-  const first = userDataCandidates('Cursor')[0];
-  return path.join(first, 'User', 'globalStorage', 'state.vscdb');
+  return path.join(cursorRoots()[0], 'User', 'globalStorage', 'state.vscdb');
 }
 
 export function discover() {
@@ -134,8 +144,12 @@ function buildSession(db, row, file) {
 
   // 会话级别的时间：createdAt 来自 composer，最后一条消息的 createdAt 作结束
   let start = row.createdAt ? new Date(row.createdAt) : null;
+
+  // 先试权威来源：Cursor 在 workspaceStorage/<workspaceId>/workspace.json
+  // 写了真实路径。取不到才退到目录名反解。
+  let project = projectFromWorkspaceJson(row.workspaceId);
+
   let end = null;
-  let project = null;
   let firstUser = null;
   let firstAssistant = null;
 
@@ -158,6 +172,9 @@ function buildSession(db, row, file) {
     } catch {
       continue;
     }
+    // 项目路径的取法有优先级：workspace.json 是权威来源，
+    // 目录名反解只在确定能解对时才用，否则宁可留空。
+    // 编一个看起来合理的错路径会静默污染项目归集，比缺数据难发现。
     if (!project && j.workspaceProjectDir) project = cursorProjectDir(j.workspaceProjectDir);
     if (!project && Array.isArray(j.workspaceUris)) {
       for (const u of j.workspaceUris) {
@@ -192,12 +209,19 @@ function buildSession(db, row, file) {
 /**
  * 把 Cursor 的 workspaceProjectDir 还原成真实路径。
  *
- * 形如 "c:\\Users\\X\\.cursor\\projects\\e-my-app"：
- * 后面的 e-my-app 是 "e:\\my-app" 把 \ 和 : 换成 - 的结果。
- * 这个映射不可逆（分不清 "e-my-app" 是 e:\my-app 还是 e:/my-app
- * 还是 e-\my-app），但盘符 + 单层项目名这个形状是稳妥的。
+ * 形如 "c:\\Users\\X\\.cursor\\projects\\e-my-app"（Windows）
+ * 或     "/Users/X/.cursor/projects/Users-X-myapp"（macOS/Linux）。
  *
- * 拿不准时返回 null，而不是编一个看起来像的路径。
+ * 目录名是「绝对路径把所有分隔符换成 -」得到的，这个编码**有损**：
+ *   - "Users-X-my-repo" 可能是 /Users/X/my-repo 或 /Users/X/my/repo
+ *   - 项目名本身带连字符时无法区分
+ * 所以不能可靠反解——反解出来的东西看着像路径，实际可能是错的。
+ *
+ * 应对：**优先用 workspace.json 里的真实路径**（Cursor 会写），
+ * 拿不到再用一个保守的启发式：只在能确定盘符形态时才反解，
+ * 其余情况返回 null。宁可返回 null 让上层显示"无项目"，
+ * 也不要给一个看起来合理、实际错误的路径——那种错误会静默污染
+ * 项目归集，比缺数据难发现得多。
  */
 export function cursorProjectDir(dir) {
   const s = String(dir || '');
@@ -207,16 +231,79 @@ export function cursorProjectDir(dir) {
 }
 
 function slugToPath(slug) {
-  // 形如 "e-my-app" → "e:/my-app"
-  const m = String(slug).match(/^([a-z])-(.+)$/i);
-  if (!m) return null;
-  const drive = m[1].toLowerCase();
-  const rest = m[2];
-  if (!rest) return null;
-  return `${drive}:/${rest}`;
+  const s = String(slug);
+
+  // Windows：盘符形态 "e-my-app" → "e:/my-app"。
+  // 只有当第一段恰好是一个字母、且后面还有内容时才这么解；
+  // 单个字母开头的目录名在 macOS 上很常见（如 "Users-..."），
+  // 但那种情况下第二段是 "sers"，不是完整单词，所以这个规则本身
+  // 只在 Windows 上成立。用盘符是否合法来兜底。
+  const m = s.match(/^([a-zA-Z])-(.+)$/);
+  if (m && /^[a-zA-Z]$/.test(m[1]) && process.platform === 'win32') {
+    return `${m[1].toLowerCase()}:/${m[2]}`;
+  }
+
+  // macOS / Linux：路径以 / 开头，编码后开头的 "-" 被去掉，
+  // 所以 "Users-X-myapp" 对应 /Users/X/myapp。但分段不可逆，
+  // 只知道首段是根下的一级目录名。取前两段能覆盖绝大多数情况：
+  //   /Users/<name>/...          → macOS 家目录
+  //   /home/<name>/...           → Linux 家目录
+  if (process.platform !== 'win32') {
+    if (/^Users-/.test(s)) {
+      // /Users/<username>/<剩下的原样保留，连字符不还原>
+      const rest = s.slice('Users-'.length);
+      const dash = rest.indexOf('-');
+      if (dash > 0) return `/Users/${rest.slice(0, dash)}/${rest.slice(dash + 1)}`;
+      return `/Users/${rest}`;
+    }
+    if (/^home-/.test(s)) {
+      const rest = s.slice('home-'.length);
+      const dash = rest.indexOf('-');
+      if (dash > 0) return `/home/${rest.slice(0, dash)}/${rest.slice(dash + 1)}`;
+      return `/home/${rest}`;
+    }
+  }
+
+  // 其余形状（Linux 下的 /opt/...、/srv/... 等）不做猜测
+  return null;
 }
 
-/** file:///e%3A/my-app → e:/my-app */
+/**
+ * 从 Cursor 的 workspace.json 读真实项目路径。
+ *
+ * Cursor 在每个 workspaceStorage/<hash>/ 下写 workspace.json，
+ * 里面的 folder 字段是 file:// URI。这是**权威来源**，
+ * 优先于从目录名反解。
+ */
+function projectFromWorkspaceJson(workspaceId) {
+  if (!workspaceId) return null;
+
+  const roots = [];
+  for (const root of cursorRoots()) {
+    // 只要产品根目录（.../Cursor），不要下面的 User/...
+    const idx = root.indexOf('User' + path.sep);
+    const appRoot = idx === -1 ? root : root.slice(0, idx).replace(/[\\/]+$/, '');
+    if (!appRoot) continue;
+    const dir = path.join(appRoot, 'User', 'workspaceStorage', workspaceId);
+    if (!roots.includes(dir)) roots.push(dir);
+  }
+
+  for (const dir of roots) {
+    try {
+      const wj = JSON.parse(fs.readFileSync(path.join(dir, 'workspace.json'), 'utf8'));
+      const folder = wj && wj.folder;
+      if (typeof folder === 'string') {
+        const p = uriToPath(folder);
+        if (p) return p;
+      }
+    } catch {
+      /* 试下一个 */
+    }
+  }
+  return null;
+}
+
+/** file:///e%3A/my-app 或 file:///Users/x/proj → 平台路径 */
 function uriToPath(uri) {
   const s = String(uri || '');
   if (!s.startsWith('file:')) return null;
@@ -227,8 +314,13 @@ function uriToPath(uri) {
     return null;
   }
   p = p.replace(/\\/g, '/');
-  // 去掉 Windows 上编码后的冒号
-  p = p.replace(/^([a-z])%3A/i, '$1:').replace(/^([a-z]):?\/?/i, (mm, d) => d.toLowerCase() + ':/');
+
+  // Windows：e%3A/... → e:/...
+  const drive = p.match(/^([a-zA-Z]):\/?(.*)$/);
+  if (drive) return `${drive[1].toLowerCase()}:/${drive[2]}`;
+
+  // POSIX：保持以 / 开头
+  if (p && !p.startsWith('/')) p = '/' + p;
   return p || null;
 }
 
