@@ -138,7 +138,7 @@ func callSources() []file {
 func zcodeDB() string { return filepath.Join(ZCodeDir(), "cli", "db", "db.sqlite") }
 ```
 
-- **Hermes**：`~/.hermes/profiles/*/state.db`，而且是**多 profile**——代码会遍历 `profiles/` 下所有非隐藏子目录（`hermes.go:32 HermesDirs`）。本机实测 `.hermes` 有 **3.8 GB**，是最大的一个。
+- **Hermes**：`~/.hermes/profiles/*/state.db`，而且是**多 profile**——代码会遍历 `profiles/` 下所有非隐藏子目录（`hermes.go:32 HermesDirs`）。实测 `.hermes` 是体量最大的一个（GB 级）。
 - **DeepSeek Harness**：`~/.DeepSeekHarness/sessions/--<项目>--/<session-id>/session.v4.jsonl.zstd`，**zstd 压缩的 JSONL**，还做了"按 zstd 帧续读"的增量优化。
 - **Codex**：`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl[.zst]`，同时兼容 `archived_sessions/`，并用 `session_index.jsonl` 取标题。
 
@@ -153,7 +153,7 @@ func (t *tail) holds(path string) bool {
 }
 ```
 
-`headOf` 只读前 256 字节（`headLen`），`prefixHash` 对长文件用 **16 个 4KB 窗口采样**（`calls.go` 的 `sample-v1` 逻辑），避免每次全量哈希大文件。这个思路对你有 3.8 GB 数据的场景是必需的。
+`headOf` 只读前 256 字节（`headLen`），`prefixHash` 对长文件用 **16 个 4KB 窗口采样**（`calls.go` 的 `sample-v1` 逻辑），避免每次全量哈希大文件。这个思路对 GB 级数据的场景是必需的。
 
 **还有两个设计值得注意**：
 
@@ -182,7 +182,7 @@ func (t *tail) holds(path string) bool {
 | WorkBuddy / CodeBuddy | 自有 JSON | ❌ | ✅ |
 | **Trae / Trae CN** | 未查到适配 | ❌ | ❌ |
 
-> 本机实测覆盖面：`magpie sessions` 一次就返回了 zcode、qoder-cn、hermes、opencode、dsh 五家的真实会话，带标题、项目路径、token 数、恢复命令。而 CC Switch 的 `session_log_sync` 表里只有 `codex`(3510)、`claude`(934)、`opencode`(94) 三类——**两家覆盖面确实不同，MAGPIE 更全**。
+> 本机实测覆盖面：`magpie sessions` 一次就返回了 zcode、qoder-cn、hermes、opencode、dsh 五家的真实会话，带标题、项目路径、token 数、恢复命令。而 CC Switch 的 `session_log_sync` 表里只有 codex / claude / opencode 三类——**两家覆盖面确实不同，MAGPIE 更全**。
 
 **这两家的空缺正好是你的机会**：Trae、Windsurf、Kiro、Cline 这些要么没适配、要么只做了半截。
 
@@ -308,26 +308,31 @@ func (t *tail) holds(path string) bool {
 
 ---
 
-## 附：本机实测数据（2026-10-21）
+## 附：实测规模量级（2026-10-21，单台开发机）
 
-| 存储 | 大小 | 文件数 |
+用来判断"全量扫描"的代价，量级比精确数字更有参考价值：
+
+| 存储 | 量级 | 文件数 |
 |---|---|---|
-| `~/.hermes` | 3810 MB | 96,142 |
-| `~/.qoder` | 2451 MB | 45,389 |
-| `~/.codex/sessions` | 1463 MB | 1,898 |
-| `~/.trae-cn` | 1321 MB | 84,431 |
-| `~/.workbuddy` | 1117 MB | 48,534 |
-| `~/.qoder-cn/projects` | 471 MB | 848 |
-| `~/.local/share/opencode` | 372 MB | 30,790 |
-| `~/.codex/archived_sessions` | 331 MB | 141 |
-| `~/.cursor` | 291 MB | 1,713 |
-| `~/.zcode/cli/db` | 262 MB | 3（单库） |
-| `~/DeepSeekHarness/sessions` | 20 MB | 39 |
-| `~/.claude/projects` | 3 MB | 50 |
+| Hermes | GB 级 | 十万级 |
+| Qoder | GB 级 | 数万 |
+| Codex sessions | GB 级 | 约 1900 |
+| Trae CN | GB 级 | 数万 |
+| OpenCode | 数百 MB | 约 3 万 |
+| Cursor | 数百 MB | 数千 |
+| ZCode | 数百 MB | 单库 |
+| Claude Code | 数 MB | 数十 |
+
+结论：**会话总量在 GB 级、文件数在十万级**。这直接决定了几个设计选择：
+
+- 必须缓存解析结果（按 `mtime + size` 命中），否则每次扫描几十秒
+- 搜索必须先建索引（全量读正文约半分钟、千万字符量级）
+- 目录遍历必须有深度与数量上限，不能假设"文件很少"
 
 ZCode 数据库结构（`~/.zcode/cli/db/db.sqlite`）：
-- `session` 245 行 / `message` 14,570 行 / `part` 65,357 行 / `model_usage` 4,340 行
-- 与 OpenCode 同构（`session` / `message` / `part`），多了 `title_source`、`workflow_*`、`turn_usage`、`tool_usage` 等 ZCode 特有表
+- 主表：`session` / `message` / `part` / `model_usage`
+- 与 OpenCode 同构（`session` / `message` / `part`），多了 `title_source`、
+  `workflow_*`、`turn_usage`、`tool_usage` 等 ZCode 特有表
 
 ---
 
