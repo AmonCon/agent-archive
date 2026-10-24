@@ -21,6 +21,71 @@ import path from 'node:path';
  * 硬分支会在这些情况下静默失败，而候选列表只是多 stat 几次。
  */
 
+/**
+ * 环境变量覆盖：各 Agent 官方支持的"换个地方存"。
+ *
+ * 这是跨平台最可靠的一层，原因很实际：**每个 OS 的默认路径都可能不同，
+ * 但环境变量是各家自己定义的、跨平台语义一致的**。用户把 CLAUDE_CONFIG_DIR
+ * 指到外置盘、把 HERMES_HOME 指到 D 盘，在哪个系统上都应该找到。
+ *
+ * 尤其重要的一点：**很多工具在 macOS 上会自己跳出默认位置**——
+ *   Gemini CLI 在 `sandbox-exec` 下把运行时目录改到 ~/.cache/.gemini
+ *   OpenCode 在 macOS 上仍用 ~/.local/share（不是 Application Support）
+ *   Hermes 在 Windows 上官方是 %LOCALAPPDATA%/hermes，mac/Linux 是 ~/.hermes
+ * 只按 platform 硬编码路径，这些都会静默落空。
+ *
+ * 支持逗号分隔多值：`CLAUDE_CONFIG_DIR=/a,/b` 是社区工具的常见约定，
+ * 用户同时装了主副两套时能都读到。
+ *
+ * @param {string[]} names 环境变量名，按优先级
+ * @returns {string[]} 存在的目录/文件路径（可能为空）
+ */
+export function envOverrides(names) {
+  const out = [];
+
+  for (const n of names) {
+    const raw = process.env[n];
+    if (!raw || !String(raw).trim()) continue;
+
+    for (const part of String(raw).split(',')) {
+      const p = part.trim();
+      if (!p) continue;
+      // ~ 展开：环境变量里写 ~/xxx 很常见
+      const full = p === '~' ? os.homedir() : p.startsWith('~/') || p.startsWith('~\\') ? path.join(os.homedir(), p.slice(2)) : p;
+      const abs = path.resolve(full);
+      if (!out.some((x) => samePathNorm(x, abs))) out.push(abs);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * 把"环境变量覆盖 + 默认候选"合成一条探测链。
+ *
+ * 覆盖优先，默认兜底。存在的排在前面，但**不因为前面的存在就丢掉后面的**——
+ * 有些用户确实有两份数据（主目录一份、外置盘一份）。
+ */
+export function withOverrides(overrideNames, defaults) {
+  const out = [];
+  const add = (p) => {
+    if (!p) return;
+    if (!out.some((x) => samePathNorm(x, p))) out.push(p);
+  };
+
+  for (const p of envOverrides(overrideNames)) add(p);
+  for (const p of defaults) add(p);
+  return out;
+}
+
+/** 大小写跟随文件系统，用来去重。 */
+function samePathNorm(a, b) {
+  const ci = process.platform === 'win32' || process.platform === 'darwin';
+  const na = String(a).replace(/\\/g, '/').replace(/\/+$/, '');
+  const nb = String(b).replace(/\\/g, '/').replace(/\/+$/, '');
+  return ci ? na.toLowerCase() === nb.toLowerCase() : na === nb;
+}
+
 /** 某个桌面应用的用户数据目录候选（按当前平台优先排序）。 */
 export function userDataCandidates(appName) {
   const home = os.homedir();

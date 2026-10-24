@@ -439,7 +439,7 @@ Codex 的 `{command:["powershell.exe","-NoProfile",...]}`、ZCode 的
 | ZCode | `~/.zcode/cli/db/db.sqlite` | `semantics.origin` 区分注入 |
 | OpenCode | `~/.local/share/opencode/opencode.db` | 与 ZCode 同源结构 |
 | Qoder | `~/.qoder/cache/projects/<项目>-<hash>/conversation-history/` | **无时间戳、无 cwd** |
-| Hermes | `~/.hermes/sessions/*.jsonl` | **无 cwd**，归不到项目 |
+| Hermes | **`~/.hermes/state.db`**（SQLite） | 多数无 cwd；`sessions/*.jsonl` 已废弃 |
 | Cursor | `%APPDATA%/Cursor/User/globalStorage/state.vscdb` | VSCode 键值库 |
 | Antigravity | `~/.gemini/antigravity/conversation_summaries.db` | 部分会话是加密 .pb |
 | Kiro | `%APPDATA%/Kiro/.../kiro.kiroagent/` | 正文在执行包里 |
@@ -463,7 +463,12 @@ Codex 的 `{command:["powershell.exe","-NoProfile",...]}`、ZCode 的
 - **Copilot** 的 16 个会话文件里 14 个 `requests` 是空数组，文件存在
   不代表有对话。
 - **Qoder** 无时间戳（用文件 mtime 近似）、无 cwd（从目录名反推项目名）。
-- **Hermes** 是接飞书渠道的助手，根本不绑定工作目录。
+- **Hermes** 的主存储是 `state.db`（SQLite），**不是 `sessions/*.jsonl`**。
+  这是本项目最大的一次数据修正：早期只扫 jsonl，本机读到 34 场，
+  而库里实际有 219 场（211 场有消息，去掉子代理和空会话后 165 场）。
+  Hermes 官方文档也写明旧版 `*.jsonl` 不再写入或读取。
+  **有 cwd 的只有 46/219**——多数是接飞书渠道的聊天，不绑定目录，
+  但那 46 场必须归到项目，硬编码 `project: null` 会让它们永远进不了时间线。
 
 `sameProject()` 会把"只记项目名"和"记完整路径"的条目并成同一个项目，
 否则 `my-app` 和 `e:/my-app` 会在列表里并排两行。
@@ -683,7 +688,7 @@ node src/cli.js doctor
 
 指标设计上刻意区分了「没有」和「丢了」：
 
-- **无项目**：该 Agent 压根不记录工作目录（Hermes），不算缺陷
+- **无项目**：该 Agent 多数不记录工作目录（Hermes 165 场里只有 37 场归到了项目），不算缺陷
 - **临时路径**：路径存在但属于 Agent 的临时落脚点
   （`.zcode/workspace/<uuid>`、`Documents/Codex/<日期>`），被 `isProjectPath`
   主动过滤，是设计如此
@@ -694,17 +699,58 @@ node src/cli.js doctor
 
 ## 跨平台
 
-各 Agent 的存储位置在不同系统上遵循不同约定，`src/platform.js` 统一处理：
+各 Agent 的存储位置在不同系统上遵循不同约定。`src/platform.js` 负责应用数据类路径，
+**但大多数 Agent 的家目录点目录三平台一致**，真正需要单独处理的是少数几个。
 
 | 类型 | Windows | macOS | Linux |
 |---|---|---|---|
 | VS Code 系应用数据 | `%APPDATA%\<App>` | `~/Library/Application Support/<App>` | `~/.config/<App>` |
-| XDG 数据目录 | `%LOCALAPPDATA%\<app>` | 多为 Application Support | `~/.local/share/<app>` |
+| XDG 数据目录 | `%LOCALAPPDATA%\<app>` | **通常是 `~/.local/share`，不是 Application Support** | `~/.local/share/<app>` |
 | 家目录点目录 | `~/.claude` 等，三平台一致 | 同左 | 同左 |
 
-受影响的是 **Cursor / Kiro / Copilot Chat / OpenCode** 四家；
-Claude Code、Codex、ZCode、Qoder、Hermes、Antigravity 都用家目录点目录，
-本来就跨平台。
+受影响的是 **Cursor / Kiro / Copilot Chat / OpenCode** 四家。
+
+### macOS 上最容易搞错的三件事
+
+这三条都是查了官方文档和源码才确认的，和直觉不一样：
+
+**一、OpenCode 在 macOS 上不用 Application Support。**
+它自己的 `global-roots.ts` 里写死 `XDG_DATA_HOME || ~/.local/share`，
+没有 `process.platform === 'darwin'` 分支。所以 macOS 上也是
+`~/.local/share/opencode/opencode.db`。看到 `~/.local/share` 别以为是 Linux 专用。
+（有意思的是：OpenCode 的**管理员级配置**确实在
+`/Library/Application Support/opencode/`——有 `~` 和没 `~` 是两个完全不同的位置。）
+
+**二、`~/Library/Application Support/Claude` 是桌面应用，不是 Claude Code。**
+Claude Code 的 CLI 三平台都用 `~/.claude/`，官方文档从没给过 Application Support 路径。
+两者是不同产品、不同会话格式。
+
+**三、Hermes 在 Windows 上官方位置是 `%LOCALAPPDATA%/hermes`，mac/Linux 是 `~/.hermes`。**
+这是少数**真的按平台分叉**的一家（源码里 `sys.platform == "win32"` 判断）。
+
+### 环境变量是比平台推断更可靠的一层
+
+这是跨平台最值得投入的部分：**每个 OS 的默认路径都可能不同，但环境变量是
+各家自己定义的、跨平台语义一致的**。用户把 `CLAUDE_CONFIG_DIR` 指到外置盘，
+在哪个系统上都该找到。
+
+已支持的覆盖变量（逗号分隔多值，支持 `~` 展开）：
+
+| Agent | 变量 |
+|---|---|
+| Claude Code | `CLAUDE_CONFIG_DIR` |
+| Codex | `CODEX_HOME` |
+| OpenCode | `OPENCODE_DATA_DIR`、`OPENCODE_DB`、`XDG_DATA_HOME` |
+| Qoder | `QODER_CONFIG_DIR` |
+| Hermes | `HERMES_HOME` |
+| Cursor | `CURSOR_CONFIG_DIR`、`CURSOR_DATA_DIR` |
+| Kiro | `KIRO_HOME` |
+| Antigravity | `ANTIGRAVITY_DATA_DIR` |
+| Gemini | `GEMINI_CLI_HOME` |
+
+**Gemini CLI 有一个 macOS 专属的改道**：在 `sandbox-exec` 下写 `~/.gemini`
+会被 Seatbelt 拦，运行时目录（含会话）改到 `~/.cache/.gemini`。
+源码注释原文如此。所以两个位置都要探测。
 
 实现上**不用 `process.platform` 硬分支选路径**，而是给出候选列表、
 按顺序挑第一个真实存在的。这样换机、跨平台拷贝备份、或者某个应用
@@ -714,20 +760,37 @@ Claude Code、Codex、ZCode、Qoder、Hermes、Antigravity 都用家目录点目
 AppData）和 macOS（Library/Applications/Movies…）的系统目录；
 `assertUnder` 的大小写比较跟随文件系统——Windows/macOS 忽略大小写，
 Linux 严格区分（在 Linux 上忽略大小写是个真实的绕过口子）。
+多根场景用 `assertUnderAny`：路径落在**任意一个**候选根下就合法
+（`CLAUDE_CONFIG_DIR` 指到外置盘、`~/.config/claude` 的历史遗留都要能读）。
 
-> **验证状态**：Windows 上 10 家 Agent 全部实测通过。macOS 与 Linux 的
-> 路径约定已实现，但**没有在真机上跑过**——自动化测试只用模拟平台值
-> 验证了"给定平台，选出的路径形状是对的"。
+### macOS 上还要注意的几处细节
+
+- **`/var` 是 `/private/var` 的符号链接**，`/tmp`、`/var/folders/...` 同理。
+  路径相等比较必须 `realpath` 两侧，否则同一条路径会判不相等。
+- **APFS 默认大小写不敏感**，但可以挂载 case-sensitive 卷。
+  所以去重前先 `realpath`，不要依赖"大小写不敏感"当去重手段。
+  （`claude-code-log` 就把 `/private/var/folders/` 硬编码进临时路径过滤表——
+  这是路径比较必须 realpath 的典型证据。）
+- **沙盒化的 app** 会把 `$HOME` 重定向到
+  `~/Library/Containers/<bundle-id>/Data/`。Desktop 类应用值得两个位置都探。
+- **在后台服务（launchd）里跑时 `HOME` 可能不是用户家目录**。
+  Hermes 源码专门用 `pwd.getpwuid(os.getuid()).pw_dir` 兜底。
+
+> **验证状态**：Windows 上 10 家 Agent 全部实测通过（1131 场会话，
+> 解析失败 0、重复 id 0）。**macOS 与 Linux 仍未在真机跑过**——
+> 路径约定已按官方文档和源码核对过，但这个仓库里没有第二台机器可用。
 >
-> **在 Mac / Linux 上首次使用，先跑这个：**
+> **在 Mac / Linux 上首次使用，按顺序跑这两个：**
 >
 > ```bash
-> node research/probes/verify-mac.mjs
+> node research/probes/audit-paths.mjs    # 秒级：路径假设对不对
+> node research/probes/verify-mac.mjs     # 分钟级：实际读到多少会话
 > ```
 >
-> 它做实际验证：每个 Agent 的目录在不在、解析出多少会话、正文能不能读、
-> 项目路径形状对不对。脚本末尾会说明怎么判断结果。某个 Agent 显示 0 场
-> 但你确实用过它，把输出发回来即可。
+> 第一个只做路径自检：每个 Agent 的候选路径哪些真实存在、哪些环境变量
+> 被读进来、路径比较的大小写语义。第二个会真的扫一遍会话，验证正文可读性
+> 和项目归集。**某个 Agent 显示 0 场但你确实用过它**，把 `audit-paths.mjs`
+> 的输出发回来即可——那里会明确列出它试过哪些路径。
 
 ### Cursor 的路径反解是个特例
 

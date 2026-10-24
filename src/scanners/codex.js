@@ -23,17 +23,74 @@ export const name = 'codex';
 /** 只看开头这么多字节就够拿到 session_meta 和第一条用户消息。 */
 const HEAD_BYTES = 256 * 1024;
 
+/**
+ * Codex 的数据根候选。
+ *
+ * `CODEX_HOME` 是官方支持的覆盖（codex-rs 的 home-dir 模块里，
+ * 设了就必须存在且是目录，否则 Codex 自己会报错——所以这里
+ * 只把**存在的**候选算进去，不要替用户造一个）。
+ *
+ * 三个平台一致：`~/.codex`。**不要去找 `~/Library/Application Support/Codex`**
+ * ——那是 Codex 桌面版存应用状态的地方，rollout 会话仍在 `~/.codex/sessions`。
+ */
+function codexDirs() {
+  const out = [];
+  const add = (p) => {
+    if (!p) return;
+    const norm = path.resolve(p);
+    if (!out.some((x) => sameNorm(x, norm))) out.push(norm);
+  };
+
+  for (const p of envOverrideList('CODEX_HOME')) add(p);
+  add(path.join(os.homedir(), '.codex'));
+
+  return out;
+}
+
+/** 兼容旧调用点。 */
 function codexDir() {
-  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+  return codexDirs()[0];
 }
 
 export function discover() {
-  const root = codexDir();
+  const all = [];
+
+  for (const root of codexDirs()) {
+    for (const sub of ['sessions', 'archived_sessions']) {
+      walk(path.join(root, sub), all, 0);
+    }
+  }
+
+  // 多根时同一文件可能被看到两次（一个根是指向另一个的链接）。
+  // 按"文件系统语义下的同一路径"去重，而不是按原字符串——
+  // Windows/macOS 上大小写不同但指向同一文件的情况真实存在。
   const out = [];
-  for (const sub of ['sessions', 'archived_sessions']) {
-    walk(path.join(root, sub), out, 0);
+  const seen = new Set();
+  for (const p of all) {
+    const key = sameNorm(p, '') ? p : String(p).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
   }
   return out;
+}
+
+function sameNorm(a, b) {
+  const ci = process.platform === 'win32' || process.platform === 'darwin';
+  const na = String(a).replace(/\\/g, '/');
+  const nb = String(b).replace(/\\/g, '/');
+  return ci ? na.toLowerCase() === nb.toLowerCase() : na === nb;
+}
+
+/** 环境变量可能是逗号分隔的多值。 */
+function envOverrideList(name) {
+  const raw = process.env[name];
+  if (!raw || !String(raw).trim()) return [];
+  return String(raw)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => (s === '~' ? os.homedir() : s.startsWith('~/') ? path.join(os.homedir(), s.slice(2)) : s));
 }
 
 function walk(dir, out, depth) {

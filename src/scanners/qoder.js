@@ -30,7 +30,18 @@ export const name = 'qoder';
 /** 所有可能的 Qoder 数据根目录（已存在的）。 */
 function cacheRoots() {
   const home = os.homedir();
+
+  // QODER_CONFIG_DIR 是官方支持的根目录覆盖。
+  // 优先于所有默认位置——用户明确指到别处就该听他的。
+  const overrides = String(process.env.QODER_CONFIG_DIR || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => (s === '~' ? home : s.startsWith('~/') ? path.join(home, s.slice(2)) : s));
+
   const candidates = [
+    ...overrides.map((p) => path.join(p, 'cache', 'projects')),
+    ...overrides.map((p) => p), // 也可能直接指到 projects
     path.join(home, '.qoder', 'cache', 'projects'),
     path.join(home, '.qoder-cn', 'cache', 'projects'),
     path.join(home, 'Library', 'Application Support', 'Qoder', 'cache', 'projects'),

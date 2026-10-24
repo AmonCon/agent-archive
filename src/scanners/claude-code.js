@@ -2,43 +2,78 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { makeSession } from '../model.js';
-import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
+import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '../messages.js';
+import { withOverrides } from '../platform.js';
 
 /**
  * Claude Code 会话扫描。
  *
- * 存储：~/.claude/projects/<项目路径转义>/<session-uuid>.jsonl
+ * 存储：`~/.claude/projects/<项目路径转义>/<session-uuid>.jsonl`
  * 一行一个 JSON 事件。消息行的 cwd 字段直接给出项目绝对路径，
  * 目录名的转义规则不必反推——那套规则改过版本，从行内字段取更稳。
+ *
+ * **三个平台一致**，这是官方文档明确写的（`~/.claude` 就在家目录下，
+ * Windows 的 `~` 是 `%USERPROFILE%`）。不要去找
+ * `~/Library/Application Support/Claude`——那是 **Claude Desktop 桌面应用**，
+ * 另一个产品，会话格式也完全不同。
+ *
+ * 两个候选位置：
+ *   CLAUDE_CONFIG_DIR  官方支持，会把 `.claude.json` 一起挪过去
+ *                      （devcontainer 文档特别提醒：只挂目录、不设这个变量不够）
+ *   ~/.config/claude   社区工具的兼容位置（ccusage 等优先试它）。
+ *                      官方不支持，但确实有用户在这留过数据，作为低优先候选。
+ *
+ * macOS 凭据在 Keychain（service: `Claude Code-credentials`），不在文件里。
+ * 本工具不碰凭据，这条只记在这里备查。
  */
 
 export const name = 'claude-code';
 
-function projectsDir() {
-  const override = process.env.CLAUDE_CONFIG_DIR;
-  return override ? path.join(override, 'projects') : path.join(os.homedir(), '.claude', 'projects');
+/** 所有候选的 projects 根目录（覆盖优先）。 */
+function projectDirs() {
+  const defaults = [
+    path.join(os.homedir(), '.claude', 'projects'),
+    path.join(os.homedir(), '.config', 'claude', 'projects'),
+  ];
+
+  // 覆盖变量指向的是 .claude 本身，要拼上 projects；
+  // 但也可能用户直接指到 projects，两种都接受
+  const overrides = withOverrides(['CLAUDE_CONFIG_DIR'], []).map((p) =>
+    path.basename(p) === 'projects' ? p : path.join(p, 'projects')
+  );
+
+  return [...overrides, ...defaults];
 }
 
 export function discover() {
-  const root = projectsDir();
   const out = [];
-  let dirs;
-  try {
-    dirs = fs.readdirSync(root, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const d of dirs) {
-    if (!d.isDirectory()) continue;
-    const full = path.join(root, d.name);
-    let files;
+  const seen = new Set();
+
+  for (const root of projectDirs()) {
+    let dirs;
     try {
-      files = fs.readdirSync(full);
+      dirs = fs.readdirSync(root, { withFileTypes: true });
     } catch {
       continue;
     }
-    for (const f of files) {
-      if (f.endsWith('.jsonl')) out.push(path.join(full, f));
+    for (const d of dirs) {
+      if (!d.isDirectory()) continue;
+      const full = path.join(root, d.name);
+      let files;
+      try {
+        files = fs.readdirSync(full);
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        if (!f.endsWith('.jsonl')) continue;
+        const p = path.join(full, f);
+        // 同一个项目目录可能通过两个候选位置都被看到（一个是指向另一个的链接）
+        const key = process.platform === 'linux' ? p : p.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(p);
+      }
     }
   }
   return out;
@@ -149,7 +184,7 @@ function isNoise(text) {
  * 消息，但语义上是工具输出，所以单独归成 tool，不混进用户发言。
  */
 export function readMessages(session) {
-  const file = assertUnder(projectsDir(), session.source);
+  const file = assertUnderAny(projectDirs(), session.source);
   const text = fs.readFileSync(file, 'utf8');
   const out = [];
 

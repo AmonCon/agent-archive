@@ -32,33 +32,80 @@ import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../
 
 export const name = 'antigravity';
 
-function root() {
-  return path.join(os.homedir(), '.gemini', 'antigravity');
+/**
+ * 所有可能的 Antigravity 数据根。
+ *
+ * **只有主根 `~/.gemini/antigravity/` 是真的数据源。**
+ *
+ * 曾以为 `antigravity-ide` / `antigravity-backup` 是"另外两个变体、各藏
+ * 18 场"，实测是误判：这两个目录里的 `.pb` 文件名与主根**完全一致**，
+ * 它们是 `antigravity/` 的备份或 IDE 镜像副本。把它们当独立来源扫，
+ * 只会把同一批会话报两遍。
+ *
+ * 保留这个数组是为了"哪天真有独立变体"时能一行加上去；
+ * 目前只有第一项会在本机命中。
+ */
+const ROOT_NAMES = ['antigravity'];
+
+function geminiDir() {
+  return path.join(os.homedir(), '.gemini');
 }
 
-function summaryDb() {
-  return path.join(root(), 'conversation_summaries.db');
+/** 所有存在的变体根。 */
+function roots() {
+  const out = [];
+  for (const n of ROOT_NAMES) {
+    const p = path.join(geminiDir(), n);
+    try {
+      if (fs.statSync(p).isDirectory()) out.push(p);
+    } catch {
+      /* 不存在 */
+    }
+  }
+  return out;
+}
+
+/** 兼容旧调用点：主根（有 summaries.db 的那个）。 */
+function root() {
+  return path.join(geminiDir(), 'antigravity');
+}
+
+function summaryDbIn(rootDir) {
+  return path.join(rootDir, 'conversation_summaries.db');
+}
+
+function conversationsDir(rootDir) {
+  return path.join(rootDir, 'conversations');
 }
 
 export function discover() {
-  const p = summaryDb();
-  try {
-    fs.accessSync(p, fs.constants.R_OK);
-  } catch {
-    return [];
+  const out = [];
+  for (const r of roots()) {
+    const db = summaryDbIn(r);
+    try {
+      fs.accessSync(db, fs.constants.R_OK);
+      out.push(db);
+    } catch {
+      /* 这个根没有索引库 */
+    }
   }
-  return [p];
+  return out;
 }
 
 let cachedDb = null;
+let cachedPath = null;
 
-function getDb() {
-  if (cachedDb) return cachedDb;
+function getDb(file) {
+  const p = file || summaryDbIn(root());
+  if (cachedDb && cachedPath === p) return cachedDb;
+  closeStore();
   try {
-    cachedDb = new DatabaseSync(summaryDb(), { readOnly: true });
+    cachedDb = new DatabaseSync(p, { readOnly: true });
     cachedDb.prepare('pragma busy_timeout = 5000').run();
+    cachedPath = p;
   } catch {
     cachedDb = null;
+    cachedPath = null;
   }
   return cachedDb;
 }
@@ -71,6 +118,7 @@ export function closeStore() {
       /* 已关闭 */
     }
     cachedDb = null;
+    cachedPath = null;
   }
 }
 
@@ -81,51 +129,100 @@ export function closeStore() {
  * 解码后作为项目路径——这是这里唯一能拿到项目的地方。
  */
 export function parseAll(file) {
-  const db = getDb();
-  if (!db) return [];
+  const db = getDb(file);
+  const rootDir = path.dirname(file);
 
-  let rows;
-  try {
-    rows = db
-      .prepare(
-        `select conversation_id, title, step_count, last_modified_time,
-                workspace_uris, status, source
-         from conversation_summaries`
-      )
-      .all();
-  } catch {
-    return [];
-  }
+  // 这个根下的 conversations 目录：有 .db 文件但我们没索引到的，
+  // 说明 summaries 表不全（实测 27 个 conversation db 只索引了 21 条）。
+  // 那些会话单独补进来，标题先用占位，正文能不能读由 readMessages 决定。
+  const convIds = listConversationIds(rootDir);
 
   const out = [];
-  for (const r of rows) {
-    const project = pickWorkspace(r.workspace_uris);
-    const end = parseTime(r.last_modified_time);
+  const seen = new Set();
 
-    // 索引里的 title 常常是空的或 "(untitled)"。正文文件名在 brain/<id>/ 下，
-    // 读首条用户输入成本太高（21 场要开 21 个目录），这里退到一步：
-    // 用 FTS 表的 user_body 首行做标题——它就在同一个库里。
-    let title = r.title;
-    if (!title || title === '(untitled)') {
-      title = titleFromFts(db, r.conversation_id);
+  if (db) {
+    let rows = [];
+    try {
+      rows = db
+        .prepare(
+          `select conversation_id, title, step_count, last_modified_time,
+                  workspace_uris, status, source
+           from conversation_summaries`
+        )
+        .all();
+    } catch {
+      /* 表不存在就只走文件列表 */
     }
 
+    for (const r of rows) {
+      const project = pickWorkspace(r.workspace_uris);
+      const end = parseTime(r.last_modified_time);
+
+      // 索引里的 title 常常是空的或 "(untitled)"。正文文件名在 brain/<id>/ 下，
+      // 读首条用户输入成本太高（21 场要开 21 个目录），这里退到一步：
+      // 用 FTS 表的 user_body 首行做标题——它就在同一个库里。
+      let title = r.title;
+      if (!title || title === '(untitled)') {
+        title = titleFromFts(db, r.conversation_id);
+      }
+
+      seen.add(String(r.conversation_id));
+      out.push(
+        makeSession({
+          agent: name,
+          id: r.conversation_id,
+          project,
+          title,
+          // 索引里只有"最后修改时间"，没有开始时间。
+          // 用同一个值填两头，doctor 的零时长统计能反映出这一点。
+          start: end,
+          end,
+          source: `${file}#${r.conversation_id}`,
+          resume: null,
+        })
+      );
+    }
+  }
+
+  // 有 conversation db 但索引里没有的：补进来。
+  // 标题用文件 mtime 归日，project 拿不到（db 里的 workspace 信息要开库）。
+  for (const cid of convIds) {
+    if (seen.has(cid)) continue;
+    const p = path.join(conversationsDir(rootDir), `${cid}.db`);
+    let end = null;
+    try {
+      end = fs.statSync(p).mtime;
+    } catch {
+      /* 读不到 mtime 就留空 */
+    }
     out.push(
       makeSession({
         agent: name,
-        id: r.conversation_id,
-        project,
-        title,
-        // 索引里只有"最后修改时间"，没有开始时间。
-        // 用同一个值填两头，doctor 的零时长统计能反映出这一点。
+        id: cid,
+        project: null,
+        title: '(未索引)',
         start: end,
         end,
-        source: `${file}#${r.conversation_id}`,
+        source: `${file}#${cid}?unindexed`,
         resume: null,
       })
     );
   }
+
   return out;
+}
+
+/** conversations/*.db 的会话 id 列表。 */
+function listConversationIds(rootDir) {
+  const dir = conversationsDir(rootDir);
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.db'))
+      .map((f) => f.slice(0, -3));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -196,26 +293,34 @@ function parseTime(v) {
 /**
  * 读一场会话的正文。
  *
+ * 现在有多个变体根，正文要先在**所有**根里找——会话可能来自
+ * antigravity-ide 而不是主根。找不到再抛错。
+ *
  * 只支持有 transcript_full.jsonl 的那几场。没有的抛错——不假装成功，
  * 也不从加密的 .pb 里硬抠（那是不可靠的启发式，会产出错误内容）。
  */
 export function readMessages(session) {
   const id = session.id;
-  const logPath = path.join(
-    root(),
-    'brain',
-    id,
-    '.system_generated',
-    'logs',
-    'transcript_full.jsonl'
+
+  const candidates = roots().map((r) =>
+    path.join(r, 'brain', id, '.system_generated', 'logs', 'transcript_full.jsonl')
   );
 
-  const real = assertUnder(root(), logPath);
+  let text = null;
+  let from = null;
+  for (const p of candidates) {
+    try {
+      text = fs.readFileSync(p, 'utf8');
+      from = p;
+      break;
+    } catch {
+      /* 这个根下没有 */
+    }
+  }
 
-  let text;
-  try {
-    text = fs.readFileSync(real, 'utf8');
-  } catch {
+  if (text === null) {
+    // 越界校验：只有当路径落在某个已知根里才允许（防止 source 被改）
+    if (from) assertUnder(path.dirname(from), from);
     throw new Error(
       '这场会话没有明文转录（Antigravity 有 18 场是加密的 .pb 格式）。' +
         '标题和摘要可从索引检索，正文读不到。'
