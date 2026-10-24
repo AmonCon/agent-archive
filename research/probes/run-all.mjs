@@ -7,6 +7,7 @@ const suites = [
   ['MCP 工具', 'research/probes/check-mcp.mjs'],
   ['可移植性 lint', 'research/probes/lint-portability.mjs'],
   ['路径审计', 'research/probes/audit-paths.mjs'],
+  ['macOS 假设', 'research/probes/check-mac-assumptions.mjs'],
 ];
 
 let failed = 0;
