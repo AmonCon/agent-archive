@@ -50,6 +50,10 @@ node src/cli.js stats
 # 采集体检：覆盖率、缺口、正文可读性
 node src/cli.js doctor
 
+# 模型调用成本（按 Agent / 模型 / 会话）
+node src/cli.js calls
+node src/cli.js calls --by session
+
 # 扫描归档里的明文凭证（只报告，掩码输出）
 node src/cli.js secrets
 
@@ -185,6 +189,7 @@ JSON-RPC」，手写足够，不需要引入任何 npm 包。
 | `session_stats` | 采集质量、索引规模、已有摘要数量 |
 | `export_timeline` | 导出 Markdown |
 | `inventory` | **环境层**：各 Agent 的 MCP / 技能 / 使用率 / 记忆（`type` 切换） |
+| `model_calls` | **调用层**：每场会话/每个 Agent 的 token、缓存命中、费用 |
 
 `read_digest` 和 `read_session_summary` 是视图层的入口。它们**只读已有的
 摘要，不会替你调模型**——生成要花钱，必须由用户在终端显式执行。
@@ -208,6 +213,39 @@ list_projects → read_digest（有现成交接材料吗）→
 决定要不要继续读。列表类工具只给元数据，从不夹带正文。
 
 所有工具都标记 `readOnlyHint: true`——它们不会修改任何 Agent 的原始数据。
+
+## 调用层：`calls`——为一场对话付了多少钱
+
+```bash
+node src/cli.js calls                  # 按 Agent 汇总
+node src/cli.js calls --by model       # 按模型
+node src/cli.js calls --by session     # 按会话，并报出与会话层的匹配率
+```
+
+会话层记录"说了什么"，调用层记录"**为它花了多少**"。同一场对话换个模型，
+成本能差十倍，而正文完全一样——只看会话看不出这件事。
+
+数据来自**本地模型网关的调用日志**（本机实测 `~/.config/magpie/usage.jsonl`
+15 天 2.5 万条）。网关记得比会话文件细：
+
+| 字段 | 含义 |
+|---|---|
+| `in` / `out` | 本次请求的未缓存输入、输出 token |
+| `cache_read` / `cache_write` | 提示词缓存命中与写入 |
+| `ttft_ms` / `ms` | 首 token 延迟、整次耗时 |
+| `credits` | 供应商自己报的费用（缺价时不估） |
+| `status` / `tries` | 结果、重试次数 |
+| `session` / `native_session` | **接会话层的钩子** |
+
+本机实测：输入里 **96.8% 是缓存读**。没有这个口径，任何成本视图都是错的。
+
+**边界要一起报。** 网关只看得见经过它的调用：本机 dsh 和 hermes 的
+`session` 字段全空（不走网关），qoder 只有 76 场被网关看到而归档有 310 场。
+所以 `calls` 同时给两个数——`86 场会话可对上 · 17704/25868 次调用（68%）`。
+只报前者会让人以为覆盖率是 100%。这和技能使用率只统计显式调用是同一种诚实。
+
+**没装网关就优雅降级**：返回 `ready: false` 和一句怎么启用的说明，不报错。
+调用层是可选视图，不是依赖。
 
 ## 凭证扫描：`secrets`
 
@@ -438,7 +476,8 @@ Codex 的 `{command:["powershell.exe","-NoProfile",...]}`、ZCode 的
 | Codex | `~/.codex/sessions/`、`~/.codex/archived_sessions/` | zstd；续接会话需合并 |
 | ZCode | `~/.zcode/cli/db/db.sqlite` | `semantics.origin` 区分注入 |
 | OpenCode | `~/.local/share/opencode/opencode.db` | 与 ZCode 同源结构 |
-| Qoder | `~/.qoder/cache/projects/<项目>-<hash>/conversation-history/` | **无时间戳、无 cwd** |
+| Qoder | `~/.qoder[-cn]/projects/<工作区>/<uuid>.jsonl`（新）· `cache/projects/...`（旧） | 新格式带时间戳和 cwd；旧格式只能靠 mtime |
+| DeepSeek Harness | `$DSH_HOME/sessions/<cwd>/<session>/session.v<N>.jsonl[.zstd]` | 多帧 zstd；子代理跳过 |
 | Hermes | **`~/.hermes/state.db`**（SQLite） | 多数无 cwd；`sessions/*.jsonl` 已废弃 |
 | Cursor | `%APPDATA%/Cursor/User/globalStorage/state.vscdb` | VSCode 键值库 |
 | Antigravity | `~/.gemini/antigravity/conversation_summaries.db` | 部分会话是加密 .pb |
@@ -462,7 +501,19 @@ Codex 的 `{command:["powershell.exe","-NoProfile",...]}`、ZCode 的
   执行包里（`actions[].output.message`），靠 `executionId` 关联。
 - **Copilot** 的 16 个会话文件里 14 个 `requests` 是空数组，文件存在
   不代表有对话。
-- **Qoder** 无时间戳（用文件 mtime 近似）、无 cwd（从目录名反推项目名）。
+- **Qoder** 有两套存储。`cache/projects/.../conversation-history/` 是旧格式，
+  没有时间戳也没有 cwd，只能靠文件 mtime 和目录名近似；`projects/<工作区>/<uuid>.jsonl`
+  是现在的主存储，每行带 `timestamp` / `cwd` / `sessionId`，工具调用和结果都在文件里。
+  本机实测新格式 291 场、旧格式只有 19 场——**只读旧格式会漏掉九成以上**。
+  新格式里 `attachment`（技能清单）、`active-leaf`（对话树指针）、
+  `file-history-snapshot`（文件备份）是运行时事件，不是对话内容，读正文时按类型过滤。
+- **DeepSeek Harness** 的会话文件默认是 `.zstd`，而且是**多帧追加**——
+  每批事件单独一帧，不是一个大帧。Node 的 `zstdDecompressSync` 只解第一帧，
+  直接读会得到一行 header 就结束；扫描器按帧魔数切开逐帧解。
+  Windows 桌面版把 `DSH_HOME` 指到 `~/DeepSeekHarness`，不是 `~/.dsh`。
+  子代理也是独立 session 文件（header 带 `parentSession`），和 Codex 子代理一样跳过。
+  正文里 `user/message` / `assistant/message` / `tool/call` / `tool/result` 是对话，
+  `*-chunks` 是流式增量、`request/*` 是请求头，读进来只会重复。
 - **Hermes** 的主存储是 `state.db`（SQLite），**不是 `sessions/*.jsonl`**。
   这是本项目最大的一次数据修正：早期只扫 jsonl，本机读到 34 场，
   而库里实际有 219 场（211 场有消息，去掉子代理和空会话后 165 场）。
@@ -475,7 +526,7 @@ Codex 的 `{command:["powershell.exe","-NoProfile",...]}`、ZCode 的
 
 ## 环境层：`env`——这台机器上各 Agent 会什么
 
-会话层回答"聊过什么"，环境层回答"**具备什么能力**"。
+会话层回答"聊过什么"，环境层回答"**具备什么能力**"，调用层回答"**花了多少**"。
 
 ```
 node src/cli.js env              # 每个 Agent 一行
