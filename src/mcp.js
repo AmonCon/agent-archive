@@ -361,6 +361,101 @@ const TOOLS = [
       };
     },
   },
+  {
+    name: 'inventory',
+    title: '本机 Agent 能力面',
+    description:
+      '这台机器上各 Agent 具备什么能力：配了哪些 MCP 服务、装了哪些技能、有哪些记忆与指令文件。' +
+      '用于"我刚装了一个新 Agent，想看看别的 Agent 里已有什么"这种场景。' +
+      '会按启动指纹把同一个 MCP 服务在多家的注册归并成一条，按内容哈希把同一份技能归并成一条。' +
+      '只读，不回传凭证值（只给环境变量的键名），也不合并不同 Agent 的记忆内容。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['overview', 'mcp', 'skills', 'memory', 'audit'],
+          description:
+            'overview=每个 Agent 一行的总览（默认）；mcp=MCP 服务清单，含跨 Agent 归并；' +
+            'skills=技能清单；memory=记忆与指令文件；audit=体检与建议',
+        },
+        agent: {
+          type: 'string',
+          description: '只看某个 Agent（如 codex、claude-code、qoder、hermes）',
+        },
+        limit: {
+          type: 'number',
+          description: '列表最多返回多少条（默认 50，上限 200）',
+        },
+      },
+      additionalProperties: false,
+    },
+    handler: async ({ type = 'overview', agent, limit = 50 }) => {
+      const { fullInventory, auditEnvironment } = await import('./env/inventory.js');
+      const cap = Math.min(Math.max(Number(limit) || 50, 1), 200);
+
+      if (type === 'audit') {
+        return auditEnvironment();
+      }
+
+      const inv = fullInventory();
+
+      if (type === 'mcp') {
+        const list = agent ? inv.mcp.list.filter((s) => s.agents.includes(agent)) : inv.mcp.list;
+        return {
+          services: list.length,
+          registrations: inv.mcp.registrations,
+          note: '同一服务在多家的注册已按启动指纹归并。环境变量只给键名，值不读取。',
+          mixedForms: inv.mcp.mixedForms,
+          list: list.slice(0, cap),
+          truncated: list.length > cap,
+        };
+      }
+
+      if (type === 'skills') {
+        const list = agent
+          ? inv.skills.list.filter((s) => s.agents.includes(agent))
+          : inv.skills.list;
+        return {
+          skills: inv.skills.skills,
+          installs: inv.skills.installs,
+          shared: inv.skills.shared,
+          note: '按 SKILL.md 内容哈希归并，同一份技能装在几处算一条。',
+          byAgent: inv.skills.byAgent,
+          list: list.slice(0, cap).map((s) => ({
+            name: s.name,
+            agents: s.agents,
+            installs: s.installs,
+            description: s.description,
+            aliases: s.aliases,
+          })),
+          truncated: list.length > cap,
+        };
+      }
+
+      if (type === 'memory') {
+        // 记忆一律只给元数据：条数、格式、大小、主题。
+        // 正文不在这一层返回——它可能含凭证，也可能被误当成"权威结论"。
+        return {
+          ...inv.memory,
+          list: inv.memory.list.filter((m) => !agent || m.agent === agent).slice(0, cap),
+          note: '只给出处与规模，不含正文。不同 Agent 的记忆可能互相矛盾，不做合并。',
+        };
+      }
+
+      const agents = agent
+        ? inv.agents.filter((a) => a.agent === agent)
+        : inv.agents;
+      return {
+        ...inv.summary,
+        agents,
+        mcpServices: inv.mcp.list.map((s) => ({ service: s.service, agents: s.agents })),
+        note:
+          '这是环境层的总览：谁装了什么能力。' +
+          '会话层（聊过什么）用 list_projects / search_sessions。',
+      };
+    },
+  },
 ];
 
 /* ------------------------------ 渲染 ------------------------------ */
@@ -479,9 +574,13 @@ async function dispatch(msg) {
         capabilities: { tools: {} },
         serverInfo: { name: 'agent-archive', version: '0.1.0' },
         instructions:
-          '这是本机跨 Agent 的会话档案馆，只读。' +
-          '推荐顺序：list_projects 看有哪些项目 → read_digest 看有没有现成的交接摘要 → ' +
-          '没有的话用 search_sessions 或 project_timeline 定位 → read_session 读正文（会截断，按需分段）。',
+          '这是本机跨 Agent 的档案馆，只读。它有两层：' +
+          '**会话层**——list_projects 看有哪些项目 → read_digest 看有没有现成的交接摘要 → ' +
+          '没有的话用 search_sessions 或 project_timeline 定位 → read_session 读正文（会截断，按需分段）。' +
+          '**环境层**——inventory 看这台机器上各 Agent 配了哪些 MCP 服务、装了哪些技能、有哪些记忆。' +
+          '刚接触这个环境、或想知道别的 Agent 已具备什么能力时先调 inventory；' +
+          '要看某个项目发生过什么再用会话层。' +
+          '两层都只提供事实与出处，不替你合并结论，也不回传任何凭证值。',
       };
     }
 

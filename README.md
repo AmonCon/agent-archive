@@ -17,6 +17,10 @@
 本工具只做三件事：**扫描 → 归一 → 时间线**。不做蒸馏，不做向量检索，
 不往 Agent 里注入任何东西。它先把事实记录下来，其余都是可选视图。
 
+在此之上还有一层**环境层**（`env`）：识别本机每个 Agent 配了哪些 MCP 服务、
+装了哪些技能、有哪些记忆。会话层回答"聊过什么"，环境层回答"会什么"——
+两层都只提供事实与出处，不替任何 Agent 做决定。
+
 四种看法，同一份数据：终端里的 `projects`/`timeline`/`cat`，
 浏览器里的 `serve`，导出成 Markdown 的 `export`，
 以及给其他 Agent 用的 `/api/*` 与 **MCP server**。
@@ -168,7 +172,7 @@ node src/cli.js mcp --json   # 只要配置 JSON
 **零依赖实现。** MCP 的 stdio 传输就是「stdin/stdout 上一行一条
 JSON-RPC」，手写足够，不需要引入任何 npm 包。
 
-### 八个工具
+### 九个工具
 
 | 工具 | 作用 |
 |---|---|
@@ -180,6 +184,7 @@ JSON-RPC」，手写足够，不需要引入任何 npm 包。
 | `read_session` | 读正文，**分段**，默认 8000 字 |
 | `session_stats` | 采集质量、索引规模、已有摘要数量 |
 | `export_timeline` | 导出 Markdown |
+| `inventory` | **环境层**：各 Agent 的 MCP / 技能 / 记忆（`type` 切换） |
 
 `read_digest` 和 `read_session_summary` 是视图层的入口。它们**只读已有的
 摘要，不会替你调模型**——生成要花钱，必须由用户在终端显式执行。
@@ -453,6 +458,171 @@ Codex 的 `{command:["powershell.exe","-NoProfile",...]}`、ZCode 的
 
 `sameProject()` 会把"只记项目名"和"记完整路径"的条目并成同一个项目，
 否则 `my-app` 和 `e:/my-app` 会在列表里并排两行。
+
+## 环境层：`env`——这台机器上各 Agent 会什么
+
+会话层回答"聊过什么"，环境层回答"**具备什么能力**"。
+
+```
+node src/cli.js env              # 每个 Agent 一行
+node src/cli.js env mcp          # MCP 服务清单，跨 Agent 归并
+node src/cli.js env skills       # 技能清单，按内容去重
+node src/cli.js env memory       # 记忆与指令文件
+node src/cli.js env audit        # 体检
+```
+
+对应的 MCP 工具是 `inventory`（`type` 取 `overview` / `mcp` / `skills` / `memory` / `audit`）。
+**这是给新 Agent 用的入口**：它自己调一次 `inventory`，就知道这台机器上别的
+Agent 配了什么、装了什么、记得什么，再自己决定要不要跟进——本工具不替它搬。
+
+### 为什么单独一层，而不是并进会话表
+
+会话是按项目组织的，换 Agent 就断了。MCP / 技能 / 记忆是**可迁移的能力与偏好**，
+恰恰是新 Agent 最想要的东西，而且现在没有任何标准接口。两层共用同一个做法：
+没有协议可依附，只能一家一个适配器，集中成注册表。
+
+### MCP：按启动指纹认，不按名字认
+
+这是和参照项目最大的分歧。cc-switch 的 `McpServer.id` 就是原生配置里的键名，
+所以同一个服务在不同 Agent 里名字不同时，它会被算成两个。
+
+本机的真实数据（`env mcp` 实测）：
+
+```
+● supabase  4 条注册 / 4 家
+    别名    adbsupabase / supabase
+    启动    local / npx
+```
+
+一个 supabase 服务，4 条注册，**2 个名字，3 种启动形态**。如果按名字认，
+"我到底配了几份、哪份是活的"就永远答不了。所以身份从 `command + args` 推：
+
+1. 剥掉 `cmd /c`、`sh -c` 这类包装层（Windows 上极常见）
+2. 找 `npx` 拉起的包名 → `pkg:@scope/name#npx`
+3. 找 `node_modules/<包名>/` → `pkg:@scope/name#local`
+4. 其余取 `dist/` 之后的脚本路径，或可执行文件名
+
+**服务身份 = 去掉安装方式后缀的包名**，所以 npx 拉的和本地装的能归到一起；
+而 `#npx` / `#local` 这个后缀单独保留，正好回答"两边装的到底是不是一个东西"。
+`supabase` 就因此报出「安装形态不一致」——一边钉版本、一边每次拉最新。
+
+各家格式差异（都在 `src/env/mcp.js` 里写明）：
+
+| Agent | 位置 | 形状 |
+|---|---|---|
+| Claude Code | `~/.claude.json` | 顶层 `mcpServers` |
+| Codex | `~/.codex/config.toml` | `[mcp_servers.<名>]` + `[.<名>.env]`，**多行 args 数组** |
+| ZCode | `~/.zcode/cli/config.json` | 多一层：`mcp.servers` |
+| Qoder | `~/.qoder/mcp.json` | `mcpServers` |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers` |
+| OpenCode | `~/.config/opencode/opencode.json` | `mcp`，`type: local/remote`，**`command` 是数组** |
+| Hermes | `~/.hermes/config.yaml` | `mcp_servers`，**无 `type` 字段** |
+| Gemini | `~/.gemini/settings.json` | `mcpServers` |
+
+TOML 和 YAML 都是手写的最小解析器，只取 `mcp_servers` 那一段——
+为一个字段引依赖不值得，而 Codex 的多行数组用单行正则会被吃掉半行
+（第一版就是这么失败的）。
+
+### 凭证：只给键名，值永不出这个模块
+
+本机实测 **3 份配置里有明文阿里云 AccessKey**（Claude 全局、ZCode、Qoder）。
+MCP 工具如果原样回传 `env`，等于把这些凭证直接送进某个模型的上下文。
+
+所以规则是硬的：`normalize()` 只保留 `Object.keys(env)`，值在那一行就被丢掉，
+下游任何一层都拿不到。`env audit` 会提醒"这个服务有明文凭证"，
+但也只说键名，并明确写「值未读取、未传输」。
+
+要看值请自己打开配置文件。这个工具自己不能成为泄漏渠道——
+和 `secrets` 命令「掩码比命中更激进」是同一条教训。
+
+### 技能：按内容哈希认，而且必须跟随符号链接
+
+本机 375 处安装、290 个独立技能。同一个技能在五个目录里装着，按名字认会撑爆列表。
+
+身份用 `SKILL.md` 的 SHA-256：名字会改（`design-taste-frontend` 和
+`-v1` 是两代），同名不同内容也真的存在（同一插件的新旧版本就是）。
+
+**踩过的坑**：第一版用 `Dirent.isDirectory()` 遍历，Qoder 的 3 个和 Kiro 的
+28 个技能全部漏掉，而且**静默漏**——显示"0 个技能"而不是报错。原因是它们
+全是指向 `~/.agents/skills/<name>` 的符号链接，`isDirectory()` 对链接返回 false。
+
+而这恰恰是最典型的跨 Agent 场景：用链接共享一份技能。修法是 `lstat` + `stat`，
+真目录才参与环路保护（链接不记录已访问路径，否则会误判成环）。
+现在 Kiro 显示 28 个、Qoder 32 个，`lark-*` 系列正确报成三家共享。
+
+每条产出还带 `symlinked` 计数：全是链接说明只维护一份（好），
+有真有假说明有人手工复制过（会漂）。
+
+### 插件缓存里的历史版本不能算"多个技能"
+
+ZCode 的插件缓存按 `<插件>/<版本>/skills/<技能>` 组织，升级后旧版本不删。
+本机 122 个技能里面有 **60 个是历史版本残留**——`docx` 8 份（0.1.0 一路到
+0.2.1）、`pdf` 8 份、`computer-use` 6 份。
+
+那不是"装了 8 个不同技能"，是同一个技能留了 8 个版本。所以这个根按
+`(插件, 技能名)` 只保留**版本号最高**的一份。ZCode 从 122 落到 62，
+全机从 300 落到 290——这才是真实数字。
+
+版本判断只处理数字段（`0.2.1` > `0.1.5`）；读不到版本号的目录原样保留，
+宁可多报一个也不猜谁新谁旧。
+
+### 性能：从 3.2 秒到 0.55 秒
+
+第一版全量扫一次 3.2 秒，而 MCP 是常驻进程、每次 `inventory` 都重扫一遍。
+三段优化，每一段都是先量再改：
+
+| 改法 | 省下 | 为什么快 |
+|---|---|---|
+| 不陪每个真目录做 `realpathSync` | 1.2 s | 环路只可能由符号链接造成，真目录没有回边。Windows 上每次 realpath 要 1-2ms，ZCode 缓存有 700 多个目录 |
+| 一次读文件，正文和哈希共用同一个 buffer | ~0.15 s | 原先是 `readSkill` 和 `hashSkill` 各读一遍 |
+| 以 `(mtime, size)` 为键做解析缓存 | ~1.0 s | 与会话层 `registry.js` 的 FileParseCache 同一策略 |
+
+汇总层还有 30 秒 TTL 的缓存，因为一个会话里 `inventory` 可能被连调几次
+（先看 overview，再按类型细看）。缓存返回 `structuredClone`，**不是同一引用**——
+MCP 工具会拿列表去 filter/map，一旦改到缓存对象，后面所有调用都读到污染数据，
+症状是"技能数莫名多一个"，极难查。
+
+## 记忆：只报出处，绝不合并
+
+这是最容易做错的一层。用户的 Hermes `USER.md` 和 Codex `MEMORY.md`
+完全可能写着两条相反的偏好。合并成"你的记忆"是在说谎，而且新 Agent
+读到一句被平滑过的结论，比读到两条带出处的矛盾更危险。
+
+所以产出只有三样：**在哪、什么格式、有多大**。正文不在这层返回。
+
+指令和记忆分开计数，因为语义不同：
+
+- **instruction** — 每轮注入的行为约定（`AGENTS.md` / `SOUL.md` / `GEMINI.md`）
+- **memory** — 跨会话积累的事实（`MEMORY.md` / 分片目录 / SQLite 库）
+
+本机 21 处、322 条，覆盖 3 种格式：
+
+| Agent | 形态 |
+|---|---|
+| Codex | `memories/MEMORY.md`（**450 KB，只报大小不读**）+ `memories_1.sqlite`（155 条） |
+| Hermes | `memories/MEMORY.md` + `USER.md` + `memory_store.db`（14 条事实） |
+| Qoder | `memory/` 目录：索引 + 8 个分片 |
+| ZCode | **项目级**：`memories/projects/<项目>-<哈希>/memory/*.md`，10 处共 145 条 |
+
+ZCode 的项目级记忆是这一层最有价值的部分——它按项目分开，正好能对上
+会话层的项目维度。但目录名会混进临时工作区（`1792567885219-...`、`default-...`、
+`draft-...`），这些如果当成项目名，会让"这个项目有哪些记忆"里全是噪音。
+所以先判内部前缀、再剥 16 位哈希、最后过一道形状检查；认不出项目的
+归到 `unattributed`，**不塞进项目列表冒充项目**。
+
+### 体检 `env audit`
+
+和会话层的 `doctor` 同一个思路：报数字，不报感觉。检查的都是
+"看起来正常、实际会让人做错判断"的东西：
+
+| 检查 | 为什么值得报 |
+|---|---|
+| 安装形态不一致 | npx 每次拉最新、本地安装钉版本，两边行为可能不同 |
+| 同名不同别名 | 不是错误，但会让人以为配了两份 |
+| 明文凭证 | 会被每个读到该配置的 Agent 拿到 |
+| 记忆格式分散 | 换 Agent 后旧记忆不会自动跟过去 |
+| 有数据但无配置能力 | 可能没配过，也可能这家配置放在没适配的位置 |
+| 技能只在共享目录 | **共享目录本身不生效**，要有 Agent 目录里的链接或副本才读得到 |
 
 ## 采集体检：`doctor`
 

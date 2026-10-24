@@ -48,6 +48,11 @@ function usage() {
   agent-archive agents <项目路径>              某个项目里各 Agent 的分布
   agent-archive stats                          扫描统计与缓存位置
   agent-archive doctor                         采集体检（覆盖率与缺口）
+  agent-archive env                            本机各 Agent 具备什么能力
+  agent-archive env mcp                        MCP 服务清单（跨 Agent 归并）
+  agent-archive env skills                     技能清单（按内容去重）
+  agent-archive env memory                     记忆与指令文件
+  agent-archive env audit                      环境层体检
   agent-archive secrets                        扫描归档里的明文凭证
   agent-archive llm                            配置模型接入（查看/设置）
   agent-archive digest <项目>                  生成项目摘要（默认只估算）
@@ -70,6 +75,7 @@ cat 的会话参数:
   --json        输出 JSON
   --no-cache    忽略缓存，全量重扫
   --flat        时间线不按天分组
+  --all         展开全部（env skills 显示所有共享技能；timeline 取全量）
   --project <路径>        限制在某个项目内查找（cat）
   --agent <名字>          限制在某个 Agent 内查找（cat）
   --port <端口>           网页端口（serve，默认 7788）
@@ -792,6 +798,10 @@ async function cmdDoctor(opts) {
       );
     }
   }
+
+  // 这个命令只管会话采集。能力面（MCP/技能/记忆）是另一层，
+  // 混进来会让"体检"这个词失去边界，所以只指个路。
+  console.log(c(C.dim, '  能力面（MCP / 技能 / 记忆）另看：agent-archive env audit'));
 }
 
 /**
@@ -1236,6 +1246,261 @@ function reasonLabel(status) {
   }
 }
 
+/**
+ * 环境层：本机各 Agent 具备什么能力。
+ *
+ * 与会话层的分工：`projects` / `timeline` 回答"聊过什么"，
+ * `env` 回答"会什么、配了什么、记得什么"。
+ *
+ * 子命令按层分开，因为三类数据的消费方式完全不同：
+ *   env            总览（每个 Agent 一行）
+ *   env mcp        服务清单，按启动指纹归并
+ *   env skills     技能清单，按内容哈希归并
+ *   env memory     记忆与指令文件
+ *   env audit      体检
+ */
+async function cmdEnv(sub, opts) {
+  const { fullInventory, auditEnvironment } = await import('./env/inventory.js');
+
+  const which = sub || 'overview';
+
+  if (which === 'audit') {
+    const r = auditEnvironment();
+    if (opts.json) {
+      console.log(JSON.stringify(r, null, 2));
+      return;
+    }
+    printEnvAudit(r);
+    return;
+  }
+
+  const inv = fullInventory();
+
+  if (which === 'mcp') {
+    if (opts.json) {
+      console.log(JSON.stringify(inv.mcp, null, 2));
+      return;
+    }
+    printMcpDetail(inv.mcp);
+    return;
+  }
+
+  if (which === 'skills') {
+    if (opts.json) {
+      console.log(JSON.stringify(inv.skills, null, 2));
+      return;
+    }
+    printSkills(inv.skills, opts);
+    return;
+  }
+
+  if (which === 'memory') {
+    if (opts.json) {
+      console.log(JSON.stringify(inv.memory, null, 2));
+      return;
+    }
+    printMemory(inv.memory);
+    return;
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify(inv, null, 2));
+    return;
+  }
+  printEnvOverview(inv);
+}
+
+function printEnvOverview(inv) {
+  const s = inv.summary;
+
+  console.log(c(C.bold, '本机 Agent 能力面'));
+  console.log(
+    c(
+      C.dim,
+      `  ${s.agentsWithData} 个 Agent 有数据 · MCP ${s.mcpServices} 个服务（${s.mcpRegistrations} 条注册） · ` +
+        `技能 ${s.skills} 个（${s.skillInstalls} 处安装） · 记忆 ${s.memoryLocations} 处`
+    )
+  );
+  console.log('');
+
+  const head = ['Agent', 'MCP', '技能', '记忆'];
+  const widths = [18, 6, 6, 8];
+  console.log(c(C.dim, '  ' + head.map((h, i) => h.padEnd(widths[i])).join('')));
+
+  for (const a of inv.agents) {
+    const cells = [a.display, String(a.mcp.length), String(a.skills), String(a.memory)];
+    const colored = cells.map((v, i) => {
+      if (i === 0) return c(C.agent, v.padEnd(widths[i]));
+      // 0 不刺眼地留白，有值才高亮
+      if (v === '0') return c(C.dim, v.padEnd(widths[i]));
+      return v.padEnd(widths[i]);
+    });
+    console.log('  ' + colored.join(''));
+  }
+  console.log('');
+
+  // MCP 服务按跨 Agent 覆盖度排，这个排序本身就有信息量：
+  // 排在前面的是"全家都在用"的，排在后面的是"只在某一家配过"的
+  console.log(c(C.bold, 'MCP 服务'));
+  for (const m of inv.mcp.list) {
+    const who = m.agents.join(',');
+    const mark = m.agents.length > 1 ? c(C.ok, '●') : c(C.dim, '○');
+    const alias = m.aliases ? c(C.dim, ` (别名 ${m.aliases.join('/')})`) : '';
+    console.log(`  ${mark} ${m.service.padEnd(22)} ${String(m.agents.length)} 家  ${c(C.dim, who)}${alias}`);
+  }
+  console.log(c(C.dim, '  ● 多家共用   ○ 只在一家'));
+  console.log('');
+
+  console.log(c(C.dim, '细看：env mcp / env skills / env memory / env audit'));
+}
+
+function printMcpDetail(mcp) {
+  console.log(c(C.bold, 'MCP 服务'));
+  console.log(c(C.dim, `  ${mcp.services} 个服务，${mcp.registrations} 条注册，来自 ${mcp.files} 个配置文件`));
+  console.log('');
+
+  for (const s of mcp.list) {
+    const mark = s.agents.length > 1 ? c(C.ok, '●') : c(C.dim, '○');
+    console.log(`${mark} ${c(C.bold, s.service)}  ${c(C.dim, `${s.registrations} 条注册 / ${s.agents.length} 家`)}`);
+    console.log(`    Agents  ${s.agents.join(', ')}`);
+    if (s.aliases) console.log(`    别名    ${s.aliases.join(' / ')}`);
+    console.log(`    启动    ${s.forms.join(' / ')}`);
+    if (s.envKeys && s.envKeys.length) {
+      // 只列键名。值在这里永远不会出现——这条线不能越过。
+      console.log(`    环境变量键  ${s.envKeys.join(', ')}`);
+    }
+    console.log('');
+  }
+
+  if (mcp.mixedForms.length) {
+    console.log(c(C.when, '安装形态不一致'));
+    for (const m of mcp.mixedForms) {
+      console.log(`  ${m.service}: ${m.forms.join(' / ')}`);
+      console.log(c(C.dim, `    分布在 ${m.agents.join(', ')}。npx 每次拉最新，本地安装钉版本，行为可能不同。`));
+    }
+    console.log('');
+  }
+
+  console.log(c(C.dim, '环境变量的值一律不读取、不传输，只报键名。要看值请自己打开配置文件。'));
+}
+
+function printSkills(sk, opts) {
+  console.log(c(C.bold, '技能'));
+  console.log(
+    c(C.dim, `  ${sk.skills} 个独立技能 · ${sk.installs} 处安装 · ${sk.shared} 个跨 Agent 共享 · ${sk.single} 个只在一处`)
+  );
+  console.log('');
+
+  console.log(c(C.dim, '  按 Agent 的安装处数'));
+  for (const [a, n] of Object.entries(sk.byAgent).sort((x, y) => y[1] - x[1])) {
+    console.log(`    ${a.padEnd(16)} ${String(n).padStart(4)}`);
+  }
+  console.log('');
+
+  console.log(c(C.bold, '跨 Agent 共享的技能'));
+  const shared = sk.list.filter((s) => s.agents.length > 1);
+  if (!shared.length) {
+    console.log(c(C.dim, '  没有。每个技能只在一处安装。'));
+  } else {
+    for (const s of shared.slice(0, opts.showAll ? shared.length : 20)) {
+      console.log(`  ${s.name.padEnd(34)} ${String(s.agents.length)} 家  ${c(C.dim, s.agents.join(','))}`);
+      if (s.aliases) console.log(c(C.dim, `     别名 ${s.aliases.join(', ')}`));
+    }
+    if (!opts.showAll && shared.length > 20) {
+      console.log(c(C.dim, `  …共 ${shared.length} 个，加 --all 看全部`));
+    }
+  }
+  console.log('');
+
+  const multiVersion = sk.list.filter((s) => s.versions);
+  if (multiVersion.length) {
+    console.log(c(C.when, '多版本并存'));
+    for (const s of multiVersion) console.log(`  ${s.name}: ${s.versions.join(' / ')}`);
+    console.log('');
+  }
+
+  console.log(c(C.dim, '按 SKILL.md 内容哈希归并：同一份技能装在几处算一个。加 --json 取完整清单。'));
+}
+
+function printMemory(mem) {
+  console.log(c(C.bold, '记忆与指令'));
+  console.log(
+    c(
+      C.dim,
+      `  ${mem.instructions} 份指令 · ${mem.memories} 处记忆 · ${mem.entries} 条条目 · ${mem.projectScoped} 处项目级`
+    )
+  );
+  console.log('');
+
+  // 指令和记忆分开摆：前者是"现在要求你怎么做"，后者是"过去学到过什么"。
+  // 混在一起看会让人以为它们是一回事。
+  const instructions = mem.list.filter((m) => m.kind === 'instruction');
+  const memories = mem.list.filter((m) => m.kind === 'memory');
+
+  console.log(c(C.bold, '指令（每轮注入的行为约定）'));
+  for (const m of instructions) {
+    const size = m.bytes ? `${Math.round(m.bytes / 1024)}KB` : '空';
+    console.log(`  ${m.agent.padEnd(14)} ${size.padEnd(7)} ${c(C.dim, m.preview ? m.preview.slice(0, 60) : '')}`);
+  }
+  console.log('');
+
+  console.log(c(C.bold, '记忆'));
+  const global = memories.filter((m) => m.scope === 'global');
+  const scoped = memories.filter((m) => m.scope === 'project');
+
+  for (const m of global) {
+    const size = `${Math.round(m.bytes / 1024)}KB`;
+    const count = m.entries != null ? `${m.entries} 条` : '';
+    console.log(`  ${m.agent.padEnd(14)} ${m.format.padEnd(8)} ${size.padStart(6)} ${count.padStart(7)}`);
+  }
+
+  if (scoped.length) {
+    console.log('');
+    console.log(c(C.bold, '  项目级（只在对应项目里生效）'));
+    for (const m of scoped) {
+      // 认不出项目的，明确标出来——不能显示成 "?" 让人以为是解析失败
+      const label = m.project || c(C.dim, '(未绑定项目的临时目录)');
+      console.log(`  ${label.padEnd(24)} ${String(m.entries ?? 0).padStart(3)} 条  ${c(C.dim, m.agent)}`);
+    }
+  }
+
+  console.log('');
+  console.log(
+    c(C.when, '这些记忆彼此独立，不做合并。')
+  );
+  console.log(
+    c(
+      C.dim,
+      '  不同 Agent 的记忆可能互相矛盾（同一件事的偏好写得相反）。合并成"你的记忆"会说谎，' +
+        '所以这里只报出处。换 Agent 后旧记忆不会自动跟过去。'
+    )
+  );
+}
+
+function printEnvAudit(r) {
+  console.log(c(C.bold, '环境层体检'));
+  const s = r.summary;
+  console.log(
+    c(
+      C.dim,
+      `  ${s.agentsPresent} 个 Agent · MCP ${s.mcpServices} 个服务 · 技能 ${s.skills} 个 · 记忆 ${s.memoryEntries} 条`
+    )
+  );
+  console.log('');
+
+  if (!r.findings.length) {
+    console.log(c(C.ok, '没有发现问题。'));
+    return;
+  }
+
+  for (const f of r.findings) {
+    const mark = f.level === 'warn' ? c(C.when, '!') : c(C.dim, '·');
+    console.log(`${mark} ${f.title}`);
+    console.log(c(C.dim, `  ${f.detail}`));
+    console.log('');
+  }
+}
+
 async function cmdStats(opts) {
   const { projects, stats, totalSessions } = listProjects({ noCache: opts.noCache });
   if (opts.json) {
@@ -1361,6 +1626,9 @@ async function main() {
     case 'doctor':
     case 'check':
       return cmdDoctor(opts);
+    case 'env':
+    case 'inventory':
+      return cmdEnv(opts.positionals[0], opts);
     case 'mcp':
       return cmdMcp(opts);
     case 'secrets':
