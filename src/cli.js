@@ -51,6 +51,7 @@ function usage() {
   agent-archive env                            本机各 Agent 具备什么能力
   agent-archive env mcp                        MCP 服务清单（跨 Agent 归并）
   agent-archive env skills                     技能清单（按内容去重）
+  agent-archive env usage                      技能使用率（哪些真用过）
   agent-archive env memory                     记忆与指令文件
   agent-archive env audit                      环境层体检
   agent-archive secrets                        扫描归档里的明文凭证
@@ -1294,6 +1295,17 @@ async function cmdEnv(sub, opts) {
     return;
   }
 
+  if (which === 'usage') {
+    const { skillUsageSummary } = await import('./env/usage.js');
+    const r = await skillUsageSummary({ fresh: opts.noCache });
+    if (opts.json) {
+      console.log(JSON.stringify(r, null, 2));
+      return;
+    }
+    printSkillUsage(r, opts);
+    return;
+  }
+
   if (which === 'memory') {
     if (opts.json) {
       console.log(JSON.stringify(inv.memory, null, 2));
@@ -1498,6 +1510,74 @@ function printEnvAudit(r) {
     console.log(`${mark} ${f.title}`);
     console.log(c(C.dim, `  ${f.detail}`));
     console.log('');
+  }
+}
+
+function printSkillUsage(r, opts) {
+  if (!r.ready) {
+    console.log(c(C.when, r.message));
+    return;
+  }
+
+  console.log(c(C.bold, '技能使用率'));
+  console.log(
+    c(
+      C.dim,
+      `  装了 ${r.installed} 个 · 用过 ${r.usedCount} 个 · 从没用过 ${r.unusedCount} 个 · ` +
+        `共 ${r.calls} 次调用，涉及 ${r.sessionsWithSkill} 场会话`
+    )
+  );
+  console.log('');
+
+  // 一句话结论。这个数字本身比列表更有用——
+  // 它回答的是"我这堆技能到底有没有在干活"。
+  const rate = r.installed ? (r.usedCount / r.installed) * 100 : 0;
+  const mark = rate >= 30 ? c(C.ok, '✓') : c(C.when, '!');
+  console.log(`${mark} 使用率 ${rate.toFixed(1)}%（${r.usedCount}/${r.installed}）`);
+  console.log('');
+
+  console.log(c(C.bold, '最常调用'));
+  for (const s of r.top.slice(0, opts.showAll ? r.top.length : 15)) {
+    const same = s.sameNameCount ? c(C.dim, `  [同名 ${s.sameNameCount} 份实现]`) : '';
+    const as = s.calledAs ? c(C.dim, `  调作 ${s.calledAs.join(' / ')}`) : '';
+    console.log(`  ${String(s.calls).padStart(3)} 次  ${s.name.padEnd(30)} ${c(C.dim, s.agents.join(','))}${same}${as}`);
+  }
+  console.log('');
+
+  if (r.unknownCount) {
+    console.log(c(C.bold, '用了但清单里没有'));
+    console.log(c(C.dim, '  这些调用找不到对应技能，可能是已删的、或在别的位置：'));
+    for (const u of r.unknown.slice(0, opts.showAll ? r.unknown.length : 10)) {
+      console.log(`  ${String(u.calls).padStart(3)} 次  ${u.skill}`);
+    }
+    console.log('');
+  }
+
+  console.log(c(C.bold, '从没用过'));
+  const never = r.neverUsed;
+  for (const s of never.slice(0, opts.showAll ? never.length : 12)) {
+    console.log(`  ${s.name.padEnd(34)} ${c(C.dim, s.agents.join(','))}`);
+  }
+  if (!opts.showAll && never.length > 12) {
+    console.log(c(C.dim, `  …共 ${never.length} 个，加 --all 看全部`));
+  }
+  console.log('');
+
+  console.log(
+    c(
+      C.dim,
+      '数据来源：会话里的 Skill 工具调用，只统计已建索引的会话。' +
+        (r.cached ? '（本次命中缓存，加 --no-cache 重扫）' : '')
+    )
+  );
+
+  // 覆盖范围必须说清楚，否则"从没用过 265 个"会被当成完整结论。
+  // 实测 Codex 没有 Skill 工具（直接 Read 那个 SKILL.md），
+  // 所以它用过的技能不会出现在这里。
+  if (r.coverage) {
+    console.log('');
+    console.log(c(C.dim, `  只覆盖显式调用 Skill 工具的 Agent：${r.coverage.agentsWithSkillTool.join('、') || '（无）'}`));
+    console.log(c(C.dim, '  Codex 等直接读 SKILL.md 的用法不计入，所以"用过"是下限、"没用过"是上限。'));
   }
 }
 

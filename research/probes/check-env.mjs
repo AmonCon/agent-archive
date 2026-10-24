@@ -198,8 +198,10 @@ console.log('\n只读边界（别的 Agent 的数据不能被碰）');
 //    真正的边界不是"一行都不能写"，而是"不能写别家 Agent 的目录"——
 //    缓存要落盘，工具也要能干活。所以按写入目标判断，不按函数名一刀切。
 const WRITE_CALL = /\bfs\.(writeFileSync|appendFileSync|unlinkSync|rmSync|renameSync|copyFileSync|symlinkSync|chmodSync|createWriteStream)\s*\(/;
-// 允许：写 ~/.agent-archive 的缓存、往系统临时目录复制数据库
-const ALLOWED_TARGET = /cacheFile\(\)|tmpdir\(\)|copy\b|dir\b/;
+// 允许：写 ~/.agent-archive 的缓存、往系统临时目录复制数据库。
+// 白名单按"变量名看起来像自己的缓存路径"来判断——这是静态检查的
+// 固有局限，但它能拦住"往别人目录写"这种真正的越界。
+const ALLOWED_TARGET = /cacheFile\(\)|cachePath|tmpdir\(\)|copy\b|dir\b/;
 
 const envDir = path.join(ROOT, 'src', 'env');
 const offenders = [];

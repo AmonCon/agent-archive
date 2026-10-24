@@ -374,10 +374,10 @@ const TOOLS = [
       properties: {
         type: {
           type: 'string',
-          enum: ['overview', 'mcp', 'skills', 'memory', 'audit'],
+          enum: ['overview', 'mcp', 'skills', 'usage', 'memory', 'audit'],
           description:
             'overview=每个 Agent 一行的总览（默认）；mcp=MCP 服务清单，含跨 Agent 归并；' +
-            'skills=技能清单；memory=记忆与指令文件；audit=体检与建议',
+            'skills=技能清单；usage=技能使用率（哪些真被调用过）；memory=记忆与指令文件；audit=体检与建议',
         },
         agent: {
           type: 'string',
@@ -431,6 +431,11 @@ const TOOLS = [
           })),
           truncated: list.length > cap,
         };
+      }
+
+      if (type === 'usage') {
+        const { skillUsageSummary } = await import('./env/usage.js');
+        return skillUsageSummary({});
       }
 
       if (type === 'memory') {
