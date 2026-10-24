@@ -5,6 +5,8 @@ const suites = [
   ['平台路径', 'research/probes/check-platform.mjs'],
   ['CLI', 'research/probes/check-cli.mjs'],
   ['MCP 工具', 'research/probes/check-mcp.mjs'],
+  ['Qoder/dsh 采集', 'research/probes/check-qoder-dsh.mjs'],
+  ['调用层', 'research/probes/check-calls.mjs'],
   ['可移植性 lint', 'research/probes/lint-portability.mjs'],
   ['路径审计', 'research/probes/audit-paths.mjs'],
   ['macOS 假设', 'research/probes/check-mac-assumptions.mjs'],

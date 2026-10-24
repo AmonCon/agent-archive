@@ -461,6 +461,101 @@ const TOOLS = [
       };
     },
   },
+  {
+    name: 'model_calls',
+    title: '模型调用成本',
+    description:
+      '每场会话为模型付了多少：调用次数、输入/输出 token、缓存命中率、费用。' +
+      '数据来自本地模型网关的调用日志（如 magpie 的 usage.jsonl），不是从会话正文推算的。' +
+      '用途：判断一场对话换模型能省多少、哪一步最贵、缓存有没有生效。' +
+      '注意：只有经过网关的调用才被记录，所以这是"已观测到的成本"，不是全部成本；' +
+      '返回里同时给 matchedSessions 和 totalCalls，别把覆盖率当成 100%。' +
+      '没装网关时返回 available:false 和原因，不报错。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        groupBy: {
+          type: 'string',
+          enum: ['agent', 'model', 'provider', 'session'],
+          description: '汇总维度（默认 agent）。要按会话看用 session。',
+        },
+        agent: {
+          type: 'string',
+          description: '只看某个 Agent（如 qoder、zcode、dsh）',
+        },
+        session: {
+          type: 'string',
+          description: '只看某场会话（会话 id 前缀即可）',
+        },
+        limit: {
+          type: 'number',
+          description: '最多返回多少组（默认 20，上限 100）',
+        },
+      },
+      additionalProperties: false,
+    },
+    handler: async ({ groupBy = 'agent', agent, session, limit = 20 }) => {
+      const { readCalls, summarizeCalls, attachToSessions } = await import('./calls.js');
+      const cap = Math.min(Math.max(Number(limit) || 20, 1), 100);
+
+      const r = readCalls();
+      if (!r.ready) {
+        return {
+          available: false,
+          reason: r.message,
+          note: '调用层是可选的。会话层的工具不受影响。',
+        };
+      }
+
+      let calls = r.calls;
+      if (agent) calls = calls.filter((c) => c.agent === agent);
+      if (session) calls = calls.filter((c) => c.session && c.session.startsWith(session));
+
+      const rows = summarizeCalls({ calls, groupBy });
+
+      // 只有按会话看时才去扫归档算匹配率：按 Agent 汇总不需要，
+      // 而扫一次全量要几秒
+      let link = null;
+      if (groupBy === 'session' || session) {
+        const { scanAll } = await import('./registry.js');
+        const { sessions } = scanAll({});
+        const l = attachToSessions(calls, sessions);
+        link = {
+          matchedSessions: l.sessions,
+          matchedCalls: l.matched.length,
+          totalCalls: l.totalCalls,
+          withoutSession: l.withoutSession,
+        };
+      }
+
+      return {
+        available: true,
+        sources: r.sources.map((s) => s.display),
+        range: r.range,
+        calls: calls.length,
+        groupBy,
+        rows: rows.slice(0, cap).map((g) => ({
+          key: g.key,
+          calls: g.calls,
+          failed: g.failed,
+          inputTokens: g.input,
+          uncachedInput: g.in,
+          cacheRead: g.cacheRead,
+          cacheWrite: g.cacheWrite,
+          outputTokens: g.out,
+          cacheHit: g.cacheHit == null ? null : Number(g.cacheHit.toFixed(3)),
+          credits: g.creditsKnown ? Number(g.credits.toFixed(2)) : null,
+          avgTtftMs: g.avgTtft == null ? null : Math.round(g.avgTtft),
+          outPerSec: g.outPerSec == null ? null : Math.round(g.outPerSec),
+        })),
+        truncated: rows.length > cap,
+        link,
+        note:
+          'inputTokens 含缓存读写；cacheHit 只看缓存读，不含缓存写。' +
+          '费用 credits 由网关按供应商口径记录，缺价时不估。',
+      };
+    },
+  },
 ];
 
 /* ------------------------------ 渲染 ------------------------------ */
@@ -584,8 +679,10 @@ async function dispatch(msg) {
           '没有的话用 search_sessions 或 project_timeline 定位 → read_session 读正文（会截断，按需分段）。' +
           '**环境层**——inventory 看这台机器上各 Agent 配了哪些 MCP 服务、装了哪些技能、有哪些记忆。' +
           '刚接触这个环境、或想知道别的 Agent 已具备什么能力时先调 inventory；' +
+          '**调用层**——model_calls 看每场会话/每个 Agent 为模型付了多少（token、缓存命中、费用），' +
+          '数据来自本地网关日志，只覆盖经过网关的调用。' +
           '要看某个项目发生过什么再用会话层。' +
-          '两层都只提供事实与出处，不替你合并结论，也不回传任何凭证值。',
+          '三层都只提供事实与出处，不替你合并结论，也不回传任何凭证值。',
       };
     }
 

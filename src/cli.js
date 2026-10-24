@@ -54,6 +54,8 @@ function usage() {
   agent-archive env usage                      技能使用率（哪些真用过）
   agent-archive env memory                     记忆与指令文件
   agent-archive env audit                      环境层体检
+  agent-archive calls                          模型调用成本（按 Agent / 模型 / 会话）
+  agent-archive calls --by session             调用挂到具体会话，报匹配率
   agent-archive secrets                        扫描归档里的明文凭证
   agent-archive llm                            配置模型接入（查看/设置）
   agent-archive digest <项目>                  生成项目摘要（默认只估算）
@@ -81,6 +83,7 @@ cat 的会话参数:
   --agent <名字>          限制在某个 Agent 内查找（cat）
   --port <端口>           网页端口（serve，默认 7788）
   --limit <n>             搜索结果条数（search，默认 20）
+  --by <维度>             calls 的分组维度：agent / model / provider / session
   --force                 忽略增量判断，重建全部（index）
   --session               导出单场会话（export）
   --bundle                导出项目全部会话（export）
@@ -1615,6 +1618,131 @@ async function cmdStats(opts) {
 }
 
 /**
+ * 调用层：一次模型请求花了多少。
+ *
+ * 与会话层的分工：会话回答"聊过什么"，这里回答"为它付了多少"。
+ * 默认不加参数就是按 Agent 汇总；--by model / --by session 换维度。
+ *
+ * 两个数字必须一起出现：匹配上多少场会话、日志里总共有多少场。
+ * 只报前者会让人以为覆盖率是 100%。
+ */
+async function cmdCalls(opts) {
+  const { readCalls, summarizeCalls, attachToSessions, callsHint } = await import('./calls.js');
+
+  const r = readCalls();
+
+  if (!r.ready) {
+    if (opts.json) {
+      console.log(JSON.stringify({ ready: false, message: r.message }, null, 2));
+      return;
+    }
+    console.log(c(C.when, '调用层不可用'));
+    console.log(c(C.dim, '  ' + r.message));
+    console.log(c(C.dim, '  ' + callsHint()));
+    return;
+  }
+
+  const by = (opts.by || 'agent').toLowerCase();
+  const rows = summarizeCalls({ calls: r.calls, groupBy: by });
+
+  // 会话匹配率只有在需要时才去扫归档——按 agent 汇总不需要
+  let link = null;
+  if (by === 'session' || opts.flags.has('--link')) {
+    const { scanAll } = await import('./registry.js');
+    const { sessions } = scanAll({ noCache: opts.noCache });
+    link = attachToSessions(r.calls, sessions);
+  }
+
+  if (opts.json) {
+    console.log(
+      JSON.stringify(
+        {
+          ready: true,
+          sources: r.sources,
+          range: r.range,
+          groupBy: by,
+          rows,
+          link: link
+            ? {
+                matchedSessions: link.sessions,
+                matchedCalls: link.matched.length,
+                totalCalls: link.totalCalls,
+                withoutSession: link.withoutSession,
+              }
+            : null,
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  const span = r.range
+    ? `${fmtDate(r.range.start)} → ${fmtDate(r.range.end)}`
+    : '—';
+  console.log(c(C.bold, '模型调用') + c(C.dim, `   ${r.calls.length} 次 · ${span}`));
+  console.log(c(C.dim, `  来源 ${r.sources.map((s) => s.display).join('、')}`));
+  console.log('');
+
+  const label = { agent: 'Agent', model: '模型', provider: '供应商', session: '会话' }[by] || '分组';
+  console.log(c(C.dim, `  ${label.padEnd(18)}${'调用'.padStart(7)}${'输入'.padStart(12)}${'输出'.padStart(11)}${'缓存命中'.padStart(9)}${'费用'.padStart(10)}`));
+
+  const top = opts.showAll ? rows : rows.slice(0, 15);
+  for (const g of top) {
+    const name = g.key.length > 17 ? g.key.slice(0, 16) + '…' : g.key;
+    const cost = g.creditsKnown ? g.credits.toFixed(1) : '—';
+    const hit = g.cacheHit == null ? '—' : `${Math.round(g.cacheHit * 100)}%`;
+    const fail = g.failed ? c(C.when, ` ✗${g.failed}`) : '';
+    console.log(
+      '  ' +
+        c(C.agent, name.padEnd(18)) +
+        c(C.dim, String(g.calls).padStart(7)) +
+        fmtNum(g.input).padStart(12) +
+        fmtNum(g.out).padStart(11) +
+        hit.padStart(9) +
+        cost.padStart(10) +
+        fail
+    );
+  }
+  if (rows.length > top.length) {
+    console.log(c(C.dim, `  …还有 ${rows.length - top.length} 组（--all 展开）`));
+  }
+  console.log('');
+  console.log(
+    c(
+      C.dim,
+      '  输入 = 未缓存 + 缓存读 + 缓存写；缓存命中 = 缓存读 /（缓存读 + 未缓存输入）。'
+    )
+  );
+  if (r.skipped.malformed) {
+    console.log(c(C.dim, `  ${r.skipped.malformed} 行日志解析失败（多为正在写入的末行），已跳过。`));
+  }
+
+  if (link) {
+    const pct = r.calls.length ? Math.round((link.matched.length / r.calls.length) * 100) : 0;
+    console.log(
+      c(C.bold, '\n  与会话层的关联') +
+        c(
+          C.dim,
+          `   ${link.sessions} 场会话可对上 · ${link.matched.length}/${link.totalCalls} 次调用（${pct}%）`
+        )
+    );
+    if (link.withoutSession) {
+      console.log(
+        c(
+          C.dim,
+          `  ${link.withoutSession} 次调用本身没有会话 id——不走网关的 Agent 就没有这个字段，`
+        )
+      );
+      console.log(c(C.dim, '  所以这是"已观测到的成本"，不是全部成本。'));
+    }
+  } else {
+    console.log(c(C.dim, '\n  想看调用挂到具体会话：agent-archive calls --by session'));
+  }
+}
+
+/**
  * 参数解析只有一个入口。
  *
  * 命令函数只接收已经分好类的选项对象，不直接碰 process.argv——
@@ -1634,6 +1762,7 @@ function parseArgs(argv) {
     '--provider',
     '--price-in',
     '--price-out',
+    '--by',
   ]);
 
   const flags = new Set();
@@ -1677,6 +1806,7 @@ function parseArgs(argv) {
     provider: values.provider,
     priceIn: values['price-in'],
     priceOut: values['price-out'],
+    by: values.by,
     positionals,
   };
 }
@@ -1709,6 +1839,8 @@ async function main() {
     case 'env':
     case 'inventory':
       return cmdEnv(opts.positionals[0], opts);
+    case 'calls':
+      return cmdCalls(opts);
     case 'mcp':
       return cmdMcp(opts);
     case 'secrets':
