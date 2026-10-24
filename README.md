@@ -780,17 +780,26 @@ Linux 严格区分（在 Linux 上忽略大小写是个真实的绕过口子）�
 > 解析失败 0、重复 id 0）。**macOS 与 Linux 仍未在真机跑过**——
 > 路径约定已按官方文档和源码核对过，但这个仓库里没有第二台机器可用。
 >
-> **在 Mac / Linux 上首次使用，按顺序跑这两个：**
+> **在 Mac / Linux 上首次使用，跑这一个就够：**
+>
+> ```bash
+> node research/probes/mac-check.mjs
+> ```
+>
+> 它是**单文件、零依赖**的，不需要 clone 整个仓库——把文件复制过去
+> `node mac-check.mjs` 就能跑。会输出一份报告到
+> `/tmp/agent-archive-mac-check.txt`，直接贴回来即可。
+>
+> 它做路径层面的自检：11 个 Agent 的候选路径哪些真实存在、
+> 每个位置有多少会话文件、哪些环境变量被读进来。**全程只读。**
+>
+> 想跑更完整的验证（真的解析会话、验证正文可读性）：
 >
 > ```bash
 > node research/probes/audit-paths.mjs    # 秒级：路径假设对不对
 > node research/probes/verify-mac.mjs     # 分钟级：实际读到多少会话
+> node research/probes/run-all.mjs        # 全部七个回归套件
 > ```
->
-> 第一个只做路径自检：每个 Agent 的候选路径哪些真实存在、哪些环境变量
-> 被读进来、路径比较的大小写语义。第二个会真的扫一遍会话，验证正文可读性
-> 和项目归集。**某个 Agent 显示 0 场但你确实用过它**，把 `audit-paths.mjs`
-> 的输出发回来即可——那里会明确列出它试过哪些路径。
 
 ### Cursor 的路径反解是个特例
 
