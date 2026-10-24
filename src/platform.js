@@ -78,12 +78,20 @@ export function withOverrides(overrideNames, defaults) {
   return out;
 }
 
+/**
+ * 去重用的路径键：大小写跟随文件系统。
+ *
+ * 导出它是因为扫描器也要去重（同一个目录可能通过两个候选根都被看到），
+ * 而且必须用**和这里一致的规则**——两处各写一遍迟早会不一致。
+ */
+export function pathKey(p) {
+  const ci = process.platform === 'win32' || process.platform === 'darwin';
+  return ci ? String(p).toLowerCase() : String(p);
+}
+
 /** 大小写跟随文件系统，用来去重。 */
 function samePathNorm(a, b) {
-  const ci = process.platform === 'win32' || process.platform === 'darwin';
-  const na = String(a).replace(/\\/g, '/').replace(/\/+$/, '');
-  const nb = String(b).replace(/\\/g, '/').replace(/\/+$/, '');
-  return ci ? na.toLowerCase() === nb.toLowerCase() : na === nb;
+  return pathKey(a) === pathKey(b);
 }
 
 /** 某个桌面应用的用户数据目录候选（按当前平台优先排序）。 */

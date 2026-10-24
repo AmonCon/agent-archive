@@ -8,6 +8,7 @@ import * as claudeCode from './scanners/claude-code.js';
 import * as codex from './scanners/codex.js';
 import * as zcode from './scanners/zcode.js';
 import * as qoder from './scanners/qoder.js';
+import * as dsh from './scanners/dsh.js';
 import * as hermes from './scanners/hermes.js';
 import * as cursor from './scanners/cursor.js';
 import * as opencode from './scanners/opencode.js';
@@ -32,6 +33,7 @@ export const scanners = [
   codex,
   zcode,
   qoder,
+  dsh,
   hermes,
   cursor,
   opencode,
