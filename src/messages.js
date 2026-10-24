@@ -88,6 +88,32 @@ export function assertUnder(root, target) {
 }
 
 /**
+ * 越界校验：路径必须落在**任意一个**给定根目录之下。
+ *
+ * 为什么需要复数版本：一个 Agent 可能有多个数据根——
+ * CLAUDE_CONFIG_DIR 指到外置盘、~/.config/claude 的历史遗留、
+ * macOS 上 ~/.cache/.gemini 这类运行时改道。只要 source 是从其中
+ * 一个根发现的，读它就是合法的。
+ *
+ * 语义与 assertUnder 完全一致，只是把"一个根"换成"一组根"：
+ * 全部校验不过才抛错。
+ */
+export function assertUnderAny(roots, target) {
+  const list = (Array.isArray(roots) ? roots : [roots]).filter(Boolean);
+  if (!list.length) throw new Error('没有可用的根目录');
+
+  let last;
+  for (const r of list) {
+    try {
+      return assertUnder(r, target);
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last || new Error(`拒绝读取根目录之外的路径: ${target}`);
+}
+
+/**
  * 尽量取真实路径。文件可能刚被删掉，但父目录通常还在，
  * 所以退一步解析父目录再拼回文件名，一样能挡住 ../ 逃逸。
  */

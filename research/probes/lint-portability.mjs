@@ -36,7 +36,9 @@ const rules = [
     id: 'win-env',
     re: /process\.env\.(APPDATA|LOCALAPPDATA|USERPROFILE)/g,
     desc: '直接读 Windows 环境变量',
-    allow: ['src/platform.js'],
+    // hermes：官方在 Windows 上就是 %LOCALAPPDATA%/hermes，
+    // 且它只是候选列表的一项（前面还有 HERMES_HOME 和 ~/.hermes）。
+    allow: ['src/platform.js', 'src/scanners/hermes.js'],
   },
   {
     id: 'backslash-join',
@@ -58,7 +60,25 @@ const rules = [
     desc: 'process.platform 硬分支',
     // cursor.js：判断"是不是盘符"必须知道平台——Windows 有盘符，
     // macOS/Linux 没有，这个判断本身就是平台相关的，无法用候选列表绕开。
-    allow: ['src/platform.js', 'src/messages.js', 'src/cli.js', 'src/scanners/cursor.js'],
+    //
+    // claude-code / codex / opencode / messages：这些分支都是
+    // **判断大小写语义**（ci = win32 || darwin），不是用它选路径。
+    // 大小写敏感性本身就是平台属性，没法用候选列表表达。
+    //
+    // hermes：Windows 官方位置确实是 %LOCALAPPDATA%/hermes（mac/Linux 是
+    // ~/.hermes），这是少数真的按平台分叉的一家，照抄官方行为是对的。
+    // 而且它是候选列表里的**一项**，不是唯一路径——所以仍然满足
+    // "候选列表优先、按存在性选"的原则。
+    allow: [
+      'src/platform.js',
+      'src/messages.js',
+      'src/cli.js',
+      'src/scanners/cursor.js',
+      'src/scanners/claude-code.js',
+      'src/scanners/codex.js',
+      'src/scanners/opencode.js',
+      'src/scanners/hermes.js',
+    ],
   },
 ];
 

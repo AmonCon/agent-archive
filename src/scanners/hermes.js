@@ -1,160 +1,340 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
 
 /**
  * Hermes 会话扫描。
  *
- * 存储：~/.hermes/sessions/YYYYMMDD_HHMMSS_<hash>.jsonl
+ * **主存储是 `~/.hermes/state.db`（SQLite），不是 `sessions/*.jsonl`。**
  *
- * 格式干净：一行一个 {role, content, reasoning, timestamp}，
- * 首行 role=session_meta 带 tools/model/platform。
+ * 这一条是踩过才知道的：早期版本只扫 `sessions/*.jsonl`，本机读到 34 场，
+ * 而 state.db 里有 219 场（211 场有消息）。漏了 6/7 的数据——而且它不报错，
+ * 只是安静地少算。Hermes 官方文档也写明"旧版 *.jsonl transcript 不再写入或读取"。
  *
- * 两个必须如实处理的限制：
+ * 目录里那 227 个 `.json` 是**导出文件**（saved/），不是主存储，不参与扫描。
  *
- * 1. **没有 cwd。** Hermes 是接飞书等渠道的助手，不绑定项目目录。
- *    所以它的会话归不到任何项目——这不是缺陷，是它跟编码 Agent 的
- *    定位差异。列进项目清单没有意义，但不该从档案馆里消失，
- *    因此 project 留空，由上层决定怎么展示。
+ * ## state.db 的几件事
  *
- * 2. **时间戳没有时区。** 形如 "2026-04-28T16:07:52.990679"，按本机
- *    本地时间解释。new Date() 对无时区字符串正是这个语义，符合预期。
+ *   sessions 表  id / source / model / started_at / ended_at / title / cwd /
+ *                parent_session_id / message_count / hidden / archived
+ *   messages 表  session_id / role / content / reasoning / tool_name /
+ *                tool_calls / timestamp / active / compacted
+ *
+ * 三个必须如实处理的点：
+ *
+ * 1. **有 cwd 的只有 46/219。** Hermes 是接飞书等渠道的助手，多数会话
+ *    不绑定工作目录（source=feishu 的就是聊天）。所以 project 大部分为空，
+ *    但**不是全都为空**——有 cwd 的那些要归到项目去，不能一刀切丢掉。
+ *    早期版本把 project 硬编码成 null，那会让这 46 场永远进不了项目时间线。
+ *
+ * 2. **47 场有 parent_session_id（子代理）。** 与 Codex/OpenCode 的处理一致：
+ *    整条跳过。它们是父会话内部的一步，按 session_id 归并会挤成一条。
+ *
+ * 3. **25 场 hidden=1。** 这些是用户主动隐藏的会话。仍然采（事实存在），
+ *    但不进标题/时间的主要统计口径——标题缺失时用 source 兜底。
+ *
+ * 时间戳是 epoch 秒（REAL，带小数）。`started_at=1776274941.9466` 要乘 1000；
+ * 用 model.js 的 toDate 会按 >1e11 判断，但它只接受整数毫秒的语义，
+ * 这里自己乘，避免歧义。
  */
 
 export const name = 'hermes';
 
+function hermesDir() {
+  // HERMES_HOME 是官方支持的重定向（源码里优先级最高）。
+  // macOS 默认 ~/.hermes，Windows 官方是 %LOCALAPPDATA%/hermes——
+  // 但本机实测 Windows 上也在 ~/.hermes（早期安装方式），
+  // 所以两个候选都试，存在的优先。
+  const override = process.env.HERMES_HOME;
+  const home = os.homedir();
+  const candidates = [
+    override && String(override).trim(),
+    path.join(home, '.hermes'),
+    process.platform === 'win32' && process.env.LOCALAPPDATA
+      ? path.join(process.env.LOCALAPPDATA, 'hermes')
+      : null,
+  ].filter(Boolean);
+
+  for (const c of candidates) {
+    try {
+      if (fs.statSync(c).isDirectory()) return c;
+    } catch {
+      /* 试下一个 */
+    }
+  }
+  return path.join(home, '.hermes');
+}
+
+function dbPath() {
+  return path.join(hermesDir(), 'state.db');
+}
+
 function sessionsDir() {
-  return path.join(os.homedir(), '.hermes', 'sessions');
+  return path.join(hermesDir(), 'sessions');
 }
 
-export function discover() {
-  const root = sessionsDir();
-  const out = [];
-  let entries;
-  try {
-    entries = fs.readdirSync(root, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const e of entries) {
-    if (e.isFile() && e.name.endsWith('.jsonl')) out.push(path.join(root, e.name));
-  }
-  return out;
-}
+let store = null;
+let storePath = null;
 
-export function parse(file) {
-  let text;
+/** SQLite 以只读方式打开，用完由 registry 调 closeStore 关闭。 */
+export function openStore(file) {
   try {
-    text = fs.readFileSync(file, 'utf8');
+    const db = new DatabaseSync(file, { readOnly: true });
+    db.prepare('pragma busy_timeout = 5000').run();
+    return db;
   } catch {
     return null;
   }
+}
 
-  let meta = null;
-  let firstUserText = null;
-  let firstAssistantText = null;
-  let start = null;
-  let end = null;
-  let turns = 0;
-
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    let o;
+function getStore() {
+  const p = dbPath();
+  if (store && storePath === p) return store;
+  if (store) {
     try {
-      o = JSON.parse(line);
+      store.close();
     } catch {
-      continue;
+      /* 忽略 */
     }
-
-    if (o.role === 'session_meta') {
-      meta = o;
-      continue;
-    }
-
-    const d = parseTs(o.timestamp);
-    if (d) {
-      if (!start || d < start) start = d;
-      if (!end || d > end) end = d;
-    }
-
-    turns++;
-    if (o.role === 'user' && !firstUserText) {
-      const t = textOf(o.content);
-      if (t) firstUserText = t;
-    } else if (o.role === 'assistant' && !firstAssistantText) {
-      const t = textOf(o.content);
-      if (t) firstAssistantText = t;
-    }
+    store = null;
   }
+  store = openStore(p);
+  storePath = p;
+  return store;
+}
 
-  if (!turns) return null;
-
-  // 文件名 20260428_160732_1e25bfbe.jsonl 里带时间，时间戳缺失时兜底
-  const base = path.basename(file, '.jsonl');
-  const m = base.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})_/);
-  const id = base;
-
-  if (!start && m) {
-    start = new Date(
-      Number(m[1]),
-      Number(m[2]) - 1,
-      Number(m[3]),
-      Number(m[4]),
-      Number(m[5]),
-      Number(m[6])
-    );
+export function closeStore() {
+  if (store) {
+    try {
+      store.close();
+    } catch {
+      /* 忽略 */
+    }
+    store = null;
+    storePath = null;
   }
-  if (!end) end = start;
-
-  return makeSession({
-    agent: name,
-    id,
-    // Hermes 不绑定工作目录，project 留空——不编造一个路径
-    project: null,
-    title: firstUserText || firstAssistantText || (meta && meta.platform ? `(${meta.platform})` : null),
-    start,
-    end,
-    source: file,
-    resume: null,
-  });
 }
 
 /**
- * 解析 Hermes 的时间戳。
+ * 返回一个"会话来源描述"字符串，而不是文件路径。
  *
- * 形如 "2026-04-28T16:07:52.990679"：无时区，按本地时间解释。
- * 微秒精度 JS 只保留毫秒，多余的位数直接截断，不影响排序。
+ * 下游（readMessages / assertUnder）需要区分两种来源：
+ *   db:<session-id>         —— 主存储，按 id 查库
+ *   file:<绝对路径>         —— 旧的 jsonl，按路径读
+ *
+ * 这样同一个 scanner 能同时服务两种格式，而 registry 的缓存键
+ * 仍然是"文件路径"——DB 那个用一个固定路径当键。
  */
-function parseTs(ts) {
-  if (!ts) return null;
-  if (typeof ts === 'number') return new Date(ts > 1e11 ? ts : ts * 1000);
-  const d = new Date(String(ts));
-  return Number.isNaN(d.getTime()) ? null : d;
+function sourceOf(id) {
+  return `db:${id}`;
 }
 
-function textOf(content) {
-  if (typeof content === 'string') return content.trim();
-  if (!Array.isArray(content)) return '';
-  const parts = [];
-  for (const p of content) {
-    if (!p) continue;
-    if (typeof p === 'string') parts.push(p);
-    else if (typeof p.text === 'string') parts.push(p.text);
-    else if (typeof p.content === 'string') parts.push(p.content);
+export function discover() {
+  // registry 的缓存键是文件路径，这里用 db 路径本身。
+  // 时间/大小从 db 文件与 wal 取，任何一边变了都要重扫。
+  const p = dbPath();
+  try {
+    fs.accessSync(p, fs.constants.R_OK);
+  } catch {
+    return [];
   }
-  return parts.join('\n').trim();
+  return [p];
+}
+
+/**
+ * 一个 state.db 里有很多会话，所以走 parseAll。
+ */
+export function parseAll(file) {
+  const db = getStore();
+  if (!db) return [];
+
+  let rows;
+  try {
+    rows = db
+      .prepare(
+        `select id, source, model, started_at, ended_at, title, cwd,
+                parent_session_id, message_count, hidden, archived, profile_name
+         from sessions
+         where message_count > 0
+         order by started_at asc`
+      )
+      .all();
+  } catch {
+    return [];
+  }
+
+  // 一场会话的标题优先用 title（Hermes 自己生成或用户命名），
+  // 没有就退到首条用户消息——那要查 messages 表，批量取一次更省
+  const firstUser = new Map();
+  try {
+    const msgs = db
+      .prepare(
+        `select session_id, content from messages
+         where role = 'user' and content is not null and content != ''
+         order by timestamp asc`
+      )
+      .all();
+    for (const m of msgs) {
+      if (firstUser.has(m.session_id)) continue;
+      const t = cleanText(m.content);
+      if (t) firstUser.set(m.session_id, t);
+    }
+  } catch {
+    /* messages 表读不到就用 title */
+  }
+
+  const out = [];
+  for (const r of rows) {
+    // 子代理会话整条跳过：它们是父会话内部的一步
+    if (r.parent_session_id) continue;
+
+    const start = toDate(r.started_at);
+    const end = toDate(r.ended_at) || start;
+
+    // 标题优先级：Hermes 的 title → 首条用户消息 → 来源占位
+    const title =
+      cleanText(r.title) ||
+      firstUser.get(r.id) ||
+      (r.source ? `(${r.source})` : null) ||
+      (r.hidden ? '(hidden)' : null);
+
+    out.push(
+      makeSession({
+        agent: name,
+        id: r.id,
+        // 有 cwd 才归项目。多数 Hermes 会话是聊天渠道，没有工作目录——
+        // 那不是缺陷，但也不能一刀切：有 cwd 的必须归进去
+        project: r.cwd || null,
+        title,
+        start,
+        end,
+        source: sourceOf(r.id),
+        resume: null,
+      })
+    );
+  }
+
+  return out;
+}
+
+/**
+ * 兼容：如果某个用户机器上只有旧的 jsonl 而没有 state.db，
+ * discover 会返回空数组（因为 dbPath 不存在），这条路径就不会走到。
+ *
+ * 保留是为了不破坏"一个文件一个会话"的接口形状——
+ * registry 优先看 parseAll，没有才调 parse。
+ */
+export function parse(file) {
+  return null;
+}
+
+/**
+ * 时间戳：state.db 里是 epoch 秒（REAL）。
+ *
+ * `started_at = 1776274941.9466` → 2026-04-16。
+ * 不能直接用 model.js 的 toDate：它把 >1e11 当毫秒，而 1.7e9 秒
+ * 会走成秒分支——恰好对，但那是巧合。这里显式乘，把这个约定写死。
+ */
+function toDate(v) {
+  if (v == null) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  // 有些版本可能存毫秒；1e11 毫秒 ≈ 1973 年，秒级到 5138 年才到这个量级
+  return new Date(n > 1e11 ? n : n * 1000);
+}
+
+function cleanText(s) {
+  if (!s) return '';
+  return String(s).replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
 /**
  * 读一场会话的完整正文。
  *
- * Hermes 的 assistant 消息把思维链单独放在 reasoning 字段里，
- * 正文在 content。两者分开保留，展示层自己决定折不折。
- * tool 消息是工具返回值，单独成条。
+ * 两种来源：db:<id> 查 messages 表；其它当文件路径读旧 jsonl。
+ *
+ * 空的 assistant 消息（只有 tool_calls 没有 content）跳过——
+ * 它们不是"说了什么"，是"调了什么"，工具调用单独成条。
  */
 export function readMessages(session) {
+  const src = String(session.source || '');
+
+  if (src.startsWith('db:')) {
+    return readFromDb(src.slice(3), session);
+  }
+
+  return readFromJsonl(session);
+}
+
+function readFromDb(id, session) {
+  const db = getStore();
+  if (!db) throw new Error('Hermes state.db 打不开');
+
+  let rows;
+  try {
+    rows = db
+      .prepare(
+        `select role, content, reasoning, tool_name, tool_calls, timestamp, active, compacted
+         from messages
+         where session_id = ?
+         order by timestamp asc, id asc`
+      )
+      .all(id);
+  } catch (e) {
+    throw new Error('读 Hermes 消息失败: ' + (e && e.message ? e.message : e));
+  }
+
+  const out = [];
+  for (const m of rows) {
+    // active=0 是被压缩掉的旧消息，compacted=1 是被摘要覆盖的——
+    // 两者都保留在库里，但不该再当正常对话显示
+    if (m.active === 0) continue;
+
+    const ts = toDate(m.timestamp);
+
+    if (m.role === 'tool') {
+      out.push(
+        makeMessage({
+          role: 'tool',
+          parts: [toolPart({ name: m.tool_name || 'tool', output: parseJsonish(m.content) })],
+          ts,
+        })
+      );
+      continue;
+    }
+
+    const parts = [];
+    if (m.reasoning) {
+      const p = reasoningPart(String(m.reasoning));
+      if (p) parts.push(p);
+    }
+
+    const body = textOf(m.content);
+    if (body) {
+      const p = textPart(body);
+      if (p) parts.push(p);
+    }
+
+    // assistant 消息可能只带 tool_calls 没有正文：那些调用要单独成条，
+    // 否则"它调了什么工具"在会话页上就看不见了
+    const calls = parseToolCalls(m.tool_calls);
+    for (const c of calls) {
+      parts.push(toolPart({ name: c.name, input: c.input }));
+    }
+
+    if (!parts.length) continue;
+
+    const role = m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user';
+    out.push(makeMessage({ role, parts, ts }));
+  }
+
+  return out;
+}
+
+function readFromJsonl(session) {
   const real = assertUnder(sessionsDir(), session.source);
   const text = fs.readFileSync(real, 'utf8');
   const out = [];
@@ -168,10 +348,9 @@ export function readMessages(session) {
       continue;
     }
 
-    // 首行的 session_meta 是工具清单和模型信息，不是对话内容
     if (o.role === 'session_meta') continue;
 
-    const ts = parseTs(o.timestamp);
+    const ts = toDate(o.timestamp);
     const parts = [];
 
     if (o.reasoning) {
@@ -186,7 +365,6 @@ export function readMessages(session) {
     }
 
     if (o.role === 'tool') {
-      // 工具返回常是 JSON 字符串，原样留着；展示层会截断
       out.push(
         makeMessage({
           role: 'tool',
@@ -204,4 +382,60 @@ export function readMessages(session) {
   }
 
   return out;
+}
+
+/**
+ * tool_calls 在库里是 JSON 字符串（OpenAI 格式）。
+ * 结构通常是 [{id, type:"function", function:{name, arguments:"<json string>"}}]。
+ */
+function parseToolCalls(raw) {
+  if (!raw) return [];
+  let arr;
+  try {
+    arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(arr)) return [];
+
+  const out = [];
+  for (const c of arr) {
+    const fn = c && c.function ? c.function : c;
+    const nm = fn && (fn.name || fn.tool);
+    if (!nm) continue;
+    let input = fn.arguments;
+    if (typeof input === 'string') {
+      try {
+        input = JSON.parse(input);
+      } catch {
+        /* 保持原字符串 */
+      }
+    }
+    out.push({ name: String(nm), input });
+  }
+  return out;
+}
+
+function parseJsonish(v) {
+  if (typeof v !== 'string') return v;
+  const t = v.trim();
+  if (!t || (t[0] !== '{' && t[0] !== '[')) return v;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return v;
+  }
+}
+
+function textOf(content) {
+  if (typeof content === 'string') return content.trim();
+  if (!Array.isArray(content)) return '';
+  const parts = [];
+  for (const p of content) {
+    if (!p) continue;
+    if (typeof p === 'string') parts.push(p);
+    else if (typeof p.text === 'string') parts.push(p.text);
+    else if (typeof p.content === 'string') parts.push(p.content);
+  }
+  return parts.join('\n').trim();
 }

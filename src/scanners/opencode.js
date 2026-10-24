@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
-import { dataCandidates, findUnder } from '../platform.js';
+import { dataCandidates } from '../platform.js';
 
 /**
  * OpenCode 会话扫描。
@@ -28,22 +29,94 @@ import { dataCandidates, findUnder } from '../platform.js';
 
 export const name = 'opencode';
 
+/**
+ * OpenCode 的 db 路径候选。
+ *
+ * **macOS 上也用 `~/.local/share/opencode`**，不是
+ * `~/Library/Application Support`——这是它自己 `global-roots.ts` 里
+ * 写死的逻辑（`XDG_DATA_HOME || ~/.local/share`，无 platform 分支）。
+ * 看到 `~/.local/share` 别以为是 Linux 专用，macOS 上真的会有。
+ *
+ * 三个官方覆盖变量：
+ *   OPENCODE_DATA_DIR  精确目录（**不再拼 opencode**）
+ *   OPENCODE_DB        精确的 db 文件路径
+ *   XDG_DATA_HOME      XDG 惯例，三平台都认
+ */
+function dbPaths() {
+  const home = os.homedir();
+  const out = [];
+
+  const add = (p) => {
+    if (!p) return;
+    const norm = path.resolve(p);
+    if (!out.some((x) => samePath(x, norm))) out.push(norm);
+  };
+
+  // 最精确的：直接给 db 文件
+  const direct = process.env.OPENCODE_DB;
+  if (direct && String(direct).trim()) {
+    add(expandHome(String(direct).trim()));
+  }
+
+  // 数据目录（精确，不拼 opencode）
+  const dataDir = process.env.OPENCODE_DATA_DIR;
+  if (dataDir && String(dataDir).trim()) {
+    add(path.join(expandHome(String(dataDir).trim()), 'opencode.db'));
+  }
+
+  // XDG
+  const xdg = process.env.XDG_DATA_HOME;
+  if (xdg && String(xdg).trim()) {
+    add(path.join(expandHome(String(xdg).trim()), 'opencode', 'opencode.db'));
+  }
+
+  // 默认：三平台都是 ~/.local/share/opencode
+  add(path.join(home, '.local', 'share', 'opencode', 'opencode.db'));
+
+  // 兜底：某些安装器可能放到 platform.js 的其它候选位置
+  for (const root of dataCandidates('opencode')) {
+    add(path.join(root, 'opencode.db'));
+  }
+
+  return out;
+}
+
+function expandHome(p) {
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) return path.join(os.homedir(), p.slice(2));
+  return p;
+}
+
+function samePath(a, b) {
+  const ci = process.platform === 'win32' || process.platform === 'darwin';
+  const na = String(a).replace(/\\/g, '/');
+  const nb = String(b).replace(/\\/g, '/');
+  return ci ? na.toLowerCase() === nb.toLowerCase() : na === nb;
+}
+
 function dbPath() {
-  // XDG 数据目录：Linux 是 ~/.local/share，Windows 是 %LOCALAPPDATA%，
-  // macOS 多数程序退回 Application Support。候选列表见 platform.js。
-  const found = findUnder(dataCandidates('opencode'), 'opencode.db');
-  if (found) return found;
-  return path.join(dataCandidates('opencode')[0], 'opencode.db');
+  for (const p of dbPaths()) {
+    try {
+      fs.accessSync(p, fs.constants.R_OK);
+      return p;
+    } catch {
+      /* 试下一个 */
+    }
+  }
+  return dbPaths()[0];
 }
 
 export function discover() {
-  const p = dbPath();
-  try {
-    fs.accessSync(p, fs.constants.R_OK);
-  } catch {
-    return [];
+  const out = [];
+  for (const p of dbPaths()) {
+    try {
+      fs.accessSync(p, fs.constants.R_OK);
+      out.push(p);
+    } catch {
+      /* 不存在 */
+    }
   }
-  return [p];
+  return out;
 }
 
 let cachedDb = null;
