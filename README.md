@@ -373,12 +373,21 @@ node src/cli.js refresh --project E:\softpi-shop
 | `/p?path=<项目路径>` | 某项目的时间线（默认最近 300 场，`&all=1` 全量） |
 | `/s?agent=<名>&id=<id>` | 某场会话的正文 |
 | `/search?q=` | 全文搜索，关键词高亮 |
+| `/env` | **能力面**：各 Agent 的 MCP / 技能 / 记忆（`?tab=` 切换） |
 | `/api/projects` | 项目清单 |
 | `/api/timeline?path=` | 时间线 |
 | `/api/agents?path=` | 各 Agent 分布 |
 | `/api/search?q=&agent=&project=&limit=` | 搜索结果 |
 | `/api/digest?path=` | 项目摘要（如果有） |
 | `/api/session?agent=&id=&message=` | 会话正文，`message` 取单条 |
+| `/api/env?tab=` | 能力面数据，`tab` 取 `mcp`/`skills`/`usage`/`memory`/`audit` |
+
+`/env` 用六个 tab 而不是一个长页：技能清单有 290 行、记忆有 21 处，
+全堆一页会让人找不到重点。默认落在总览——那才是第一眼该看的。
+
+`tab` 参数只认白名单里的值，别的一律回落到总览，不把用户输入拼进页面。
+页面上的环境变量**只有键名**：值在 `env/mcp.js` 的 `normalize()` 里
+就被丢掉了，这一层根本拿不到。
 
 项目页顶部会展示已生成的摘要（折叠块），会话页顶部展示会话摘要。
 摘要是**视图层**，和下面的时间线（事实层）在视觉上分开摆——
