@@ -266,10 +266,23 @@ export function detectGaps() {
     {
       name: 'Qoder',
       agent: 'qoder',
-      // 国际版和中国版是两套独立安装，各存一份会话
+      // 两套存储：cache/projects 是旧格式（无时间戳、无 cwd），
+      // projects 是现在的主存储（每行带时间戳和 cwd）。国际版和中国版各一份。
       paths: [
         { p: homePath('.qoder/cache/projects'), kind: 'dir' },
         { p: homePath('.qoder-cn/cache/projects'), kind: 'dir' },
+        { p: homePath('.qoder/projects'), kind: 'dir' },
+        { p: homePath('.qoder-cn/projects'), kind: 'dir' },
+      ],
+    },
+    {
+      name: 'DeepSeek Harness',
+      agent: 'dsh',
+      // Windows 桌面版默认把 DSH_HOME 指到 ~/DeepSeekHarness；
+      // CLI 默认是 ~/.dsh。两边都探，环境变量覆盖在扫描器里处理。
+      paths: [
+        { p: homePath('DeepSeekHarness/sessions'), kind: 'dir' },
+        { p: homePath('.dsh/sessions'), kind: 'dir' },
       ],
     },
     {
