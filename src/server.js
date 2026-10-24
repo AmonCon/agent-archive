@@ -67,6 +67,9 @@ async function handle(req, res) {
     if (path === '/s') {
       return sendHtml(res, await pageSession(url.searchParams.get('agent') || '', url.searchParams.get('id') || ''));
     }
+    if (path === '/env') {
+      return sendHtml(res, await pageEnv(url.searchParams.get('tab') || 'overview'));
+    }
 
     if (path === '/api/projects') {
       const { projects, stats, totalSessions, unbound } = listProjects({});
@@ -233,6 +236,23 @@ async function handle(req, res) {
       });
     }
 
+    if (path === '/api/env') {
+      const { fullInventory, auditEnvironment } = await import('./env/inventory.js');
+      const tab = url.searchParams.get('tab') || 'overview';
+
+      if (tab === 'audit') return sendJson(res, auditEnvironment());
+      if (tab === 'usage') {
+        const { skillUsageSummary } = await import('./env/usage.js');
+        return sendJson(res, await skillUsageSummary({}));
+      }
+
+      const inv = fullInventory();
+      if (tab === 'mcp') return sendJson(res, inv.mcp);
+      if (tab === 'skills') return sendJson(res, inv.skills);
+      if (tab === 'memory') return sendJson(res, inv.memory);
+      return sendJson(res, inv);
+    }
+
     return sendHtml(res, pageNotFound(), 404);
   } catch (e) {
     return send(
@@ -326,7 +346,8 @@ function pageProjects() {
   return layout(
     '项目',
     `<h1>会话档案馆</h1>
-     <p class="sub">${projects.length} 个项目 · ${totalSessions} 场会话 · ${stats.files} 个文件</p>
+     <p class="sub">${projects.length} 个项目 · ${totalSessions} 场会话 · ${stats.files} 个文件
+       · <a href="/env">看能力面 →</a></p>
      <table>
        <thead><tr><th>项目</th><th class="num">会话</th><th>Agent</th><th>最近</th></tr></thead>
        <tbody>${rows}</tbody>
@@ -335,6 +356,288 @@ function pageProjects() {
      <p class="foot">JSON 接口：<code>/api/projects</code> · <code>/api/timeline?path=</code> ·
      <code>/api/agents?path=</code> · <code>/api/search?q=</code> · <code>/api/session?agent=&amp;id=</code></p>`
   );
+}
+
+/**
+ * 环境层页面。
+ *
+ * 和会话页的分工：`/` 回答"聊过什么"，`/env` 回答"会什么"。
+ *
+ * 用 tab 而不是一个长页：技能清单有 290 行、记忆有 21 处，
+ * 全堆在一页会让人找不到重点。默认落在总览——那才是第一眼该看的。
+ *
+ * 这里有个和 CLI 一致的硬约束：**不回传凭证值**。
+ * 页面上出现的只有环境变量的键名，值在 env/mcp.js 的 normalize()
+ * 里就被丢掉了，这一层拿不到。
+ */
+async function pageEnv(tab) {
+  const { fullInventory, auditEnvironment } = await import('./env/inventory.js');
+
+  const TABS = [
+    ['overview', '总览'],
+    ['mcp', 'MCP'],
+    ['skills', '技能'],
+    ['usage', '使用率'],
+    ['memory', '记忆'],
+    ['audit', '体检'],
+  ];
+
+  // tab 只认白名单里的值，别的一律回落到 overview——
+  // 免得把用户输入原样拼进页面
+  const active = TABS.some(([k]) => k === tab) ? tab : 'overview';
+
+  const nav = `<nav class="tabs">${TABS.map(
+    ([k, label]) =>
+      `<a href="/env?tab=${k}" class="${k === active ? 'on' : ''}">${esc(label)}</a>`
+  ).join('')}</nav>`;
+
+  const inv = fullInventory();
+  let body = '';
+
+  if (active === 'overview') {
+    body = envOverview(inv);
+  } else if (active === 'mcp') {
+    body = envMcp(inv.mcp);
+  } else if (active === 'skills') {
+    body = envSkills(inv.skills);
+  } else if (active === 'usage') {
+    const { skillUsageSummary } = await import('./env/usage.js');
+    body = envUsage(await skillUsageSummary({}));
+  } else if (active === 'memory') {
+    body = envMemory(inv.memory);
+  } else {
+    body = envAudit(auditEnvironment());
+  }
+
+  return layout('能力面', `<h1>能力面</h1>
+    <p class="sub">这台机器上各 Agent 配了什么、装了什么、记得什么。与会话层并列的另一半。
+    <a href="/">← 会话档案馆</a></p>
+    ${nav}
+    ${body}
+    <p class="foot">JSON 接口：<code>/api/env</code> · <code>/api/env?tab=mcp</code> ·
+    <code>/api/env?tab=skills</code> · <code>/api/env?tab=usage</code> ·
+    <code>/api/env?tab=memory</code> · <code>/api/env?tab=audit</code><br>
+    环境变量的值不读取、不传输，这里只有键名。</p>`);
+}
+
+function envOverview(inv) {
+  const s = inv.summary;
+
+  const cards = `<div class="cards">
+    <div class="card"><b>${s.agentsWithData}</b><span>Agent 有数据</span></div>
+    <div class="card"><b>${s.mcpServices}</b><span>MCP 服务</span></div>
+    <div class="card"><b>${s.skills}</b><span>技能</span></div>
+    <div class="card"><b>${s.memoryEntries}</b><span>记忆条目</span></div>
+  </div>`;
+
+  const agentRows = inv.agents
+    .map(
+      (a) => `<tr>
+        <td class="proj">${esc(a.display)}</td>
+        <td class="num">${a.mcp.length}</td>
+        <td class="num">${a.skills}</td>
+        <td class="num">${a.memory}</td>
+        <td class="dim">${a.mcp.map((m) => `<span class="tag">${esc(m)}</span>`).join('')}</td>
+      </tr>`
+    )
+    .join('');
+
+  // MCP 服务按覆盖度排：多家共用的排前面，这本身就是信息
+  const mcpRows = inv.mcp.list
+    .map(
+      (m) => `<tr>
+        <td class="proj">${esc(m.service)}${
+          m.aliases ? `<span class="dim" style="font-weight:400"> · 别名 ${esc(m.aliases.join(' / '))}</span>` : ''
+        }</td>
+        <td class="num">${m.agents.length}</td>
+        <td class="dim">${esc(m.agents.join(', '))}</td>
+        <td class="dim">${esc(m.forms.join(' / '))}</td>
+      </tr>`
+    )
+    .join('');
+
+  return `${cards}
+    <h2 class="day">各 Agent 的能力面</h2>
+    <table>
+      <thead><tr><th>Agent</th><th class="num">MCP</th><th class="num">技能</th><th class="num">记忆</th><th>配了哪些 MCP</th></tr></thead>
+      <tbody>${agentRows}</tbody>
+    </table>
+    <h2 class="day">MCP 服务</h2>
+    <table>
+      <thead><tr><th>服务</th><th class="num">家数</th><th>分布</th><th>安装形态</th></tr></thead>
+      <tbody>${mcpRows}</tbody>
+    </table>`;
+}
+
+function envMcp(mcp) {
+  const rows = mcp.list
+    .map(
+      (s) => `<tr>
+        <td class="proj">${esc(s.service)}</td>
+        <td class="num">${s.registrations}</td>
+        <td class="dim">${esc(s.agents.join(', '))}</td>
+        <td class="dim">${esc(s.forms.join(' / '))}</td>
+        <td class="dim mono" style="font-size:12px">${
+          s.envKeys.length ? esc(s.envKeys.join(', ')) : '—'
+        }</td>
+      </tr>`
+    )
+    .join('');
+
+  // 安装形态不一致是最值得人看的一条：npx 每次拉最新、本地钉版本
+  const mixed = mcp.mixedForms.length
+    ? `<h2 class="day">安装形态不一致</h2>
+       ${mcp.mixedForms
+         .map(
+           (m) => `<p class="warn-line"><b>${esc(m.service)}</b>：${esc(m.forms.join(' / '))}
+            <span class="dim">分布在 ${esc(m.agents.join(', '))}。npx 每次拉最新，本地安装钉版本，两边行为可能不同。</span></p>`
+         )
+         .join('')}`
+    : '';
+
+  return `<p class="sub">${mcp.services} 个服务，${mcp.registrations} 条注册。
+    同一个服务在多家的注册已按启动指纹归并（不是按名字——那样 supabase 和 adbsupabase 会被算成两个）。</p>
+    <table>
+      <thead><tr><th>服务</th><th class="num">注册</th><th>分布</th><th>形态</th><th>环境变量（仅键名）</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${mixed}
+    <p class="foot">环境变量的值不读取、不传输。要看值请自己打开配置文件。</p>`;
+}
+
+function envSkills(sk) {
+  const byAgent = Object.entries(sk.byAgent)
+    .sort((a, b) => b[1] - a[1])
+    .map(([a, n]) => `<tr><td class="proj">${esc(a)}</td><td class="num">${n}</td></tr>`)
+    .join('');
+
+  const shared = sk.list.filter((s) => s.agents.length > 1);
+  const sharedRows = shared
+    .map(
+      (s) => `<tr>
+        <td class="proj">${esc(s.name)}</td>
+        <td class="num">${s.agents.length}</td>
+        <td class="dim">${esc(s.agents.join(', '))}</td>
+      </tr>`
+    )
+    .join('');
+
+  return `<p class="sub">${sk.skills} 个独立技能，${sk.installs} 处安装。
+    按 SKILL.md 内容哈希归并：同一份技能装在几处算一个。插件缓存里的旧版本已排除。</p>
+    <div class="two-col">
+      <div>
+        <h2 class="day">按 Agent 的安装处数</h2>
+        <table><tbody>${byAgent}</tbody></table>
+      </div>
+      <div>
+        <h2 class="day">跨 Agent 共享（${shared.length} 个）</h2>
+        <table><tbody>${sharedRows}</tbody></table>
+      </div>
+    </div>`;
+}
+
+function envUsage(r) {
+  if (!r || !r.ready) {
+    return `<p class="sub">${esc((r && r.message) || '还没有索引')}</p>`;
+  }
+
+  const rate = r.installed ? (r.usedCount / r.installed) * 100 : 0;
+
+  const topRows = r.top
+    .map((s) => {
+      const marks = [];
+      if (s.sameNameCount) marks.push(`同名 ${s.sameNameCount} 份实现`);
+      if (s.calledAs) marks.push(`调作 ${s.calledAs.join(' / ')}`);
+      return `<tr>
+        <td class="num">${s.calls}</td>
+        <td class="proj">${esc(s.name)}</td>
+        <td class="dim">${esc(s.agents.join(', '))}</td>
+        <td class="dim" style="font-size:12px">${esc(marks.join(' · '))}</td>
+      </tr>`;
+    })
+    .join('');
+
+  const neverRows = r.neverUsed
+    .map((s) => `<tr><td class="proj">${esc(s.name)}</td><td class="dim">${esc(s.agents.join(', '))}</td></tr>`)
+    .join('');
+
+  const unknown = r.unknownCount
+    ? `<h2 class="day">用了但清单里没有（${r.unknownCount}）</h2>
+       <table><tbody>${r.unknown
+         .map((u) => `<tr><td class="num">${u.calls}</td><td class="proj">${esc(u.skill)}</td></tr>`)
+         .join('')}</tbody></table>`
+    : '';
+
+  return `<div class="cards">
+      <div class="card"><b>${rate.toFixed(1)}%</b><span>使用率</span></div>
+      <div class="card"><b>${r.usedCount}</b><span>用过</span></div>
+      <div class="card"><b>${r.unusedCount}</b><span>从没用过</span></div>
+      <div class="card"><b>${r.calls}</b><span>调用次数</span></div>
+    </div>
+    <h2 class="day">最常调用</h2>
+    <table>
+      <thead><tr><th class="num">次数</th><th>技能</th><th>装在哪</th><th>备注</th></tr></thead>
+      <tbody>${topRows}</tbody>
+    </table>
+    ${unknown}
+    <h2 class="day">从没用过（${r.unusedCount} 个）</h2>
+    <table><tbody>${neverRows}</tbody></table>
+    <p class="foot">只统计显式调用 Skill 工具的记录（本次覆盖：${
+      r.coverage ? esc(r.coverage.agentsWithSkillTool.join('、') || '无') : '—'
+    }）。
+    Codex 等直接读 SKILL.md 的用法不计入，所以"用过"是下限、"没用过"是上限。</p>`;
+}
+
+function envMemory(mem) {
+  const instructions = mem.list.filter((m) => m.kind === 'instruction');
+  const memories = mem.list.filter((m) => m.kind === 'memory');
+
+  const insRows = instructions
+    .map(
+      (m) => `<tr>
+        <td class="proj">${esc(m.agent)}</td>
+        <td class="num">${m.bytes ? Math.round(m.bytes / 1024) + ' KB' : '空'}</td>
+        <td class="dim">${esc(clip(m.preview || '', 90))}</td>
+      </tr>`
+    )
+    .join('');
+
+  const memRows = memories
+    .map(
+      (m) => `<tr>
+        <td class="proj">${esc(m.agent)}</td>
+        <td class="dim">${esc(m.format)}</td>
+        <td class="dim">${esc(m.scope === 'project' ? m.project || '未绑定项目' : '全局')}</td>
+        <td class="num">${Math.round(m.bytes / 1024)} KB</td>
+        <td class="num">${m.entries != null ? m.entries : '—'}</td>
+      </tr>`
+    )
+    .join('');
+
+  return `<p class="sub">${mem.instructions} 份指令 · ${mem.memories} 处记忆 · ${mem.entries} 条条目 ·
+    ${mem.projectScoped} 处项目级。只报出处，不合并内容。</p>
+    <h2 class="day">指令（每轮注入的行为约定）</h2>
+    <table><thead><tr><th>Agent</th><th class="num">大小</th><th>开头</th></tr></thead>
+      <tbody>${insRows}</tbody></table>
+    <h2 class="day">记忆</h2>
+    <table><thead><tr><th>Agent</th><th>格式</th><th>范围</th><th class="num">大小</th><th class="num">条目</th></tr></thead>
+      <tbody>${memRows}</tbody></table>
+    <p class="foot">不同 Agent 的记忆可能互相矛盾（同一件事的偏好写得相反）。
+    合并成"你的记忆"会说谎，所以这里只报出处。</p>`;
+}
+
+function envAudit(r) {
+  const rows = r.findings
+    .map((f) => {
+      const mark = f.level === 'warn' ? '<span class="badge-warn">!</span>' : '<span class="dim">·</span>';
+      return `<div class="finding">${mark} <b>${esc(f.title)}</b>
+        <p class="dim">${esc(f.detail)}</p></div>`;
+    })
+    .join('');
+
+  return `<p class="sub">${r.summary.agentsPresent} 个 Agent · ${r.summary.mcpServices} 个 MCP 服务 ·
+    ${r.summary.skills} 个技能 · ${r.summary.memoryEntries} 条记忆</p>
+    ${rows || '<p class="sub">没有发现问题。</p>'}`;
 }
 
 function pageSearch(q, agent) {
@@ -894,6 +1197,32 @@ td.dim, .dim { color: var(--dim); }
 .folded > summary .tname { color: var(--tool); font-weight: 600; }
 .folded-body { margin-top: 8px; }
 .hint { font-size: 12px; color: var(--dim); margin: 4px 0; }
+
+/* 环境层 */
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 22px;
+        border-bottom: 1px solid var(--line); }
+.tabs a { font-size: 13px; color: var(--dim); text-decoration: none; padding: 7px 12px 8px;
+          border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs a:hover { color: var(--fg); }
+.tabs a.on { color: var(--fg); border-bottom-color: var(--assistant); font-weight: 500; }
+.cards { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 22px; }
+.card { flex: 1 1 120px; border: 1px solid var(--line); border-radius: 8px;
+        padding: 12px 14px; background: var(--soft); }
+.card b { display: block; font-size: 22px; font-weight: 600; line-height: 1.2;
+          font-variant-numeric: tabular-nums; }
+.card span { font-size: 12px; color: var(--dim); }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+@media (max-width: 680px) { .two-col { grid-template-columns: 1fr; gap: 0; } }
+.finding { border-top: 1px solid var(--line); padding: 12px 0; }
+.finding b { font-weight: 500; font-size: 14px; }
+.finding p { margin: 5px 0 0; font-size: 13px; line-height: 1.7; }
+.badge-warn { display: inline-block; width: 16px; height: 16px; line-height: 16px; text-align: center;
+              font-size: 11px; font-weight: 600; color: #8a5a00; background: rgba(255,190,0,.18);
+              border: 1px solid rgba(255,190,0,.42); border-radius: 50%; }
+@media (prefers-color-scheme: dark) {
+  .badge-warn { color: #e0b463; background: rgba(255,190,0,.12); border-color: rgba(255,190,0,.3); }
+}
+.warn-line { font-size: 13px; margin: 6px 0; line-height: 1.7; }
 
 /* 导出等操作链接 */
 .actions { margin: 14px 0 4px; display: flex; gap: 10px; flex-wrap: wrap; }
