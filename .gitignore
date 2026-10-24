@@ -10,3 +10,6 @@ dist/
 *.log
 .DS_Store
 Thumbs.db
+
+# 调研时抓取的临时材料（命令重定向还会产生带分号的怪文件名）
+.research/
