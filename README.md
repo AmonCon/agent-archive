@@ -184,7 +184,7 @@ JSON-RPC」，手写足够，不需要引入任何 npm 包。
 | `read_session` | 读正文，**分段**，默认 8000 字 |
 | `session_stats` | 采集质量、索引规模、已有摘要数量 |
 | `export_timeline` | 导出 Markdown |
-| `inventory` | **环境层**：各 Agent 的 MCP / 技能 / 记忆（`type` 切换） |
+| `inventory` | **环境层**：各 Agent 的 MCP / 技能 / 使用率 / 记忆（`type` 切换） |
 
 `read_digest` 和 `read_session_summary` 是视图层的入口。它们**只读已有的
 摘要，不会替你调模型**——生成要花钱，必须由用户在终端显式执行。
@@ -467,13 +467,43 @@ Codex 的 `{command:["powershell.exe","-NoProfile",...]}`、ZCode 的
 node src/cli.js env              # 每个 Agent 一行
 node src/cli.js env mcp          # MCP 服务清单，跨 Agent 归并
 node src/cli.js env skills       # 技能清单，按内容去重
+node src/cli.js env usage        # 技能使用率：哪些真用过
 node src/cli.js env memory       # 记忆与指令文件
 node src/cli.js env audit        # 体检
 ```
 
-对应的 MCP 工具是 `inventory`（`type` 取 `overview` / `mcp` / `skills` / `memory` / `audit`）。
+对应的 MCP 工具是 `inventory`（`type` 取 `overview` / `mcp` / `skills` / `usage` / `memory` / `audit`）。
 **这是给新 Agent 用的入口**：它自己调一次 `inventory`，就知道这台机器上别的
 Agent 配了什么、装了什么、记得什么，再自己决定要不要跟进——本工具不替它搬。
+
+### 技能使用率：本机 290 个技能里用过 25 个
+
+这是环境层唯一"两边数据都要"的功能，也是别的工具做不了的：要同时知道
+**装了哪些技能**（技能目录）和**用过哪些**（会话里的工具调用）。
+
+本机实测：290 个技能，用过 25 个，**使用率 8.6%**。调用最多的是
+`control-browser`（32 次），其余大多一两次。265 个从没被调用过。
+
+**但"从没用过"是个上限，不是定论。** 实测各家的做法不一样：
+
+| Agent | 怎么用技能 | 能否统计 |
+|---|---|---|
+| ZCode / Claude Code | 调 `Skill` 工具，`input.skill` 给名字 | ✅ |
+| Codex | **没有 Skill 工具**，直接 Read 那个 SKILL.md | ❌ |
+| Hermes | 走自己的机制，形态未统一 | ❌ |
+
+所以只统计**显式调用 Skill 工具**的记录。Codex 那 269 场提到 "Skill" 的
+会话里，绝大多数只是在正文里聊到这个词（讨论技能、贴 GitHub URL）。
+
+这里有一个刻意的取舍：**不把"读了 SKILL.md 就算用过"算进来。**
+那会显著抬高使用率，但也会让"从没用过"这个结论失去意义——而后者
+才是这个功能的价值。宁可报一个偏保守的下限，并在输出里明说覆盖范围。
+
+### 同名的技能可能是不同实现
+
+`env usage` 里会看到三个 `xlsx`，那不是重复行。本机确实有三个内容哈希
+不同的 xlsx 技能（ZCode 两个版本 + Hermes 一份）。它们各自匹配到同一批
+使用记录，所以调用次数一样——输出里会标 `[同名 3 份实现]` 区分。
 
 ### 为什么单独一层，而不是并进会话表
 
