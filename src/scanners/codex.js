@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import zlib from 'node:zlib';
+import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
 
@@ -16,12 +17,37 @@ import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../
  *
  * .zst 是整文件 zstd 压缩（不是逐帧追加），Node 22+ 自带 zstd 解压。
  * 大文件只解压前若干字节用于取元数据，避免为列个标题解压几百 MB。
+ *
+ * ## 头部读取会漏掉"结束时间"，靠旁路表修
+ *
+ * 只读头部有个静默的后果：**`.zst` 截断帧解压不抛错**。实测
+ * `zstdDecompressSync(前 256KB)` 在一份 87 MB 的 rollout 上"成功"返回
+ * 0.3% 的内容——原本设想的"解压失败就退回整文件"这条兜底从来没触发过。
+ * 于是长会话的 end 取到的是开头的几条事件，本机实测 91 场差 >1 天、
+ * 236 场差 >1 小时。整文件解压可以修（实测 2 GB / 110 秒），但没必要。
+ *
+ * Codex 自己维护 `state_5.sqlite` 的 threads 表，记着每个线程的
+ * `updated_at` / `title` / `tokens_used`。拿它和完整解压的真实末条对照：
+ *
+ *   样本 20 个：threads.updated_at 平均偏差 1 秒，最大 1 秒
+ *              文件 mtime       平均偏差 507 秒，最大 2420 秒
+ *
+ * 所以用 threads 表修 end 和 title（见下方 enrich），代价是一次 48 毫秒的
+ * 查询；mtime 只作最后兜底。这也正是 cc-switch 的做法（它把 state_5 的
+ * 用户标题和 utils 里的 mtime 兜底结合起来）。
  */
 
 export const name = 'codex';
 
 /** 只看开头这么多字节就够拿到 session_meta 和第一条用户消息。 */
 const HEAD_BYTES = 256 * 1024;
+
+/**
+ * 明文文件从尾部读这么多字节找真实结束时间。
+ *
+ * 64KB 足够覆盖若干条事件（一条事件通常几 KB），读到被切断的首行就跳过。
+ */
+const TAIL_BYTES = 64 * 1024;
 
 /**
  * Codex 的数据根候选。
@@ -150,6 +176,10 @@ export function parse(file) {
   let parentId = null;
   let start = null;
   let end = null;
+  // 导入会话的真实时间（见下方 imported 说明）
+  let imported = false;
+  let realStart = null;
+  let realEnd = null;
 
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
@@ -172,6 +202,24 @@ export function parse(file) {
 
     const payload = o.payload;
     if (!payload) continue;
+
+    // 导入会话：真实时间在 payload 里，不在顶层 timestamp。
+    // turn_id 形如 "external-import-turn-25"，是唯一的可靠标志。
+    if (payload.turn_id && String(payload.turn_id).startsWith('external-import-turn')) {
+      imported = true;
+    }
+    if (imported) {
+      // started_at / completed_at 是 Unix 秒，是这批会话**原本**的时间；
+      // 别被 completed_at_ms 骗了——那个字段装的是导入时刻。
+      if (typeof payload.started_at === 'number' && payload.started_at > 0) {
+        const d = new Date(payload.started_at * 1000);
+        if (!Number.isNaN(d.getTime()) && (!realStart || d < realStart)) realStart = d;
+      }
+      if (typeof payload.completed_at === 'number' && payload.completed_at > 0) {
+        const d = new Date(payload.completed_at * 1000);
+        if (!Number.isNaN(d.getTime()) && (!realEnd || d > realEnd)) realEnd = d;
+      }
+    }
 
     if (o.type === 'session_meta') {
       cwd = cwd || payload.cwd || null;
@@ -211,6 +259,22 @@ export function parse(file) {
   // 子代理会话（guardian、reviewer 之类）以前整条跳过，理由是"列出来会让
   // 时间线翻倍"。但那是展示问题，不该用丢数据来解决：子代理会话里才记着
   // 具体查了什么、发现了什么。现在照常采集并标记归属，时间线默认按
+  // 导入会话：顶层 timestamp 全部是导入那一刻（本机实测 37 场集中在同一秒），
+  // 用它当起止时间会让这些会话在时间线上全挤到导入那一天。
+  // payload 里的 started_at / completed_at 才是原来的时间。
+  if (imported && realStart) start = realStart;
+  if (imported && realEnd) end = realEnd;
+
+  // 头部只覆盖开头。明文文件直接读尾部拿到真实结束时间；
+  // `.zst` 读不到（单帧压缩），留给 enrich 用 threads 表修。
+  //
+  // 导入会话跳过这一步：它们文件里的时间戳全是导入那一刻，
+  // 读尾部只会把刚修好的真实时间又盖回导入时间。
+  if (!imported) {
+    const tailEnd = readTailEnd(file);
+    if (tailEnd && (!end || tailEnd > end)) end = tailEnd;
+  }
+
   // kind === 'main' 过滤，列表不会翻倍，事实也不再丢。
   return makeSession({
     agent: name,
@@ -256,6 +320,58 @@ function parentOf(payload) {
     return payload.session_id;
   }
   return null;
+}
+
+/**
+ * 读文件尾部，取最后一条事件的时间戳。
+ *
+ * 只对**明文** `.jsonl` 有用（`.zst` 是单帧压缩，尾部无法独立解压）。
+ * 头部读取对大文件会漏掉真实的结束时间，明文文件可以直接读尾巴补上——
+ * 这是最便宜也最精确的修法，代价是 64KB 的读。
+ *
+ * 尾部第一行可能是被切断的半行，解析失败跳过即可；反正我们只要
+ * "最后一条能解析出的 timestamp"。
+ */
+function readTailEnd(file) {
+  // 压缩文件尾部是二进制，逐行解析永远不会成功——直接跳过，
+  // 省下每个文件 64KB 的无用读取（本机 2032 个 .zst，合计 130MB）
+  if (file.endsWith('.zst')) return null;
+
+  let fh;
+  try {
+    fh = fs.openSync(file, 'r');
+  } catch {
+    return null;
+  }
+  try {
+    const st = fs.fstatSync(fh);
+    if (st.size <= HEAD_BYTES) return null; // 头部已经覆盖全文
+    const start = Math.max(0, st.size - TAIL_BYTES);
+    const len = st.size - start;
+    const buf = Buffer.allocUnsafe(len);
+    const n = fs.readSync(fh, buf, 0, len, start);
+    let last = null;
+    for (const line of buf.subarray(0, n).toString('utf8').split('\n')) {
+      const i = line.indexOf('"timestamp"');
+      if (i < 0) continue;
+      try {
+        const o = JSON.parse(line);
+        const d = new Date(o.timestamp);
+        if (!Number.isNaN(d.getTime()) && (!last || d > last)) last = d;
+      } catch {
+        /* 被切断的行，跳过 */
+      }
+    }
+    return last;
+  } catch {
+    return null;
+  } finally {
+    try {
+      fs.closeSync(fh);
+    } catch {
+      /* 忽略 */
+    }
+  }
 }
 
 /**
@@ -489,4 +605,155 @@ function unwrapOutput(raw) {
   } catch {
     return raw;
   }
+}
+
+/**
+ * 读 Codex 自己的线程索引（state_5.sqlite 的 threads 表）。
+ *
+ * 这张表是 Codex 应用自己维护的：每个线程一行，带 `updated_at`（最后活动）、
+ * `title`（应用生成或用户改名）、`tokens_used`、`cwd`、`rollout_path`。
+ * 它是旁路数据，**不在会话文件里**，但比头 256KB 可靠得多（对照见文件头注释）。
+ *
+ * ## 缓存
+ *
+ * 按 (size, mtime) 记住上次读的那份。Codex 一写这张表就要重读，但它只有
+ * 50 MB、1997 行读一次 48 毫秒，比重新解析任何一场 rollout 都便宜。
+ *
+ * ## 读不到的机器
+ *
+ * 老版本 Codex 可能没有这张表，或者用户把 state 库搬走了。读不到就返回
+ * 空 Map，enrich 会退化成"什么都不改"——采集照常，只是 end 精度回到
+ * 头部推断的水平。**不能因为旁路数据缺失就让 Codex 整个读不出来。**
+ */
+let threadIndexMemo = null;
+
+function threadIndex() {
+  const dbPath = path.join(codexDir(), 'state_5.sqlite');
+  let stamp;
+  try {
+    const st = fs.statSync(dbPath);
+    stamp = `${st.size}:${st.mtimeMs}`;
+  } catch {
+    return null; // 没有这张表
+  }
+  if (threadIndexMemo && threadIndexMemo.stamp === stamp) return threadIndexMemo.map;
+
+  const map = new Map();
+  const db = openReadOnly(dbPath);
+  if (db) {
+    try {
+      // 只取需要的列。title 可能很长，限制长度避免把整表读进内存
+      const rows = db
+        .prepare(
+          `select id, title, updated_at, cwd, tokens_used
+           from threads
+           where id is not null`
+        )
+        .all();
+      for (const r of rows) {
+        map.set(String(r.id), {
+          title: r.title == null ? null : String(r.title),
+          updatedAt: toThreadDate(r.updated_at),
+          cwd: r.cwd == null ? null : String(r.cwd),
+          tokensUsed: Number.isFinite(r.tokens_used) ? r.tokens_used : null,
+        });
+      }
+    } catch {
+      /* 表结构变了或读不了：当空表处理 */
+    } finally {
+      try {
+        db.close();
+      } catch {
+        /* 忽略 */
+      }
+    }
+  }
+
+  threadIndexMemo = { stamp, map };
+  return map;
+}
+
+/**
+ * threads.updated_at 的格式。
+ *
+ * 本机实测是 Unix 秒（`1792421580`），但同一张表里 created_at 有被写成
+ * 毫秒的情况，所以按量级判断——与 model.js 的 toDate 同一套判据。
+ */
+function toThreadDate(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const ms = n > 1e11 ? n : n * 1000;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * 富化：用 threads 表修正 end 和 title。
+ *
+ * 在 registry 合并之后调用（见 registry.js 的 applyEnrichers），不进磁盘缓存——
+ * 这样 Codex 一写状态库，修正立刻生效，不必让 2037 个 rollout 缓存全部作废。
+ *
+ * 三条规矩：
+ *   1. **不改身份字段**（agent/id/source/project）。旁路表只用来纠正时间和标题。
+ *   2. **只往前走的时间才算修正**。`end` 只在 threads 更新更晚时才替换，
+ *      免得把某些边缘情况下的正确值改坏。
+ *   3. **标题只在明显更好时才换**：应用给的标题非空、且不是占位符
+ *      （我们的占位符形如 `(Codex Desktop)`），才覆盖。
+ */
+export function enrich(sessions) {
+  const index = threadIndex();
+  if (!index || !index.size) return sessions;
+
+  let touchedEnd = 0;
+  let touchedTitle = 0;
+
+  const out = sessions.map((s) => {
+    if (s.agent !== name) return s;
+    const t = index.get(String(s.id));
+    if (!t) return s;
+
+    let next = s;
+
+    // 结束时间：threads 的更晚才replace
+    if (t.updatedAt && (!s.end || t.updatedAt > s.end)) {
+      next = next === s ? { ...s } : next;
+      next.end = t.updatedAt;
+      touchedEnd++;
+    }
+
+    // 标题：应用给的更靠谱才换
+    const theirs = (t.title || '').trim();
+    const ours = String(s.title || '');
+    if (theirs && isPlaceholderTitle(ours)) {
+      next = next === s ? { ...s } : next;
+      next.title = theirs.slice(0, 200);
+      touchedTitle++;
+    }
+
+    return next;
+  });
+
+  // 修完 end 之后可能有会话跨度变了，重新算一遍时长由下游负责；
+  // 这里只保证字段本身正确。
+  return out;
+}
+
+/** 我们生成的占位标题（`(Codex Desktop)` 之类），不配盖掉应用给的标题。 */
+function isPlaceholderTitle(t) {
+  const s = String(t || '').trim();
+  if (!s || s === '(untitled)') return true;
+  if (/^\(.*\)$/.test(s)) return true;
+  // guardian 类子代理的标题会被我们的标题提取拿到 prompt 开头
+  if (s.startsWith('The following is the Codex agent history')) return true;
+  return false;
+}
+
+/** 会话时长，供上游排序用。 */
+export function enrichStats() {
+  return threadIndexMemo ? { indexed: threadIndexMemo.map.size } : { indexed: 0 };
 }

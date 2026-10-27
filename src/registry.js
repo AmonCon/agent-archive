@@ -82,7 +82,7 @@ export const scanners = [
  * 缓存目录放在用户目录而不是项目里：这是工具自己的运行态数据，
  * 不该污染被归档的项目。
  */
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 
 /** 头部哈希取多少字节。与 MAGPIE 的 headLen 一致。 */
 const HEAD_BYTES = 256;
@@ -314,13 +314,50 @@ export function scanAll({ noCache = false } = {}) {
 
   saveCache(nextCache);
 
-  // 同一场会话可能散在多个文件里（Codex 续接会话就是如此：
+// 同一场会话可能散在多个文件里（Codex 续接会话就是如此：
   // 一个 rollout 写满后另起一个文件，两者 session id 相同、时间相接）。
   // 合并成一个条目，时间取包络，source 记成用「|」连接的多段路径，
-  // 正文读取时再逐个展开。不合并会让时间线把一场对话显示好几次。
+  // 正文读取时再逐个展开。不合并会让时间线把这场对话显示好几次。
   const merged = mergeByKey(sessions);
-  merged.sort((a, b) => (b.end || b.start || 0) - (a.end || a.start || 0));
-  return { sessions: merged, stats };
+  const enriched = applyEnrichers(merged, stats);
+  enriched.sort((a, b) => (b.end || b.start || 0) - (a.end || a.start || 0));
+  return { sessions: enriched, stats };
+}
+
+/**
+ * 让扫描器对自己的会话做一次"富化"。
+ *
+ * ## 为什么不直接写进 parse()
+ *
+ * 会话文件的解析结果按 (mtime, size, 头哈希) 缓存；而有些信息**不在会话文件里**，
+ * 而在旁边的数据库或索引里（Codex 的 state_5.sqlite 就是典型）。如果把它们
+ * 混进 parse() 的返回值，就必须把那些旁路文件也算进每个文件的缓存指纹——
+ * 结果是 Codex 每写一次状态库，2037 个 rollout 全部作废重解析，一次几十秒。
+ *
+ * 所以分成两步：
+ *   parse()    只看会话文件本身，结果可长期缓存
+ *   enrich()   在合并之后跑，读的是旁路数据，**不进磁盘缓存**，每次扫描重算
+ *
+ * 旁路数据的读取自己做进程内记忆（按文件 (size, mtime) 缓存），所以重算很便宜
+ * ——Codex 那个库 1997 行读一次 48 毫秒。
+ *
+ * 约定：enrich 是纯函数，只改自己认得的字段，不改 id/agent/source 这些身份字段；
+ * 抛错就把原始列表交回去，不能因为旁路数据坏了就让整个扫描失败。
+ */
+function applyEnrichers(sessions, stats) {
+  let out = sessions;
+  for (const scanner of scanners) {
+    if (typeof scanner.enrich !== 'function') continue;
+    try {
+      const next = scanner.enrich(out);
+      if (Array.isArray(next) && next.length) out = next;
+    } catch (e) {
+      // 旁路数据读不到不该影响事实采集——记一笔，继续
+      stats.enrichErrors = stats.enrichErrors || {};
+      stats.enrichErrors[scanner.name] = e && e.message ? e.message : String(e);
+    }
+  }
+  return out;
 }
 
 /**

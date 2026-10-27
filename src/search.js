@@ -332,8 +332,8 @@ export async function buildIndex({ force = false, onProgress } = {}) {
   const { sessions } = scanCached({});
 
   const existing = new Map();
-  for (const r of db.prepare('select key, mtime, size from doc').all()) {
-    existing.set(r.key, { mtime: r.mtime, size: r.size });
+  for (const r of db.prepare('select key, mtime, size, title, start, end from doc').all()) {
+    existing.set(r.key, { mtime: r.mtime, size: r.size, title: r.title, start: r.start, end: r.end });
   }
 
   let reused = 0;
@@ -367,7 +367,19 @@ export async function buildIndex({ force = false, onProgress } = {}) {
     }
 
     const prev = existing.get(key);
-    if (prev && prev.mtime === mtime && prev.size === size && !force) {
+    // 复用条件不只是"源文件没变"。
+    //
+    // 会话的 title/start/end 可能被**旁路数据**修正（Codex 的 threads 表就改
+    // 这三个，见 scanners/codex.js 的 enrich），而源文件一个字没动。只看
+    // (mtime, size) 的话，索引会一直显示旧的占位标题和错误的起止时间。
+    // 所以这三个字段也要比一遍——比一次字符串/数字，比重新读正文便宜得多。
+    const metaSame =
+      prev &&
+      prev.title === s.title &&
+      prev.start === (s.start ? s.start.getTime() : null) &&
+      prev.end === (s.end ? s.end.getTime() : null);
+
+    if (prev && prev.mtime === mtime && prev.size === size && metaSame && !force) {
       reused++;
       if (onProgress) onProgress({ phase: 'collect', i, total: sessions.length, reused, rebuilt, failed });
       continue;
