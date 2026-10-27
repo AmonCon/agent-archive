@@ -202,6 +202,88 @@ function openIndex({ create = true } = {}) {
 }
 
 /**
+ * 从会话的 source 字段推出"索引该按什么判过期"。
+ *
+ * source 有四种形态，前三种都是路径，第四种不是：
+ *
+ *   /path/a.jsonl                单文件
+ *   /path/a.jsonl|/path/b.jsonl  registry 按 agent|id 合并的多段（Codex 续接）
+ *   /path/db.sqlite#session_id   SQLite 源，'#' 前面才是路径
+ *   db:<session-id>              Hermes——只记了会话 id，没有路径
+ *
+ * 这里曾经有两个真实缺陷，都会让索引**静默不更新**：
+ *
+ *   1. 多段 source 直接 statSync 整个字符串，必然 ENOENT，mtime 记 null。
+ *      而 null === null 成立，于是"永远命中缓存"，会话再怎么追加都不重建。
+ *      本机实测 28 场 Codex 会话中招。
+ *   2. Hermes 的 db: 前缀同样 statSync 失败，本机 165 场全部 mtime=null，
+ *      等于 Hermes 的索引一旦建成就冻结在第一次。
+ *
+ * 两条都造成"搜不到刚聊过的内容"，且不报错。修法是：
+ *   - 多段取**最大** mtime、求和 size：任一段有新内容就算过期（早的段不需要再重建）
+ *   - db: 形态回退到 Hermes 自己的库路径
+ *
+ * 取最大而不是最小：包络的结束时间由最后一段决定，索引正文也包含全部段。
+ *
+ * @returns {{mtime: number, size: number} | null}
+ */
+function sourceStamp(session) {
+  if (!session || !session.source) return null;
+
+  const src = String(session.source);
+
+  if (src.startsWith('db:')) {
+    const db = hermesDbPath();
+    if (!db) return null;
+    return statStamp([db], { sumSize: false });
+  }
+
+  // 多段路径：每段各自 stat，取最晚 mtime
+  const parts = src.split('|');
+  const files = parts.map((one) => one.split('#')[0]).filter(Boolean);
+  if (!files.length) return null;
+  return statStamp(files, { sumSize: true });
+}
+
+/** 对一组文件求"联合指纹"；任一文件不可读就返回 null（宁可重扫也不误判未变）。 */
+function statStamp(files, { sumSize = false } = {}) {
+  let mtime = 0;
+  let size = 0;
+  for (const f of files) {
+    let st;
+    try {
+      st = fs.statSync(f);
+    } catch {
+      return null;
+    }
+    mtime = Math.max(mtime, st.mtimeMs);
+    size = sumSize ? size + st.size : st.size;
+  }
+  return { mtime, size };
+}
+
+/** Hermes 的库路径。与 scanners/hermes.js 的 hermesDir() 保持同一套候选顺序。 */
+function hermesDbPath() {
+  const home = os.homedir();
+  const candidates = [
+    process.env.HERMES_HOME && String(process.env.HERMES_HOME).trim(),
+    path.join(home, '.hermes'),
+    process.platform === 'win32' && process.env.LOCALAPPDATA
+      ? path.join(process.env.LOCALAPPDATA, 'hermes')
+      : null,
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    const p = path.join(dir, 'state.db');
+    try {
+      if (fs.statSync(p).isFile()) return p;
+    } catch {
+      /* 试下一个 */
+    }
+  }
+  return null;
+}
+
+/**
  * 建索引 / 增量更新。
  *
  * 只重建"源文件变了"的会话。判断依据是同一个源文件的 (mtime, size)，
@@ -250,16 +332,10 @@ export async function buildIndex({ force = false, onProgress } = {}) {
 
     let mtime = null;
     let size = null;
-    if (s.source) {
-      // ZCode 的 source 是 "db.sqlite#session_id"，取前半段
-      const p = s.source.split('#')[0];
-      try {
-        const st = fs.statSync(p);
-        mtime = st.mtimeMs;
-        size = st.size;
-      } catch {
-        /* 源文件没了，保留旧索引 */
-      }
+    const stamp = sourceStamp(s);
+    if (stamp) {
+      mtime = stamp.mtime;
+      size = stamp.size;
     }
 
     const prev = existing.get(key);

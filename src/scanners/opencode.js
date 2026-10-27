@@ -119,6 +119,11 @@ export function discover() {
   return out;
 }
 
+/** WAL 必须参与缓存判据：新消息先落 wal，主库 mtime 可以长时间不动。 */
+export function extraFiles(file) {
+  return [`${file}-wal`];
+}
+
 let cachedDb = null;
 let cachedPath = null;
 

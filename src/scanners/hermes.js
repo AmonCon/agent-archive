@@ -145,6 +145,17 @@ export function discover() {
 }
 
 /**
+ * 参与缓存判据的附属文件。
+ *
+ * `-wal` 必须算进来：WAL 模式下新消息先写 wal，主库文件的 mtime/size
+ * 可以长时间不动。只按主库判缓存就会漏掉刚聊完的会话。
+ * `-shm` 不参与——它是索引页，内容随 wal 重建，算进来只会造成误判重扫。
+ */
+export function extraFiles(file) {
+  return [`${file}-wal`];
+}
+
+/**
  * 一个 state.db 里有很多会话，所以走 parseAll。
  */
 export function parseAll(file) {

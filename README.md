@@ -904,6 +904,25 @@ Antigravity 是中间态：21 场里 3 场有明文 `transcript_full.jsonl`，
 会话在两次扫描之间没有变化，而重新解析一个 1.8 MB 的 JSONL 要几十毫秒。
 实测 2042 个文件第二次扫描命中 2041 个。
 
+**SQLite 源必须把 `-wal` 一起算进缓存指纹。** Hermes、ZCode、OpenCode 都是
+WAL 模式，新消息先写 `-wal`，主库文件的 mtime/size 可以长时间不动。只按
+主库判断就会漏数，而且不报错：本机实测 Hermes 的 wal 比主库新 24 秒、
+积了 3.4 MB 新消息，缓存却仍然命中。
+
+扫描器通过 `extraFiles(file)` 声明自己的附属文件，registry 统一合并成指纹
+（`CACHE_VERSION` 因此升到 2，旧缓存自动作废一次）。这条思路来自 MAGPIE
+对 Hermes 的做法——它把 `(size, mtime)` 拼成 revision 并覆盖 checkpoint 后
+wal 被截断的情况；这里的差别是"带哪些文件"由 scanner 自己声明，因为只有
+它知道自家存储有几个附属文件。`-shm` 不参与：它是索引页，算进来只会误判重扫。
+
+**索引侧的 source 解析也得认这几种形态。** `source` 有四种写法：单文件、
+多段 `|`（Codex 续接会话合并而成）、`path#id`（SQLite 源）、`db:<id>`
+（Hermes 只记会话 id）。曾经只做了 `split('#')[0]`，另外两种直接
+`statSync` 失败、`mtime` 记成 null；而 `null === null` 成立，索引就
+**永远不会重建**——本机 28 场 Codex + 165 场 Hermes 全部中招，表现是
+"搜不到刚聊过的内容"。现在多段取最大 mtime、求和 size，`db:` 回退到
+Hermes 库路径。修完 `mtime is null` 的记录从 193 条降到 0。
+
 **噪音过滤**：各 Agent 会把斜杠命令、环境上下文、AGENTS.md 指令块、
 IDE 状态当成用户消息写进会话。这些会污染标题，必须在抽取"第一条真实
 用户输入"时剥掉。没有用户输入的会话（自动化、子代理触发）退到助手
@@ -929,6 +948,8 @@ export function parse(file) { /* 一个文件一个会话 */ }
 export function parseAll(file) { /* 一个文件多个会话，返回数组 */ }
 // 想看正文再加一个（cat 用）
 export function readMessages(session) { /* 返回统一消息数组 */ }
+// SQLite 源再加一个：参与缓存判据的附属文件（WAL 等）
+export function extraFiles(file) { return [`${file}-wal`]; }
 ```
 
 然后在 `src/registry.js` 的 `scanners` 数组里加一行。
