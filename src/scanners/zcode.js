@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { DatabaseSync } from 'node:sqlite';
+import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
 
@@ -43,7 +43,7 @@ export function extraFiles(file) {
 /** 打开只读连接；一次扫描复用同一个连接。 */
 export function openStore(file) {
   try {
-    return new DatabaseSync(file, { readOnly: true });
+    return openReadOnly(file);
   } catch {
     return null;
   }

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { scanAll, scanners } from './registry.js';
+import { scanCached, scanners } from './registry.js';
 import {
   projectKey,
   normalizeProject,
@@ -30,7 +30,7 @@ function absProject(p) {
 }
 
 export function listProjects({ noCache = false, showAll = false } = {}) {
-  const { sessions, stats } = scanAll({ noCache });
+  const { sessions, stats } = scanCached({ noCache });
 
   const byKey = new Map();
   // 不绑定项目的会话（Hermes 这类接聊天渠道的助手）单独归一堆。
@@ -125,7 +125,7 @@ function summarizeUnbound(sessions) {
  * 子目录的项目（monorepo 里的子包）也算进来，由 belongTo 判断。
  */
 export function projectTimeline(target, { noCache = false, includeNested = true } = {}) {
-  const { sessions, stats } = scanAll({ noCache });
+  const { sessions, stats } = scanCached({ noCache });
   const abs = absProject(target);
   const targetKey = projectKey(abs);
 
@@ -205,7 +205,7 @@ export async function readSessionContent(session) {
  * 命中多场时返回候选列表而不是猜一个——静默挑错比报错更烦人。
  */
 export function findSessions({ query, agent, project, limit = 10 } = {}) {
-  const { sessions } = scanAll({});
+  const { sessions } = scanCached({});
   let pool = sessions;
 
   if (agent) pool = pool.filter((s) => s.agent === agent);

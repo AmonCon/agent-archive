@@ -517,8 +517,8 @@ const TOOLS = [
       // 而扫一次全量要几秒
       let link = null;
       if (groupBy === 'session' || session) {
-        const { scanAll } = await import('./registry.js');
-        const { sessions } = scanAll({});
+        const { scanCached } = await import('./registry.js');
+        const { sessions } = scanCached({});
         const l = attachToSessions(calls, sessions);
         link = {
           matchedSessions: l.sessions,

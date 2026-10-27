@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { DatabaseSync } from 'node:sqlite';
+import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
 
@@ -82,7 +82,8 @@ let storePath = null;
 /** SQLite 以只读方式打开，用完由 registry 调 closeStore 关闭。 */
 export function openStore(file) {
   try {
-    const db = new DatabaseSync(file, { readOnly: true });
+    const db = openReadOnly(file);
+    if (!db) return null;
     db.prepare('pragma busy_timeout = 5000').run();
     return db;
   } catch {
@@ -157,6 +158,26 @@ export function extraFiles(file) {
 
 /**
  * 一个 state.db 里有很多会话，所以走 parseAll。
+ *
+ * ## 为什么还要按会话做一层增量
+ *
+ * registry 的缓存是按**文件**判的：state.db 一动，整库 165 场全部重解析。
+ * 而 Hermes 的库是追加式写入——聊完一场，别的会话一个字都没变。
+ * 本机实测整库重解析要读 250 MB 的 messages 表，全部白做。
+ *
+ * 所以这里再套一层按会话的指纹（MAGPIE 对 Hermes 用的是同一套思路）：
+ * 用一次 SQL 聚合给每场会话算 `(消息数, 末条时间, 正文总长)`，只有指纹
+ * 变了的会话才重新查首条用户消息。库变了但只有一场会话变时，代价从
+ * "整库"降到"一场 + 一次聚合查询"。
+ *
+ * 指纹的取法有讲究：
+ *   count(*)          抓新增消息
+ *   max(timestamp)    抓替换（rewind 后重写同一批消息）
+ *   sum(rowid)        抓"条数不变、行被删了重建"（重建会拿到新 rowid）
+ *
+ * 代价实测：这三列一起聚合 6 ms，而原来读全表求首条用户消息要 117 ms。
+ * 刻意**不**用 total(length(content))：它要解压每行正文，实测 203 ms，
+ * 把省下来的力气全吃回去，还比原方案更慢。
  */
 export function parseAll(file) {
   const db = getStore();
@@ -177,59 +198,99 @@ export function parseAll(file) {
     return [];
   }
 
-  // 一场会话的标题优先用 title（Hermes 自己生成或用户命名），
-  // 没有就退到首条用户消息——那要查 messages 表，批量取一次更省
-  const firstUser = new Map();
+  // 一次聚合拿到所有会话的消息指纹。读不到（老 schema）就退化成全量重算。
+  //
+  // 指纹只用「不读正文就能拿到」的列。这一点实测过：
+  //   count+max(timestamp)              12 ms
+  //   count+max+sum(rowid)               6 ms
+  //   count+max+total(length(content)) 203 ms
+  // total(length(content)) 要解压每一行的正文，把省下来的力气全吃回去，
+  // 比原来读全表（117 ms）还慢。sum(rowid) 足够了：消息被删后重写会拿到
+  // 新的 rowid，因此"条数没变但内容换了"依然会被检测到。
+  const fps = new Map();
   try {
-    const msgs = db
+    const agg = db
       .prepare(
-        `select session_id, content from messages
-         where role = 'user' and content is not null and content != ''
-         order by timestamp asc`
+        `select session_id, count(*) n, max(timestamp) last_ts, sum(rowid) ids
+         from messages group by session_id`
       )
       .all();
-    for (const m of msgs) {
-      if (firstUser.has(m.session_id)) continue;
-      const t = cleanText(m.content);
-      if (t) firstUser.set(m.session_id, t);
+    for (const a of agg) {
+      fps.set(a.session_id, `${a.n}|${a.last_ts == null ? '-' : a.last_ts}|${a.ids || 0}`);
     }
   } catch {
-    /* messages 表读不到就用 title */
+    /* 聚合失败：下面靠"缓存里没有就重算"兜底 */
   }
 
+  /** 会话行本身的字段指纹——title/cwd 这类可以不读 messages 就变。 */
+  const rowFp = (r) =>
+    `${r.message_count}|${r.ended_at}|${r.title || ''}|${r.cwd || ''}|${r.hidden}|${r.source || ''}`;
+
+  const firstUserStmt = db.prepare(
+    `select content from messages
+     where session_id = ? and role = 'user' and content is not null and content != ''
+     order by timestamp asc limit 1`
+  );
+
   const out = [];
+  const nextCache = new Map();
+
   for (const r of rows) {
     // 子代理会话整条跳过：它们是父会话内部的一步
     if (r.parent_session_id) continue;
 
+    const fp = `${rowFp(r)}||${fps.get(r.id) || ''}`;
+    const cached = sessionCache.get(r.id);
+    if (cached && cached.fp === fp) {
+      nextCache.set(r.id, cached);
+      out.push(cached.session);
+      continue;
+    }
+
     const start = toDate(r.started_at);
     const end = toDate(r.ended_at) || start;
+
+    // 首条用户消息只在需要时查——这是原来最大的开销，现在按会话分摊
+    let first = null;
+    try {
+      const row = firstUserStmt.get(r.id);
+      if (row) first = cleanText(row.content);
+    } catch {
+      /* 查不到就用 title */
+    }
 
     // 标题优先级：Hermes 的 title → 首条用户消息 → 来源占位
     const title =
       cleanText(r.title) ||
-      firstUser.get(r.id) ||
+      first ||
       (r.source ? `(${r.source})` : null) ||
       (r.hidden ? '(hidden)' : null);
 
-    out.push(
-      makeSession({
-        agent: name,
-        id: r.id,
-        // 有 cwd 才归项目。多数 Hermes 会话是聊天渠道，没有工作目录——
-        // 那不是缺陷，但也不能一刀切：有 cwd 的必须归进去
-        project: r.cwd || null,
-        title,
-        start,
-        end,
-        source: sourceOf(r.id),
-        resume: null,
-      })
-    );
+    const session = makeSession({
+      agent: name,
+      id: r.id,
+      // 有 cwd 才归项目。多数 Hermes 会话是聊天渠道，没有工作目录——
+      // 那不是缺陷，但也不能一刀切：有 cwd 的必须归进去
+      project: r.cwd || null,
+      title,
+      start,
+      end,
+      source: sourceOf(r.id),
+      resume: null,
+    });
+
+    nextCache.set(r.id, { fp, session });
+    out.push(session);
   }
+
+  // 已经被删掉的会话不能一直留在缓存里
+  sessionCache = nextCache;
 
   return out;
 }
+
+/** 按会话的解析缓存：id -> { fp, session }。库变了但会话没变时直接复用。 */
+let sessionCache = new Map();
 
 /**
  * 兼容：如果某个用户机器上只有旧的 jsonl 而没有 state.db，

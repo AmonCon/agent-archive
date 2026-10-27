@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
-import { scanAll } from './registry.js';
+import { scanCached } from './registry.js';
 import { readSessionContent } from './query.js';
 import { statePath } from './paths.js';
 
@@ -301,7 +301,7 @@ function hermesDbPath() {
  */
 export async function buildIndex({ force = false, onProgress } = {}) {
   const db = openIndex();
-  const { sessions } = scanAll({});
+  const { sessions } = scanCached({});
 
   const existing = new Map();
   for (const r of db.prepare('select key, mtime, size from doc').all()) {

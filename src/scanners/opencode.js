@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { DatabaseSync } from 'node:sqlite';
+import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
 import { dataCandidates } from '../platform.js';
@@ -129,7 +129,8 @@ let cachedPath = null;
 
 export function openStore(file) {
   try {
-    const db = new DatabaseSync(file, { readOnly: true });
+    const db = openReadOnly(file);
+    if (!db) return null;
     db.prepare('pragma busy_timeout = 5000').run();
     return db;
   } catch {

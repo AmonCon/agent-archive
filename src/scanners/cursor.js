@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
 import { editorDataCandidates, findUnder } from '../platform.js';
@@ -70,7 +70,11 @@ function getDb() {
   if (cachedDb && cachedPath === p) return cachedDb;
   closeStore();
   try {
-    cachedDb = new DatabaseSync(p, { readOnly: true });
+    cachedDb = openReadOnly(p);
+    if (!cachedDb) {
+      cachedPath = p;
+      return null;
+    }
     cachedDb.prepare('pragma busy_timeout = 5000').run();
   } catch {
     cachedDb = null;
