@@ -82,9 +82,6 @@ export function parseAll(file) {
 
   const out = [];
   for (const r of rows) {
-    // 子会话是父会话的子代理，单独列会让时间线翻倍；先跳过
-    if (r.parent_id) continue;
-
     const title = r.title_source === 'default' ? null : r.title;
     out.push(
       makeSession({
@@ -96,6 +93,9 @@ export function parseAll(file) {
         end: r.time_updated,
         source: `${file}#${r.id}`,
         resume: null, // ZCode 是桌面应用，没有命令行恢复方式
+        // 子会话照常采集，只标记归属。丢弃会连带丢掉子代理实际干的活。
+        kind: r.parent_id ? 'subagent' : 'main',
+        parent: r.parent_id || null,
       })
     );
   }

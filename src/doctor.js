@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { scanAll, scanners } from './registry.js';
 import { readSessionContent } from './query.js';
-import { projectKey, isProjectPath } from './model.js';
+import { projectKey, isProjectPath, isSubagent, mainOnly } from './model.js';
 import { userDataCandidates, dataCandidates, candidatesWith } from './platform.js';
 
 /** 各 Agent 的存储根目录是否存在于本机。 */
@@ -46,7 +46,12 @@ export function detectAgents() {
  * 抽样取每家的前若干个，够发现"完全读不出"这类系统性故障。
  */
 export async function auditCollection({ samplePerAgent = 3, noCache = false } = {}) {
-  const { sessions, stats } = scanAll({ noCache });
+  const scanned = scanAll({ noCache });
+  const stats = scanned.stats;
+  // 质量指标只针对主会话：子代理会话没有独立的用户输入，把它们算进
+  // "标题是占位符"或"项目覆盖率"的分母会凭空拉低这两个数
+  const sessions = mainOnly(scanned.sessions);
+  const subagentAudit = auditSubagents(scanned.sessions);
 
   const byAgent = new Map();
   for (const s of sessions) {
@@ -122,6 +127,8 @@ export async function auditCollection({ samplePerAgent = 3, noCache = false } = 
 
   return {
     total: sessions.length,
+    // 子会话单列。它们被采集但不参与上面的质量指标。
+    subagent: subagentAudit,
     files: stats.files,
     failures: stats.failures,
     duplicates,
@@ -142,6 +149,78 @@ export async function auditCollection({ samplePerAgent = 3, noCache = false } = 
       // 但数量多说明这类自动化会话占比高，值得知道。
       withoutUserInput: ratio(sessions, (s) => !/^\(.*\)$/.test(String(s.title || ''))),
     },
+  };
+}
+
+/**
+ * 子代理归属体检。
+ *
+ * 子代理会话被采集之后，唯一真正会坏的事情是**归不到根会话**：那样它既
+ * 不显示在时间线上（默认只看 main），也不能挂在任何父会话下面，等于又丢了
+ * 一次，只是这次是静默的。
+ *
+ * **归属要沿链上溯，不能只看父是不是 main。** Codex 支持多级委派：
+ * 子代理还能再派子代理，于是"父会话"本身也是 subagent。本机实测 1543 场
+ * 子代理里有 181 场的直接父会话是另一个子代理——只看一层会把它们误报成
+ * 孤儿。正确的判据是：沿 parent 链往上走，能不能走到一个 main 会话。
+ *
+ * 三种情况分开报，因为处置完全不同：
+ *
+ *   attached  沿链能到达 main——健康
+ *   orphan    有父 id，但链断了（父会话被删、或跨项目不在本批次）
+ *   noParent  扫描器没取到父 id，子代理只能游离存在
+ *
+ * 上溯带跳数上限，防止数据里出现环。
+ */
+function auditSubagents(allSessions) {
+  const byKey = new Map(allSessions.map((s) => [`${s.agent}|${s.id}`, s]));
+  const subs = allSessions.filter(isSubagent);
+
+  let attached = 0;
+  let orphan = 0;
+  let noParent = 0;
+  const byAgent = new Map();
+
+  /** 沿 parent 链上溯，返回是否到达 main。最多 64 跳，防环。 */
+  const reachesMain = (s) => {
+    let cur = s;
+    for (let i = 0; i < 64; i++) {
+      if (!cur.parent) return false;
+      const p = byKey.get(`${cur.agent}|${cur.parent}`);
+      if (!p) return false;
+      if (!isSubagent(p)) return true;
+      cur = p;
+    }
+    return false;
+  };
+
+  for (const s of subs) {
+    let e = byAgent.get(s.agent);
+    if (!e) {
+      e = { agent: s.agent, total: 0, attached: 0, orphan: 0, noParent: 0 };
+      byAgent.set(s.agent, e);
+    }
+    e.total++;
+    if (!s.parent) {
+      noParent++;
+      e.noParent++;
+    } else if (reachesMain(s)) {
+      attached++;
+      e.attached++;
+    } else {
+      orphan++;
+      e.orphan++;
+    }
+  }
+
+  return {
+    total: subs.length,
+    attached,
+    orphan,
+    noParent,
+    // 归属率的分母排掉 noParent：那不是"挂不上"，是压根没取到父 id
+    attachRate: attached + orphan > 0 ? attached / (attached + orphan) : 1,
+    byAgent: [...byAgent.values()].sort((a, b) => b.total - a.total),
   };
 }
 

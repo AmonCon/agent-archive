@@ -179,9 +179,6 @@ export function parseAll(file) {
 
   const out = [];
   for (const r of rows) {
-    // 子代理会话是父会话内部的一步，单独列会让时间线翻倍
-    if (r.parent_id) continue;
-
     out.push(
       makeSession({
         agent: name,
@@ -192,6 +189,9 @@ export function parseAll(file) {
         end: r.time_updated,
         source: `${file}#${r.id}`,
         resume: null,
+        // 子代理会话照常采集，只标记归属；时间线默认按 main 过滤
+        kind: r.parent_id ? 'subagent' : 'main',
+        parent: r.parent_id || null,
       })
     );
   }

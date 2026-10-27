@@ -196,8 +196,9 @@ export function parse(file) {
   }
   if (!header || header.type !== 'session') return null;
 
-  // 子代理是父会话内部的一步，单独归档会让时间线出现重复的"同一场对话"
-  if (header.parentSession) return null;
+  // 子代理会话（header.parentSession 非空）以前整条 return null。现在照常
+  // 采集并标记归属：子代理会话里记着实际干的活，丢掉只存一半事实；
+  // 时间线默认按 kind === 'main' 过滤，列表不会因此翻倍。
 
   let start = toDate(header.createdAt);
   let end = null;
@@ -243,6 +244,8 @@ export function parse(file) {
     end: end || start,
     source: file,
     resume: null,
+    kind: header.parentSession ? 'subagent' : 'main',
+    parent: header.parentSession || null,
   });
 }
 

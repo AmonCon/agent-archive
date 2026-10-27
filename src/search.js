@@ -44,6 +44,7 @@ const SCHEMA_STATEMENTS = [
      chars integer not null default 0,
      mtime real,
      size integer,
+     kind text not null default 'main',
      body text,
      fts_text text
    )`,
@@ -198,7 +199,34 @@ function openIndex({ create = true } = {}) {
   }
 
   for (const stmt of SCHEMA_STATEMENTS) db.prepare(stmt).run();
+  migrate(db);
   return db;
+}
+
+/**
+ * 老索引库的列迁移。
+ *
+ * `create table if not exists` 不会给已存在的表加列，所以新增字段要单独补。
+ * 迁移必须是幂等的：每次打开都跑一遍，加过就跳过。
+ *
+ * kind 列的意义：同一个词可能在主会话和子代理会话里都出现，搜索结果必须
+ * 能区分——否则用户读到一段"子代理查到的细节"会以为是主对话说的。
+ */
+function migrate(db) {
+  let cols;
+  try {
+    cols = db.prepare('pragma table_info(doc)').all();
+  } catch {
+    return;
+  }
+  const has = new Set(cols.map((c) => c.name));
+  if (!has.has('kind')) {
+    try {
+      db.prepare("alter table doc add column kind text not null default 'main'").run();
+    } catch {
+      /* 并发建索引时可能已被别人加上 */
+    }
+  }
 }
 
 /**
@@ -315,8 +343,8 @@ export async function buildIndex({ force = false, onProgress } = {}) {
 
   const delDoc = db.prepare('delete from doc where key = ?');
   const insDoc = db.prepare(
-    `insert into doc (key, agent, id, project, title, start, end, chars, mtime, size, body, fts_text)
-     values (?,?,?,?,?,?,?,?,?,?,?,?)`
+    `insert into doc (key, agent, id, project, title, start, end, chars, mtime, size, kind, body, fts_text)
+     values (?,?,?,?,?,?,?,?,?,?,?,?,?)`
   );
 
   const begin = db.prepare('begin');
@@ -369,6 +397,7 @@ export async function buildIndex({ force = false, onProgress } = {}) {
         body.length,
         mtime,
         size,
+        s.kind || 'main',
         body,
         toIndexTokens(body)
       );
@@ -481,8 +510,13 @@ function summarize(input) {
  *
  * 返回每场会话最相关的一段摘录，而不是整篇——搜索结果的价值在于
  * "让你想起那场对话"，不是把内容再读一遍。
+ *
+ * **子代理会话默认也搜**：它们记着主会话没记的细节（子代理实际查了什么、
+ * 看到了什么），把它们排除会让搜索结果变浅。每条结果都带 `kind`，
+ * 调用方据此标注"这是子代理会话"，不要让用户误以为主对话说过这话。
+ * 只想要主会话时传 `includeSubagents: false`。
  */
-export function search(query, { limit = 20, agent, project } = {}) {
+export function search(query, { limit = 20, agent, project, includeSubagents = true } = {}) {
   const db = openIndex({ create: false });
   if (!db) {
     return { ready: false, hits: [], total: 0, message: '索引还没建，先运行：agent-archive index' };
@@ -495,6 +529,7 @@ export function search(query, { limit = 20, agent, project } = {}) {
   }
 
   let sql = `select d.key, d.agent, d.id, d.project, d.title, d.start, d.end, d.chars,
+                    coalesce(d.kind,'main') as kind,
                     d.body as hit_body,
                     bm25(doc_fts) as score
              from doc_fts
@@ -509,6 +544,9 @@ export function search(query, { limit = 20, agent, project } = {}) {
   if (project) {
     sql += ' and lower(d.project) like ?';
     params.push('%' + project.toLowerCase().replace(/\\/g, '/') + '%');
+  }
+  if (!includeSubagents) {
+    sql += " and coalesce(d.kind,'main') = 'main'";
   }
 
   sql += ' order by score limit ?';
@@ -530,6 +568,7 @@ export function search(query, { limit = 20, agent, project } = {}) {
     start: r.start ? new Date(r.start) : null,
     end: r.end ? new Date(r.end) : null,
     chars: r.chars,
+    kind: r.kind || 'main',
     snippet: excerpt(r.hit_body, query),
     score: r.score,
   }));

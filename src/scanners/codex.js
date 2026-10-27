@@ -147,6 +147,7 @@ export function parse(file) {
   let firstAssistantText = null;
   let originator = null;
   let isSubagent = false;
+  let parentId = null;
   let start = null;
   let end = null;
 
@@ -178,6 +179,7 @@ export function parse(file) {
       // session_id 指向**父会话**，只有 id 是自己的。用 session_id 会把
       // 几十个子代理会话全记成同一条，时间线里重复出现几十次。
       sessionId = sessionId || payload.id || payload.session_id || null;
+      parentId = parentId || parentOf(payload) || null;
       originator = originator || payload.originator || null;
       isSubagent = isSubagent || isSubagentSource(payload.source);
       continue;
@@ -206,11 +208,10 @@ export function parse(file) {
 
   if (!start && !end) return null;
 
-  // 子代理会话（guardian、reviewer 之类）是父会话内部的一步，
-  // 不是用户发起的对话。列出来只会让时间线翻倍，所以整条跳过——
-  // 与 ZCode 扫描器跳过 parent_id 的处理保持一致。
-  if (isSubagent) return null;
-
+  // 子代理会话（guardian、reviewer 之类）以前整条跳过，理由是"列出来会让
+  // 时间线翻倍"。但那是展示问题，不该用丢数据来解决：子代理会话里才记着
+  // 具体查了什么、发现了什么。现在照常采集并标记归属，时间线默认按
+  // kind === 'main' 过滤，列表不会翻倍，事实也不再丢。
   return makeSession({
     agent: name,
     id: sessionId,
@@ -222,7 +223,39 @@ export function parse(file) {
     end,
     source: file,
     resume: `codex resume ${sessionId}`,
+    kind: isSubagent ? 'subagent' : 'main',
+    parent: isSubagent ? parentId : null,
   });
+}
+
+/**
+ * 从 session_meta 里取父会话 id。
+ *
+ * Codex 有两代写法，本机两种都遇到了：
+ *
+ *   旧版  session_id 指向父会话、id 指向自己（两者不同）
+ *   新版  session_id == id（都是自己），父 id 单独放在 parent_thread_id，
+ *         并在 source.subagent.thread_spawn 里再写一遍
+ *
+ * 只认旧版会在新版全部取不到父 id——本机实测 41 场 subagent 落在这里，
+ * 表现是"子代理会话存在但挂不到任何父会话下"。
+ *
+ * 还有一种**取不到**的情况，不是解析错误而是数据源限制：Codex 的
+ * `source.subagent.other = "guardian"` 这类内部看护线程，rollout 里压根
+ * 没写父 id（本机 27 场）。它们只能以"无父 id"存在，doctor 会如实报数，
+ * 不要用推测去填一个看起来合理的父 id。
+ */
+function parentOf(payload) {
+  if (!payload) return null;
+  // 新版：显式字段
+  if (payload.parent_thread_id) return payload.parent_thread_id;
+  const spawn = payload.source && payload.source.subagent && payload.source.subagent.thread_spawn;
+  if (spawn && spawn.parent_thread_id) return spawn.parent_thread_id;
+  // 旧版：session_id 指向父，且不等于自己
+  if (payload.session_id && payload.id && payload.session_id !== payload.id) {
+    return payload.session_id;
+  }
+  return null;
 }
 
 /**

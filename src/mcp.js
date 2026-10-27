@@ -83,6 +83,10 @@ const TOOLS = [
       const cap = Math.min(Math.max(Number(limit) || 50, 1), 500);
       const shown = list.slice(-cap);
 
+      // 子代理会话挂在主会话下面。它们是"这场对话内部发生的事"，
+      // 不该和主会话并列成一个独立条目，否则时间线会翻倍。
+      const childIndex = new Map(r.children.map((c) => [c.parent, c]));
+
       return {
         project: tildify(r.target),
         total: list.length,
@@ -93,17 +97,25 @@ const TOOLS = [
           first: iso(r.summary.first),
           last: iso(r.summary.last),
           totalHours: +(r.summary.totalMs / 3600000).toFixed(1),
+          // 子会话单列：它们被采集但不占时间线的一行
+          subagentSessions: r.summary.subagentCount,
         },
         byAgent: groupByAgent(list).map(([a, ss]) => ({ agent: a, sessions: ss.length })),
-        sessions: shown.map((s) => ({
-          agent: s.agent,
-          id: s.id,
-          title: s.title,
-          start: iso(s.start),
-          end: iso(s.end),
-          minutes: Math.round(durationMs(s) / 60000),
-          resume: s.resume || undefined,
-        })),
+        sessions: shown.map((s) => {
+          const kids = childIndex.get(s.id);
+          return {
+            agent: s.agent,
+            id: s.id,
+            title: s.title,
+            start: iso(s.start),
+            end: iso(s.end),
+            minutes: Math.round(durationMs(s) / 60000),
+            resume: s.resume || undefined,
+            // 这场会话派生了几个子代理；要知道细节用 read_session 读子会话 id
+            subagents: kids ? kids.count : undefined,
+            subagentIds: kids ? kids.ids : undefined,
+          };
+        }),
       };
     },
   },
@@ -198,6 +210,9 @@ const TOOLS = [
         agent: session.agent,
         id: session.id,
         title: session.title,
+        // 子代理会话必须标出来：读到的细节是子代理查的，不是主对话说的
+        kind: session.kind || 'main',
+        parent: session.parent || undefined,
         project: session.project ? tildify(session.project) : null,
         start: iso(session.start),
         end: iso(session.end),

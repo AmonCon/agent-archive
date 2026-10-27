@@ -8,6 +8,9 @@ import {
   durationMs,
   isProjectPath,
   sameProject,
+  isSubagent,
+  mainOnly,
+  indexChildren,
 } from './model.js';
 
 /**
@@ -29,8 +32,19 @@ function absProject(p) {
   return path.resolve(process.cwd(), p);
 }
 
-export function listProjects({ noCache = false, showAll = false } = {}) {
-  const { sessions, stats } = scanCached({ noCache });
+/**
+ * 项目清单。
+ *
+ * 默认只统计主会话：子代理会话不是"一场对话"，把它们算进项目会话数会让
+ * 数字虚高（本机 Codex 有 1322 场子代理，是主会话的两倍）。
+ * `includeSubagents: true` 可以看全量，用于核对采集完整性。
+ */
+export function listProjects({ noCache = false, showAll = false, includeSubagents = false } = {}) {
+  const scanned = scanCached({ noCache });
+  const stats = scanned.stats;
+  // 子会话数与主会话数分开报，两个数字都有意义
+  const subagentCount = scanned.sessions.filter(isSubagent).length;
+  const sessions = includeSubagents ? scanned.sessions : mainOnly(scanned.sessions);
 
   const byKey = new Map();
   // 不绑定项目的会话（Hermes 这类接聊天渠道的助手）单独归一堆。
@@ -74,6 +88,8 @@ export function listProjects({ noCache = false, showAll = false } = {}) {
     projects,
     stats,
     totalSessions: sessions.length,
+    // 子代理会话单列一个数字：它们被采集但不冒充"一场对话"
+    subagentSessions: subagentCount,
     unbound: summarizeUnbound(unbound),
   };
 }
@@ -123,16 +139,29 @@ function summarizeUnbound(sessions) {
 /**
  * 给定项目路径，返回该项目的会话时间线。
  * 子目录的项目（monorepo 里的子包）也算进来，由 belongTo 判断。
+ *
+ * 默认只返回主会话。子代理会话仍在扫描结果里、可被单独读取，但不占据
+ * 时间线的一行——它们本就是父会话内部的步骤。需要时传
+ * `includeSubagents: true`；`children` 则给出「主会话 id → 它派生的子会话」
+ * 的索引，供 UI 做折叠。
  */
-export function projectTimeline(target, { noCache = false, includeNested = true } = {}) {
+export function projectTimeline(
+  target,
+  { noCache = false, includeNested = true, includeSubagents = false } = {}
+) {
   const { sessions, stats } = scanCached({ noCache });
   const abs = absProject(target);
   const targetKey = projectKey(abs);
 
-  const matched = sessions.filter((s) => {
+  const inProject = sessions.filter((s) => {
     if (!s.project) return false;
     return includeNested ? belongsTo(s.project, targetKey) : projectKey(s.project) === targetKey;
   });
+
+  // 子会话的索引始终基于"这个项目里的全部会话"构建，
+  // 这样即使默认不显示子会话，父会话旁边也能报出"派生了几个"
+  const children = indexChildren(inProject);
+  const matched = includeSubagents ? inProject.slice() : mainOnly(inProject);
 
   matched.sort((a, b) => (a.start || 0) - (b.start || 0));
 
@@ -155,8 +184,15 @@ export function projectTimeline(target, { noCache = false, includeNested = true 
     target: normalizeProject(abs),
     targetKey,
     sessions: matched,
+    // 每个主会话派生了几场子代理会话（只含 >0 的）
+    children: [...children.entries()].map(([parent, list]) => ({
+      parent,
+      count: list.length,
+      ids: list.map((c) => c.id),
+    })),
     summary: {
       count: matched.length,
+      subagentCount: inProject.length - mainOnly(inProject).length,
       agents: [...agents].sort(),
       first,
       last,
@@ -203,8 +239,12 @@ export async function readSessionContent(session) {
  *   - 也可以只给项目路径，此时返回该项目最近的一场
  *
  * 命中多场时返回候选列表而不是猜一个——静默挑错比报错更烦人。
+ *
+ * 子代理会话的取舍：**按 id 查时包含它们**（用户既然敲了 id，就该读得到），
+ * 但**按项目查时不返回**——那种场景要的是"最近一场对话"，拿一场子代理
+ * 会话充数没有意义。
  */
-export function findSessions({ query, agent, project, limit = 10 } = {}) {
+export function findSessions({ query, agent, project, limit = 10, includeSubagents = false } = {}) {
   const { sessions } = scanCached({});
   let pool = sessions;
 
@@ -217,6 +257,8 @@ export function findSessions({ query, agent, project, limit = 10 } = {}) {
     const q = String(query).toLowerCase();
     pool = pool.filter((s) => s.id.toLowerCase().startsWith(q) || s.id.toLowerCase() === q);
   }
+  // 没指定 id 时默认只看主会话
+  if (!query && !includeSubagents) pool = mainOnly(pool);
 
   const sorted = pool
     .slice()

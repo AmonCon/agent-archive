@@ -7,8 +7,37 @@ import os from 'node:os';
  * 各家 Agent 的存储格式差异很大，但"一个项目里发生过哪些对话"需要的字段
  * 只有这些。所有 scanner 都产出这个形状，下游（时间线、检索、导出）就
  * 不必知道来源是谁。
+ *
+ * ## kind / parent：为什么子代理会话也要留下来
+ *
+ * 早期版本把子代理会话整条丢掉，理由是它们的 `session_id` 指向父会话，
+ * 按它归并会让几十个子代理挤成一条。这个理由只对了一半——**该修的是标识，
+ * 不是把它们扔了**。
+ *
+ * 主会话只记"我让子代理去查一下 X"，具体查了什么、看到了什么全在子代理
+ * 会话里。扔掉等于档案馆只存了一半事实。本机实测仅 Hermes / ZCode /
+ * OpenCode 三家就有 202 场被丢。
+ *
+ * 所以现在的约定：
+ *   kind: 'main'      正常会话（默认，缺省即 main）
+ *   kind: 'subagent'  子代理会话，parent 指向父会话 id
+ *
+ * 下游的默认行为是按 `kind === 'main'` 过滤——时间线、项目列表、搜索都以
+ * 主会话为单位。子代理会话仍然被完整采集、可被单独读取、可被统计，
+ * 只是不冒充一场独立对话。
  */
-export function makeSession({ agent, id, project, title, start, end, source, resume }) {
+export function makeSession({
+  agent,
+  id,
+  project,
+  title,
+  start,
+  end,
+  source,
+  resume,
+  kind,
+  parent,
+}) {
   return {
     agent,
     id: String(id),
@@ -18,6 +47,10 @@ export function makeSession({ agent, id, project, title, start, end, source, res
     end: toDate(end),
     source: source || null,
     resume: resume || null,
+    // 缺省 main：老会话（没有这两个字段的缓存）按主会话对待，
+    // 这样升级缓存版本之前的数据不会被误判成子代理
+    kind: kind === 'subagent' ? 'subagent' : 'main',
+    parent: parent ? String(parent) : null,
   };
 }
 
@@ -153,6 +186,61 @@ function cleanTitle(t) {
 export function durationMs(s) {
   if (!s.start || !s.end) return 0;
   return Math.max(0, s.end - s.start);
+}
+
+/** 是不是子代理会话。缺省字段按主会话对待（兼容老缓存）。 */
+export function isSubagent(s) {
+  return !!s && s.kind === 'subagent';
+}
+
+/** 只看主会话。时间线、项目列表、搜索默认都走这个。 */
+export function mainOnly(sessions) {
+  return sessions.filter((s) => !isSubagent(s));
+}
+
+/**
+ * 把子代理会话按**根会话**分组，返回 Map<根会话 id, 子会话数组>。
+ *
+ * 注意是"根"不是"直接父"：Codex 支持多级委派（子代理还能再派子代理），
+ * 本机实测 1543 场子代理里有 181 场的直接父是另一个子代理。只按直接父
+ * 分组，这些孙子会话会挂在一个时间线上根本不显示的节点下面，等于看不见。
+ * 所以沿 parent 链上溯到根，全部归到根名下，并保留 `depth` 说明层级。
+ *
+ * 只挂能上溯到根（main）的：链断了的（父会话被删、跨项目）不放进索引，
+ * 由调用方单独处理——不要静默吞掉。
+ */
+export function indexChildren(sessions) {
+  const byKey = new Map(sessions.map((s) => [`${s.agent}|${s.id}`, s]));
+  const byRoot = new Map();
+
+  for (const s of sessions) {
+    if (!isSubagent(s) || !s.parent) continue;
+
+    // 沿链上溯，找最近的 main 祖先，同时记录深度
+    let cur = s;
+    let depth = 1;
+    let root = null;
+    for (let i = 0; i < 64; i++) {
+      const p = byKey.get(`${cur.agent}|${cur.parent}`);
+      if (!p) break;
+      if (!isSubagent(p)) {
+        root = p;
+        break;
+      }
+      cur = p;
+      depth++;
+    }
+    if (!root) continue;
+
+    const list = byRoot.get(root.id) || [];
+    list.push({ ...s, depth });
+    byRoot.set(root.id, list);
+  }
+
+  for (const list of byRoot.values()) {
+    list.sort((a, b) => (a.start || 0) - (b.start || 0));
+  }
+  return byRoot;
 }
 
 /** 把 home 目录缩写成 ~，让输出更短。 */

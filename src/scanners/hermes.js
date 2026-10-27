@@ -30,8 +30,9 @@ import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../
  *    但**不是全都为空**——有 cwd 的那些要归到项目去，不能一刀切丢掉。
  *    早期版本把 project 硬编码成 null，那会让这 46 场永远进不了项目时间线。
  *
- * 2. **47 场有 parent_session_id（子代理）。** 与 Codex/OpenCode 的处理一致：
- *    整条跳过。它们是父会话内部的一步，按 session_id 归并会挤成一条。
+ * 2. **47 场有 parent_session_id（子代理）。** 以前整条跳过，现在是照常采集
+ *    并标记 `kind: 'subagent'` + `parent`。理由是子代理会话里才记着实际
+ *    干的活，丢掉等于只存一半事实。时间线默认只显示 main，所以列表不会翻倍。
  *
  * 3. **25 场 hidden=1。** 这些是用户主动隐藏的会话。仍然采（事实存在），
  *    但不进标题/时间的主要统计口径——标题缺失时用 source 兜底。
@@ -236,10 +237,7 @@ export function parseAll(file) {
   const nextCache = new Map();
 
   for (const r of rows) {
-    // 子代理会话整条跳过：它们是父会话内部的一步
-    if (r.parent_session_id) continue;
-
-    const fp = `${rowFp(r)}||${fps.get(r.id) || ''}`;
+    const fp = `${rowFp(r)}||${fps.get(r.id) || ''}|${r.parent_session_id || ''}`;
     const cached = sessionCache.get(r.id);
     if (cached && cached.fp === fp) {
       nextCache.set(r.id, cached);
@@ -277,6 +275,9 @@ export function parseAll(file) {
       end,
       source: sourceOf(r.id),
       resume: null,
+      // 有 parent_session_id 的是子代理会话：照常采集，只标记归属
+      kind: r.parent_session_id ? 'subagent' : 'main',
+      parent: r.parent_session_id || null,
     });
 
     nextCache.set(r.id, { fp, session });

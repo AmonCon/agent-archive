@@ -109,13 +109,15 @@ cat 的会话参数:
 }
 
 async function cmdProjects(opts) {
-  const { projects, stats, totalSessions, unbound } = listProjects({
+  const { projects, stats, totalSessions, subagentSessions, unbound } = listProjects({
     noCache: opts.noCache,
     showAll: opts.showAll,
   });
 
   if (opts.json) {
-    console.log(JSON.stringify({ projects, totalSessions, stats, unbound }, null, 2));
+    console.log(
+      JSON.stringify({ projects, totalSessions, subagentSessions, stats, unbound }, null, 2)
+    );
     return;
   }
 
@@ -124,8 +126,12 @@ async function cmdProjects(opts) {
     return;
   }
 
+  // 子代理会话单列：它们被采集了，但不是"一场对话"，不该混进会话数
+  const subNote = subagentSessions ? c(C.dim, `，另有 ${subagentSessions} 场子代理会话`) : '';
   console.log(
-    c(C.bold, '项目') + c(C.dim, `  (${projects.length} 个, ${totalSessions} 个会话)`) + '\n'
+    c(C.bold, '项目') +
+      c(C.dim, `  (${projects.length} 个, ${totalSessions} 个会话${subNote})`) +
+      '\n'
   );
 
   const width = Math.min(60, Math.max(...projects.map((p) => tildify(p.display).length), 10));
@@ -589,8 +595,11 @@ async function cmdSearch(query, opts) {
 
   console.log(c(C.bold, `「${query}」`) + c(C.dim, `  ${r.total} 场会话`) + '\n');
   for (const h of r.hits) {
+    // 子代理会话必须显式标出来：用户读到一段细节，得知道那是子代理查到的，
+    // 不是主对话说过的
+    const tag = h.kind === 'subagent' ? c(C.dim, ' [子代理]') : '';
     console.log(
-      `${c(C.agent, h.agent.padEnd(12))} ${c(C.dim, fmtDate(h.start))}  ${c(C.dim, h.id.slice(0, 12))}`
+      `${c(C.agent, h.agent.padEnd(12))} ${c(C.dim, fmtDate(h.start))}  ${c(C.dim, h.id.slice(0, 12))}${tag}`
     );
     console.log(`  ${c(C.bold, h.title)}`);
     if (h.project) console.log(c(C.dim, `  ${tildify(h.project)}`));
@@ -686,10 +695,13 @@ async function cmdDoctor(opts) {
   }
 
   console.log(c(C.bold, '采集体检'));
+  const subNote = r.subagent.total
+    ? ` · 另有 ${r.subagent.total} 场子代理会话`
+    : '';
   console.log(
     c(
       C.dim,
-      `  ${r.files} 个文件 · ${r.total} 场会话 · 解析失败 ${r.failures} · 重复 id ${r.duplicates} 组`
+      `  ${r.files} 个文件 · ${r.total} 场会话${subNote} · 解析失败 ${r.failures} · 重复 id ${r.duplicates} 组`
     )
   );
   console.log('');
@@ -750,6 +762,36 @@ async function cmdDoctor(opts) {
     )
   );
   console.log('');
+
+  // 子代理归属：子会话被采集之后，唯一会坏的就是"挂不到父会话"
+  if (r.subagent.total) {
+    const sa = r.subagent;
+    console.log(c(C.bold, '子代理会话'));
+    console.log(
+      c(
+        C.dim,
+        `  ${sa.total} 场 · 归属 ${sa.attached} · 孤儿 ${sa.orphan} · 无父id ${sa.noParent}` +
+          ` · 归属率 ${(sa.attachRate * 100).toFixed(1)}%`
+      )
+    );
+    for (const a of sa.byAgent) {
+      const notes = [];
+      if (a.orphan) notes.push(`孤儿 ${a.orphan}`);
+      if (a.noParent) notes.push(`无父id ${a.noParent}`);
+      const flag = a.orphan || a.noParent ? c(C.when, '!') : c(C.ok, '✓');
+      console.log(
+        `  ${flag} ${c(C.agent, a.agent.padEnd(13))} ${c(C.dim, String(a.total).padStart(5) + ' 场')}` +
+          (notes.length ? c(C.dim, '  ' + notes.join(' · ')) : '')
+      );
+    }
+    console.log(
+      c(
+        C.dim,
+        '  孤儿 = 有父 id 但父会话不在归档里（被删或跨项目）；无父id = 扫描器没取到父会话标识。'
+      )
+    );
+    console.log('');
+  }
 
   // 采集缺口：有目录但没有 scanner。
   // 分成两类——"还没做"要行动，"已确认读不了"是结论，不该继续挂在待办里。
@@ -1585,9 +1627,13 @@ function printSkillUsage(r, opts) {
 }
 
 async function cmdStats(opts) {
-  const { projects, stats, totalSessions } = listProjects({ noCache: opts.noCache });
+  const { projects, stats, totalSessions, subagentSessions } = listProjects({
+    noCache: opts.noCache,
+  });
   if (opts.json) {
-    console.log(JSON.stringify({ stats, totalSessions, projects: projects.length }, null, 2));
+    console.log(
+      JSON.stringify({ stats, totalSessions, subagentSessions, projects: projects.length }, null, 2)
+    );
     return;
   }
   console.log(c(C.bold, '扫描统计'));
@@ -1595,10 +1641,13 @@ async function cmdStats(opts) {
   console.log(`  新解析        ${stats.parsed}`);
   console.log(`  命中缓存      ${stats.cached}`);
   console.log(`  失败          ${stats.failures}`);
-  console.log(`  会话总数      ${totalSessions}`);
+  console.log(`  主会话        ${totalSessions}`);
+  console.log(`  子代理会话    ${subagentSessions}`);
   console.log(`  识别出项目    ${projects.length}`);
   console.log('');
-  console.log(c(C.bold, '各 Agent 会话数'));
+  // stats.byAgent 是扫描器产出的**全部**会话数（含子代理），
+  // 与上面的"主会话"口径不同，所以标题要写明
+  console.log(c(C.bold, '各 Agent 会话数') + c(C.dim, '  (含子代理)'));
   for (const [a, n] of Object.entries(stats.byAgent).sort((x, y) => y[1] - x[1])) {
     console.log(`  ${a.padEnd(14)} ${n}`);
   }

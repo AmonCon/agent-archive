@@ -72,9 +72,10 @@ async function handle(req, res) {
     }
 
     if (path === '/api/projects') {
-      const { projects, stats, totalSessions, unbound } = listProjects({});
+      const { projects, stats, totalSessions, subagentSessions, unbound } = listProjects({});
       return sendJson(res, {
         totalSessions,
+        subagentSessions,
         stats,
         unbound,
         projects: projects.map((p) => ({
@@ -310,7 +311,7 @@ function send(res, code, headers, body) {
 /* ------------------------------ 页面 ------------------------------ */
 
 function pageProjects() {
-  const { projects, totalSessions, stats, unbound } = listProjects({});
+  const { projects, totalSessions, subagentSessions, stats, unbound } = listProjects({});
 
   const rows = projects
     .map((p) => {
@@ -346,7 +347,7 @@ function pageProjects() {
   return layout(
     '项目',
     `<h1>会话档案馆</h1>
-     <p class="sub">${projects.length} 个项目 · ${totalSessions} 场会话 · ${stats.files} 个文件
+     <p class="sub">${projects.length} 个项目 · ${totalSessions} 场会话${subagentSessions ? ` · 另有 ${subagentSessions} 场子代理会话` : ''} · ${stats.files} 个文件
        · <a href="/env">看能力面 →</a></p>
      <table>
        <thead><tr><th>项目</th><th class="num">会话</th><th>Agent</th><th>最近</th></tr></thead>
