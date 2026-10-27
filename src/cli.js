@@ -802,12 +802,13 @@ async function cmdDoctor(opts) {
   const subNote = r.subagent.total
     ? ` · 另有 ${r.subagent.total} 场子代理会话`
     : '';
-  console.log(
-    c(
-      C.dim,
-      `  ${r.files} 个文件 · ${r.total} 场会话${subNote} · 解析失败 ${r.failures} · 重复 id ${r.duplicates} 组`
-    )
-  );
+  // 保留旧结果的场次数单独报：这些文件的解析这次没成功，档案馆留着上一次
+  // 读到的内容。不报出来的话，用户看到的"会话数没变"可能掩盖了一场正在
+  // 被写坏的会话——这正是这个项目一贯要避免的那种沉默。
+  const keptNote = r.stats && r.stats.keptStale
+    ? c(C.when, ` · ${r.stats.emptied || 0} 个文件解析为空，已保留上次结果 ${r.stats.keptStale} 场`)
+    : '';
+  console.log(c(C.dim, `  ${r.files} 个文件 · ${r.total} 场会话${subNote} · 解析失败 ${r.failures} · 重复 id ${r.duplicates} 组`) + keptNote);
   console.log('');
 
   // 覆盖率三根支柱

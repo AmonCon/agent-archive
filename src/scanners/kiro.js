@@ -3,6 +3,7 @@ import path from 'node:path';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, assertUnder } from '../messages.js';
 import { userDataCandidates, findUnder } from '../platform.js';
+import { isDirEntry } from '../fsentry.js';
 
 /**
  * Kiro 会话扫描。
@@ -47,7 +48,9 @@ export function discover() {
   const wsRoot = path.join(root, 'workspace-sessions');
   let dirs = [];
   try {
-    dirs = fs.readdirSync(wsRoot, { withFileTypes: true }).filter((d) => d.isDirectory());
+    dirs = fs
+      .readdirSync(wsRoot, { withFileTypes: true })
+      .filter((d) => isDirEntry(d, path.join(wsRoot, d.name)));
   } catch {
     return out;
   }
@@ -259,7 +262,7 @@ function loadExecution(executionId) {
   }
 
   for (const d of dirs) {
-    if (!d.isDirectory() || SKIP_DIRS.has(d.name)) continue;
+    if (!isDirEntry(d, path.join(root, d.name)) || SKIP_DIRS.has(d.name)) continue;
 
     let sub;
     try {
@@ -276,7 +279,7 @@ function loadExecution(executionId) {
     }
 
     for (const i of inner) {
-      if (!i.isDirectory()) continue;
+      if (!isDirEntry(i, path.join(sub, i.name))) continue;
 
       let dir2;
       try {

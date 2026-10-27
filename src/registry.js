@@ -103,12 +103,45 @@ export function loadCache() {
   }
 }
 
+/**
+ * 原子写缓存。
+ *
+ * 不能直接 writeFileSync：这份缓存有 1 MB 量级，写一半崩了会留下一个
+ * 截断的 JSON。下次 loadCache 解析失败会返回 `{}`——看起来"优雅降级"，
+ * 实际是整机全量重扫一次（本机实测 50 秒），而用户不知道发生了什么。
+ *
+ * 做法照 MAGPIE 的 steady.WriteFile / cc-switch 的 stage_write：
+ * 同目录临时文件 → fsync → rename 覆盖。rename 在 POSIX 和 Windows 上
+ * 都是原子的，要么是旧内容要么是新内容，不会出现半截。
+ *
+ * CLI、serve、MCP 可能同时写这份缓存，原子替换也让并发写不会互相截断
+ * ——最后写完的那个赢，而不是两败俱伤。
+ */
 export function saveCache(entries) {
+  const target = cacheFile();
+  let tmp = null;
   try {
     fs.mkdirSync(cacheDir(), { recursive: true });
-    fs.writeFileSync(cacheFile(), JSON.stringify(entries), 'utf8');
+    tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
+    const fd = fs.openSync(tmp, 'w');
+    try {
+      fs.writeFileSync(fd, JSON.stringify(entries), 'utf8');
+      fs.fsyncSync(fd); // 先落盘再改名，崩溃时不会留下"改名了但内容是空的"
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmp, target);
+    tmp = null;
   } catch {
     // 缓存写不进去不影响正确性，只是下次慢一点
+  } finally {
+    if (tmp) {
+      try {
+        fs.unlinkSync(tmp);
+      } catch {
+        /* 留着也不影响，下次会覆盖 */
+      }
+    }
   }
 }
 
@@ -287,21 +320,44 @@ export function scanAll({ noCache = false } = {}) {
       }
 
       let got = null;
+      let keptStale = false;
       if (hit) {
         got = prev.sessions;
         stats.cached++;
       } else {
-        got = parseFile(scanner, file);
-        if (got === null) {
-          stats.failures++;
-          continue;
+        const res = parseFile(scanner, file);
+        // 两种"这次没解析出东西"要分开处理：
+        //   !ok              解析抛异常——明确失败
+        //   emptied          以前有会话，这次一个都没有——对会话文件来说
+        //                    几乎总是"正被写到一半"或格式变了
+        // 两者都保留上一次的好结果，而不是让这场对话从档案里静默消失。
+        // 保留的代价是"可能显示过期内容"，但那比丢数据轻得多，而且
+        // doctor 会把这两个计数如实报出来。
+        const emptied = res.ok && res.sessions.length === 0 && prev && prev.sessions.length > 0;
+        if (!res.ok || emptied) {
+          if (emptied) stats.emptied = (stats.emptied || 0) + 1;
+          else stats.failures++;
+          if (prev && Array.isArray(prev.sessions) && prev.sessions.length) {
+            got = prev.sessions;
+            keptStale = true;
+            stats.keptStale = (stats.keptStale || 0) + prev.sessions.length;
+          } else {
+            continue;
+          }
+        } else {
+          got = res.sessions;
+          stats.parsed++;
         }
-        stats.parsed++;
       }
+
+      // 失败时沿用**旧指纹**：这样下一轮扫描仍会判定"变了"并重试解析。
+      // 若用新指纹写进去，下一轮会命中缓存，这场会话就永远停在旧内容上
+      // ——把一次暂时性失败变成了永久错误。
+      const stampToStore = keptStale && prev ? prev.stamp : stamp;
 
       // 时间戳统一成 ISO 字符串存缓存，避免 JSON 里 Date 变字符串的歧义
       const normalized = got.map(serialize);
-      nextCache[key] = { stamp, sessions: normalized };
+      nextCache[key] = { stamp: stampToStore, sessions: normalized };
       for (const s of normalized) sessions.push(deserialize(s));
       stats.byAgent[scanner.name] = (stats.byAgent[scanner.name] || 0) + normalized.length;
     }
@@ -455,15 +511,28 @@ function isPlaceholder(title) {
   return !title || /^\(.*\)$/.test(title);
 }
 
+/**
+ * 解析一个文件，返回 `{ sessions, ok }`。
+ *
+ * `ok:false` **只在解析抛异常时**出现——那是明确的"我试了但做不到"。
+ *
+ * 为什么不用"返回空"当失败信号：我们的扫描器里，返回 null 有正当含义。
+ * Copilot 的 16 个会话文件里 14 个 `requests` 是空数组（文件在但没有对话），
+ * Codex 有 2 个 rollout 没有时间戳，这些都不是故障。本机实测把它们算成
+ * 失败会凭空报出 15 个"解析失败"，正是这个项目一直在避免的那种假警报。
+ *
+ * "曾经能解析出会话、现在解析为空"是另一回事，交给调用方判断（见 scanAll）：
+ * 对会话文件来说，那种情况几乎总是被写到一半或格式变了。
+ */
 function parseFile(scanner, file) {
   try {
     if (typeof scanner.parseAll === 'function') {
-      return scanner.parseAll(file) || [];
+      return { sessions: scanner.parseAll(file) || [], ok: true };
     }
     const one = scanner.parse(file);
-    return one ? [one] : [];
+    return { sessions: one ? [one] : [], ok: true };
   } catch {
-    return null;
+    return { sessions: [], ok: false };
   }
 }
 

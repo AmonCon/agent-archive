@@ -4,6 +4,7 @@ import os from 'node:os';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
 import { pathKey } from '../platform.js';
+import { isDirEntry, isFileEntry } from '../fsentry.js';
 
 /**
  * Qoder 会话扫描。
@@ -115,7 +116,7 @@ export function discover() {
       continue;
     }
     for (const p of projects) {
-      if (!p.isDirectory()) continue;
+      if (!isDirEntry(p, path.join(root, p.name))) continue;
       const history = path.join(root, p.name, 'conversation-history');
       let convs;
       try {
@@ -124,8 +125,9 @@ export function discover() {
         continue;
       }
       for (const c of convs) {
-        if (!c.isDirectory()) continue;
-        const file = path.join(history, c.name, `${c.name}.jsonl`);
+        const cfull = path.join(history, c.name);
+        if (!isDirEntry(c, cfull)) continue;
+        const file = path.join(cfull, `${c.name}.jsonl`);
         try {
           if (fs.statSync(file).isFile()) add(file);
         } catch {
@@ -147,8 +149,8 @@ export function discover() {
       continue;
     }
     for (const w of workspaces) {
-      if (!w.isDirectory()) continue;
       const dir = path.join(root, w.name);
+      if (!isDirEntry(w, dir)) continue;
       let files;
       try {
         files = fs.readdirSync(dir, { withFileTypes: true });
@@ -156,7 +158,7 @@ export function discover() {
         continue;
       }
       for (const f of files) {
-        if (!f.isFile() || !uuidFile.test(f.name)) continue;
+        if (!isFileEntry(f, path.join(dir, f.name)) || !uuidFile.test(f.name)) continue;
         add(path.join(dir, f.name));
       }
     }

@@ -4,6 +4,7 @@ import os from 'node:os';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '../messages.js';
 import { withOverrides } from '../platform.js';
+import { isDirEntry } from '../fsentry.js';
 
 /**
  * Claude Code 会话扫描。
@@ -57,8 +58,10 @@ export function discover() {
       continue;
     }
     for (const d of dirs) {
-      if (!d.isDirectory()) continue;
       const full = path.join(root, d.name);
+      // 跟随符号链接/junction：用户把项目目录搬走后留个链接是常见做法，
+      // dirent.isDirectory() 会把它判成"不是目录"从而整家漏掉
+      if (!isDirEntry(d, full)) continue;
       let files;
       try {
         files = fs.readdirSync(full);

@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import zlib from 'node:zlib';
 import { openReadOnly } from '../sqlite-read.js';
+import { isDirEntry, isFileEntry } from '../fsentry.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
 
@@ -129,8 +130,11 @@ function walk(dir, out, depth) {
   }
   for (const e of entries) {
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) walk(full, out, depth + 1);
-    else if (e.isFile() && /\.jsonl(\.zst)?$/.test(e.name)) out.push(full);
+    // 用 isDirEntry/isFileEntry 而不是 dirent.isDirectory()：
+    // 后者对符号链接和 junction 一律报 false。用户把 sessions 目录搬到别的
+    // 盘再留个 junction，就会静默丢掉整家会话。见 fsentry.js 的说明。
+    if (isDirEntry(e, full)) walk(full, out, depth + 1);
+    else if (isFileEntry(e, full) && /\.jsonl(\.zst)?$/.test(e.name)) out.push(full);
   }
 }
 

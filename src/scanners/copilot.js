@@ -3,6 +3,7 @@ import path from 'node:path';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, assertUnder } from '../messages.js';
 import { userDataCandidates, findUnder } from '../platform.js';
+import { isDirEntry, isFileEntry } from '../fsentry.js';
 
 /**
  * GitHub Copilot Chat 会话扫描。
@@ -43,7 +44,9 @@ export function discover() {
   const out = [];
   let dirs = [];
   try {
-    dirs = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory());
+    dirs = fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter((d) => isDirEntry(d, path.join(root, d.name)));
   } catch {
     return out;
   }
@@ -57,9 +60,10 @@ export function discover() {
       continue;
     }
     for (const f of files) {
-      if (!f.isFile()) continue;
+      const full = path.join(sessionsDir, f.name);
+      if (!isFileEntry(f, full)) continue;
       if (!/\.jsonl?$/.test(f.name)) continue;
-      out.push(path.join(sessionsDir, f.name));
+      out.push(full);
     }
   }
   return out;

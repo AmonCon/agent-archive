@@ -5,6 +5,7 @@ import zlib from 'node:zlib';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '../messages.js';
 import { envOverrides } from '../platform.js';
+import { isDirEntry, isFileEntry } from '../fsentry.js';
 
 /**
  * DeepSeek Harness（dsh）会话扫描。
@@ -131,11 +132,12 @@ function pickSessionFile(dir) {
 
   let best = null;
   for (const e of entries) {
-    if (!e.isFile()) continue;
+    const efull = path.join(dir, e.name);
+    if (!isFileEntry(e, efull)) continue;
     const m = e.name.match(SESSION_FILE);
     if (!m) continue;
     const version = m[1] ? Number(m[1]) : 0;
-    const full = path.join(dir, e.name);
+    const full = efull;
     let mtime = 0;
     try {
       mtime = fs.statSync(full).mtimeMs;
@@ -161,8 +163,8 @@ export function discover() {
       continue;
     }
     for (const w of workspaces) {
-      if (!w.isDirectory()) continue;
       const wd = path.join(sessions, w.name);
+      if (!isDirEntry(w, wd)) continue;
       let sessionDirs;
       try {
         sessionDirs = fs.readdirSync(wd, { withFileTypes: true });
@@ -170,8 +172,9 @@ export function discover() {
         continue;
       }
       for (const s of sessionDirs) {
-        if (!s.isDirectory()) continue;
-        const file = pickSessionFile(path.join(wd, s.name));
+        const sd = path.join(wd, s.name);
+        if (!isDirEntry(s, sd)) continue;
+        const file = pickSessionFile(sd);
         if (file) out.push(file);
       }
     }
