@@ -227,6 +227,61 @@ const TOOLS = [
     },
   },
   {
+    name: 'project_handoffs',
+    title: '跨 Agent 接力',
+    description:
+      '一个项目被哪些 Agent 轮流接手过，以及每次换手之间隔了多久。' +
+      '时间线按会话列，几百场没人看得完；这个工具把连续同一 Agent 的会话压成一段，只给换手点。' +
+      '**用途**：判断"我该不该先读某场会话"——换手间隔长的位置就是上下文最容易丢的地方。' +
+      '注意 overlap 表示两段在时间上重叠（不是真正的交接），不要当成接续。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: '项目路径，如 E:/my-app 或 .' },
+        minGapMinutes: {
+          type: 'number',
+          description: '只返回间隔超过这么多分钟的换手（默认 0 = 全部）',
+        },
+      },
+      required: ['project'],
+      additionalProperties: false,
+    },
+    handler: async ({ project, minGapMinutes = 0 }) => {
+      const { projectHandoffs } = await import('./handoff.js');
+      const r = projectHandoffs(project, { minGapMinutes: Number(minGapMinutes) || 0 });
+      if (!r.sessions) return { error: `项目 ${project} 下没有找到会话` };
+
+      return {
+        project: tildify(r.project),
+        sessions: r.sessions,
+        runs: r.runs,
+        agents: r.agents,
+        singleAgent: r.singleAgent,
+        summary: {
+          sequential: r.summary.sequential,
+          overlap: r.summary.overlap,
+          stale: r.summary.stale,
+          medianGapMinutes:
+            r.summary.medianGapMs == null ? null : Math.round(r.summary.medianGapMs / 60000),
+          topPairs: r.summary.topPairs,
+        },
+        handoffs: r.handoffs.map((h) => ({
+          from: h.from,
+          to: h.to,
+          kind: h.kind,
+          gapMinutes: h.gapMinutes,
+          stale: h.stale,
+          fromLast: h.fromLastSession
+            ? { id: h.fromLastSession.id, title: h.fromLastSession.title }
+            : null,
+          toFirst: h.toFirstSession
+            ? { id: h.toFirstSession.id, title: h.toFirstSession.title }
+            : null,
+        })),
+      };
+    },
+  },
+  {
     name: 'read_digest',
     title: '读项目摘要',
     description:
@@ -689,14 +744,17 @@ async function dispatch(msg) {
         capabilities: { tools: {} },
         serverInfo: { name: 'agent-archive', version: '0.1.0' },
         instructions:
-          '这是本机跨 Agent 的档案馆，只读。它有两层：' +
+          '这是本机跨 Agent 的档案馆，只读。它有三层：' +
           '**会话层**——list_projects 看有哪些项目 → read_digest 看有没有现成的交接摘要 → ' +
           '没有的话用 search_sessions 或 project_timeline 定位 → read_session 读正文（会截断，按需分段）。' +
+          '要接手一个别人做过的项目时，先调 project_handoffs 看它是被哪些 Agent 轮流做过的、' +
+          '换手间隔多长——间隔长的地方就是上下文最容易丢的地方，值得优先读那场会话。' +
           '**环境层**——inventory 看这台机器上各 Agent 配了哪些 MCP 服务、装了哪些技能、有哪些记忆。' +
           '刚接触这个环境、或想知道别的 Agent 已具备什么能力时先调 inventory；' +
           '**调用层**——model_calls 看每场会话/每个 Agent 为模型付了多少（token、缓存命中、费用），' +
           '数据来自本地网关日志，只覆盖经过网关的调用。' +
-          '要看某个项目发生过什么再用会话层。' +
+          '子代理会话（kind=subagent）也被采集：它们是主会话内部派出去干的活，' +
+          '搜索结果和 read_session 都会标出来，别把子代理查到的细节当成主对话说过的。' +
           '三层都只提供事实与出处，不替你合并结论，也不回传任何凭证值。',
       };
     }

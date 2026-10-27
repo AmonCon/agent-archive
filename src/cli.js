@@ -45,6 +45,7 @@ function usage() {
 用法:
   agent-archive projects                       列出本机所有有会话的项目
   agent-archive timeline <项目路径>            某个项目的会话时间线
+  agent-archive handoff <项目路径>             跨 Agent 接力：谁在什么时候接手
   agent-archive agents <项目路径>              某个项目里各 Agent 的分布
   agent-archive stats                          扫描统计与缓存位置
   agent-archive doctor                         采集体检（覆盖率与缺口）
@@ -83,6 +84,7 @@ cat 的会话参数:
   --agent <名字>          限制在某个 Agent 内查找（cat）
   --port <端口>           网页端口（serve，默认 7788）
   --limit <n>             搜索结果条数（search，默认 20）
+  --min-gap <分钟>        handoff 只显示间隔超过这个值的换手
   --by <维度>             calls 的分组维度：agent / model / provider / session
   --force                 忽略增量判断，重建全部（index）
   --session               导出单场会话（export）
@@ -221,6 +223,108 @@ function printSession(s, indent) {
   const time = c(C.dim, fmtDate(s.start).slice(11) || '     ');
   const dur = c(C.dim, fmtDur(durationMs(s)).padStart(6));
   console.log(`${pad}${agent} ${time} ${dur}  ${s.title}`);
+}
+
+/**
+ * 跨 Agent 接力视图。
+ *
+ * 时间线是按会话列，一个项目几百场就没人看得完。这里把连续同一 Agent
+ * 的会话压成一段 run，人只需要看换手点——那才是上下文最容易丢的地方。
+ */
+async function cmdHandoff(target, opts) {
+  if (!target) {
+    console.error('需要项目路径。用 agent-archive projects 先看看有哪些。');
+    process.exit(2);
+  }
+
+  const { projectHandoffs, handoffLabel } = await import('./handoff.js');
+  const r = projectHandoffs(target, {
+    minGapMinutes: opts.minGap ? Number(opts.minGap) : 0,
+    noCache: opts.noCache,
+  });
+
+  if (opts.json) {
+    console.log(JSON.stringify(r, null, 2));
+    return;
+  }
+
+  if (!r.sessions) {
+    console.log(`项目 ${target} 下没有找到会话。`);
+    return;
+  }
+
+  console.log(c(C.bold, tildify(r.project)));
+  console.log(
+    c(
+      C.dim,
+      `${r.sessions} 场会话压成 ${r.runs} 段 · ${r.agentCount} 家 Agent · ` +
+        `${fmtDate(r.first)} → ${fmtDate(r.last)}`
+    )
+  );
+
+  // 单 Agent 的项目要说清楚，否则"0 次换手"看起来像没算出来
+  if (r.singleAgent) {
+    console.log('');
+    console.log(c(C.dim, `  这个项目从头到尾只有 ${r.agents[0] || '一家'} 在用，没有换手。`));
+    return;
+  }
+
+  const s = r.summary;
+  console.log('');
+  console.log(c(C.bold, '换手概况'));
+  const parts = [
+    `${s.sequential} 次接续`,
+    s.overlap ? `${s.overlap} 次并行` : null,
+    s.stale ? `${s.stale} 次长期中断` : null,
+  ].filter(Boolean);
+  console.log(`  ${parts.join(' · ')}`);
+  if (s.medianGapMs != null) {
+    console.log(c(C.dim, `  接续间隔中位数 ${fmtDur(s.medianGapMs)}`));
+  }
+  if (s.topPairs.length) {
+    console.log(
+      c(C.dim, `  最常走的接力线：${s.topPairs.map((p) => `${p.pair}(${p.count})`).join('  ')}`)
+    );
+  }
+
+  console.log('');
+  console.log(c(C.bold, '换手点'));
+  console.log(
+    c(C.dim, '  「并行」= 上一段还没结束下一段就开始了，不是真正的交接；「长期中断」= 隔了一周以上')
+  );
+  console.log('');
+
+  for (const h of r.handoffs) {
+    // 间隔的展示分三种：接续是"+Nmin"，并行是"重叠N"，未知是"—"。
+    // 并行不能显示成负数分钟——那个负号是时间轴重叠，不是"提前了"。
+    let gap;
+    if (h.gapMinutes == null) {
+      gap = c(C.dim, '       —');
+    } else if (h.kind === 'overlap') {
+      gap = c(C.when, `重叠${fmtDur(-h.gapMs)}`.padStart(10));
+    } else {
+      gap = c(h.stale ? C.warn : C.dim, `+${fmtDur(h.gapMs)}`.padStart(10));
+    }
+    const tag = c(
+      h.kind === 'overlap' ? C.when : h.stale ? C.warn : C.dim,
+      handoffLabel(h).padEnd(6)
+    );
+    console.log(
+      `${c(C.agent, h.from.padEnd(11))} → ${c(C.agent, h.to.padEnd(11))} ${gap} ${tag}`
+    );
+    // 先截断再着色：长标题一旦进了颜色包装，终端宽度计算会失准
+    if (h.fromLastSession) {
+      console.log(c(C.dim, `    离开: ${truncate(h.fromLastSession.title, 64)}`));
+    }
+    if (h.toFirstSession) {
+      console.log(c(C.dim, `    接手: ${truncate(h.toFirstSession.title, 64)}`));
+    }
+  }
+
+  console.log('');
+  console.log(
+    c(C.dim, '接续间隔越长，新 Agent 越不知道前面发生了什么。看某一场：agent-archive cat <id>')
+  );
 }
 
 async function cmdAgents(target, opts) {
@@ -1812,6 +1916,7 @@ function parseArgs(argv) {
     '--price-in',
     '--price-out',
     '--by',
+    '--min-gap',
   ]);
 
   const flags = new Set();
@@ -1849,6 +1954,7 @@ function parseArgs(argv) {
     port: values.port,
     limit: values.limit,
     out: values.out,
+    minGap: values['min-gap'],
     key: values.key,
     model: values.model,
     baseUrl: values['base-url'],
@@ -1878,6 +1984,9 @@ async function main() {
     case 'timeline':
     case 'tl':
       return cmdTimeline(first, opts);
+    case 'handoff':
+    case 'relay':
+      return cmdHandoff(first, opts);
     case 'agents':
       return cmdAgents(first, opts);
     case 'stats':

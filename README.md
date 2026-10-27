@@ -38,6 +38,10 @@ node src/cli.js projects
 # 某个项目的完整时间线
 node src/cli.js timeline E:\my-app
 
+# 跨 Agent 接力：谁在什么时候接手、中间隔了多久
+node src/cli.js handoff E:\my-app
+node src/cli.js handoff E:\my-app --min-gap 1440   # 只看隔了一天以上的换手
+
 # 不分天，平铺
 node src/cli.js timeline . --flat
 
@@ -203,6 +207,74 @@ Codex 支持**多级委派**：子代理还能再派子代理。本机 1543 场�
 但每条都带 `[子代理]` 标记，用户读到一段细节时得知道那是子代理查到的，
 不是主对话说过的。只想要主会话时传 `includeSubagents: false`。
 
+## 跨 Agent 接力：`handoff`
+
+时间线按会话列，一个项目几百场就没人看得完。`handoff` 换一个角度：
+**这个项目被哪些 Agent 轮流接手过，每次换手之间隔了多久。**
+
+把连续同一 Agent 的会话压成一段"run"，本机 my-app 的 891 场会话
+变成 223 段——人只需要看换手点。
+
+```
+node src/cli.js handoff E:\my-app
+```
+
+```
+E:/my-studio
+38 场会话压成 12 段 · 4 家 Agent · 2026-05-26 15:57 → 2026-10-23 20:54
+
+换手概况
+  7 次接续 · 4 次并行 · 2 次长期中断
+  接续间隔中位数 1.3d
+  最常走的接力线：qoder→codex(3)  codex→qoder(2)  ...
+
+qoder       → codex        重叠5.9d 并行
+    离开: 这个项目是生图的吗
+    接手: [@gmail](plugin://...) Summarize inbox, draft replies...
+codex       → qoder          +14min 接续
+    离开: 你先了解一下我们这个项目
+    接手: 我还有一个想法，我希望你能帮我做一个...
+```
+
+### 为什么这件事只能在这里做
+
+用户真实的用法是换工具：这个项目先用 Codex，界面问题换 Antigravity，后端又回
+Codex。每换一次，新 Agent 都不知道前面发生了什么——**它只看得到自己的会话**。
+档案馆是唯一能看见整条接力的地方。
+
+所以这个视图最实用的读法是：**换手间隔长的地方，就是上下文最容易丢的地方**，
+那几场会话值得优先读。
+
+### 一个必须如实处理的细节：会话会重叠
+
+本机实测 my-app 的 224 次换手里有 **87 次间隔为负**——上一段还没结束，
+下一段已经开始了。原因很实际：会话的 `end` 是最后一条消息的时间，一个开了
+好几天、偶尔回一句的会话会"横跨"别人的工作。
+
+三种情况分开报，**不合并成一个数**：
+
+| 类型 | 含义 | 为什么不合并 |
+|---|---|---|
+| `sequential` | 正常先后接续（间隔 ≥ 0） | — |
+| `overlap` | 时间重叠（间隔 < 0） | 算成 0 会让"平均换手间隔"偏小；取绝对值则虚构了一段等待时间 |
+| `unknown` | 有一边没有时间戳 | 算不出来就是算不出来 |
+
+平均间隔只在 `sequential` 上算，重叠数单独报。把并行当成"接续"会让
+"换手间隔"这个指标彻底失真。
+
+间隔超过一周的标成 `stale`（长期中断）——这类换手基本等于重新开始。
+
+### 三处入口
+
+| 位置 | 内容 |
+|---|---|
+| `handoff <项目>` | 终端，带每个换手点前后的会话标题 |
+| `project_handoffs` | MCP 工具，让别的 Agent 自己判断"该先读哪场" |
+| `/handoff?path=` | 网页，表格形式；项目页顶部也有一行入口 |
+
+网页只在项目页给一行摘要（`N 次换手 · N 次并行`），详情在独立页面——
+项目页已经很长，再塞一张换手表会把它压垮。
+
 ## 导出：三种粒度
 
 | 命令 | 内容 | 用途 |
@@ -248,13 +320,14 @@ node src/cli.js mcp --json   # 只要配置 JSON
 **零依赖实现。** MCP 的 stdio 传输就是「stdin/stdout 上一行一条
 JSON-RPC」，手写足够，不需要引入任何 npm 包。
 
-### 九个工具
+### 十个工具
 
 | 工具 | 作用 |
 |---|---|
 | `list_projects` | 有哪些项目、多少会话、哪些 Agent |
-| `project_timeline` | 某项目的会话清单（只有元数据） |
-| `search_sessions` | 全文搜索，返回命中处摘录 |
+| `project_timeline` | 某项目的会话清单（只有元数据），每条带派生的子代理数 |
+| `project_handoffs` | **跨 Agent 接力**：谁在什么时候接手、间隔多久 |
+| `search_sessions` | 全文搜索，返回命中处摘录（含子代理会话，带标记） |
 | `read_digest` | 读**已生成**的项目摘要；没有就提示怎么生成，不现编 |
 | `read_session_summary` | 读某场会话已有的摘要，用来判断值不值得深挖 |
 | `read_session` | 读正文，**分段**，默认 8000 字 |
@@ -269,7 +342,8 @@ JSON-RPC」，手写足够，不需要引入任何 npm 包。
 
 ```
 list_projects → read_digest（有现成交接材料吗）→
-  没有就 search_sessions / project_timeline 定位 → read_session 读正文
+  没有就 project_handoffs 看接力（哪次换手间隔最长）→
+  search_sessions / project_timeline 定位 → read_session 读正文
 ```
 
 翻 984 场会话的成本，因此可以降一个数量级。

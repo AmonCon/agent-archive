@@ -3,6 +3,7 @@ import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionC
 import { search, indexStats } from './search.js';
 import { timelineMarkdown, sessionMarkdown, bundleMarkdown } from './export.js';
 import { latestProjectDigest, latestSessionSummary } from './digest.js';
+import { projectHandoffs } from './handoff.js';
 import { quickFreshness } from './refresh.js';
 import { projectKey, durationMs, tildify } from './model.js';
 
@@ -64,6 +65,9 @@ async function handle(req, res) {
     if (path === '/search') {
       return sendHtml(res, pageSearch(url.searchParams.get('q') || '', url.searchParams.get('agent') || ''));
     }
+    if (path === '/handoff') {
+      return sendHtml(res, pageHandoff(url.searchParams.get('path') || ''));
+    }
     if (path === '/s') {
       return sendHtml(res, await pageSession(url.searchParams.get('agent') || '', url.searchParams.get('id') || ''));
     }
@@ -98,6 +102,29 @@ async function handle(req, res) {
         summary: r.summary,
         orphanCount: r.orphanCount,
         sessions: r.sessions.map(publicSession),
+      });
+    }
+
+    if (path === '/api/handoff') {
+      const target = url.searchParams.get('path');
+      if (!target) return sendJson(res, { error: '缺少 path 参数' }, 400);
+      const h = projectHandoffs(target, {});
+      return sendJson(res, {
+        target: tildify(h.project),
+        sessions: h.sessions,
+        runs: h.runs,
+        agents: h.agents,
+        singleAgent: h.singleAgent,
+        summary: h.summary,
+        handoffs: h.handoffs.map((x) => ({
+          from: x.from,
+          to: x.to,
+          kind: x.kind,
+          gapMinutes: x.gapMinutes,
+          stale: x.stale,
+          fromLast: x.fromLastSession && { id: x.fromLastSession.id, title: x.fromLastSession.title },
+          toFirst: x.toFirstSession && { id: x.toFirstSession.id, title: x.toFirstSession.title },
+        })),
       });
     }
 
@@ -923,12 +950,17 @@ function pageTimeline(target, openAll) {
   const dg = latestProjectDigest(r.target);
   const digestHtml = dg ? renderProjectDigest(dg, r.sessions, r.target) : digestMissingHint(r.target);
 
+  // 交接概况只给一行入口：详情在 /handoff 页。
+  // 项目页已经很长，再塞一张换手表会把它压垮。
+  const handoffLine = handoffSummaryLine(r.target);
+
   return layout(
     tildify(r.target),
     `<p><a href="/">← 所有项目</a></p>
      <h1>${esc(tildify(r.target))}</h1>
      <p class="sub">${esc(summary)}</p>
      <p class="tags">${agentBar}</p>
+     ${handoffLine}
      <p class="actions">
        <a href="/export?kind=timeline&amp;path=${encodeURIComponent(r.target)}">导出时间线 .md</a>
        <a href="/export?kind=bundle&amp;path=${encodeURIComponent(r.target)}">导出全部会话 .md</a>
@@ -936,6 +968,110 @@ function pageTimeline(target, openAll) {
      ${digestHtml}
      ${more}
      <div class="timeline">${body}</div>`
+  );
+}
+
+/** 项目页上的一行交接入口。没有换手就什么都不显示。 */
+function handoffSummaryLine(target) {
+  let h;
+  try {
+    h = projectHandoffs(target, {});
+  } catch {
+    return '';
+  }
+  if (!h.sessions || h.singleAgent || !h.handoffCount) return '';
+  const parts = [`${h.handoffCount} 次换手`];
+  if (h.summary.overlap) parts.push(`${h.summary.overlap} 次并行`);
+  if (h.summary.stale) parts.push(`${h.summary.stale} 次长期中断`);
+  return `<p class="hint">这个项目被 ${h.agentCount} 家 Agent 轮流做过 · ${esc(parts.join(' · '))}
+    · <a href="/handoff?path=${encodeURIComponent(target)}">看接力详情 →</a></p>`;
+}
+
+/**
+ * 交接页。
+ *
+ * 只列换手点，不列会话——会话在项目页已经有了。这里要回答的是
+ * "谁在什么时候接手、中间隔了多久"，那是项目页给不了的角度。
+ */
+function pageHandoff(target) {
+  if (!target) return pageNotFound('缺少项目路径');
+  const h = projectHandoffs(target, {});
+
+  if (!h.sessions) {
+    return layout(
+      '没有会话',
+      `<p><a href="/">← 所有项目</a></p><h1>${esc(tildify(h.project))}</h1>
+       <p class="sub">这个项目下没有找到会话。</p>`
+    );
+  }
+
+  if (h.singleAgent) {
+    return layout(
+      tildify(h.project),
+      `<p><a href="/p?path=${encodeURIComponent(h.project)}">← ${esc(tildify(h.project))}</a></p>
+       <h1>跨 Agent 接力</h1>
+       <p class="sub">${h.sessions} 场会话，全部由 <b>${esc(h.agents[0] || '?')}</b> 一家完成，没有换手。</p>`
+    );
+  }
+
+  const s = h.summary;
+  const stat = [
+    ['接续', s.sequential],
+    ['并行', s.overlap],
+    ['长期中断', s.stale],
+    ['中位间隔', s.medianGapMs == null ? '—' : fmtDur(s.medianGapMs)],
+  ]
+    .map(
+      ([k, v]) => `<div class="card"><b>${esc(String(v))}</b><span>${esc(k)}</span></div>`
+    )
+    .join('');
+
+  const pairs = s.topPairs.length
+    ? `<p class="hint">最常走的接力线：${s.topPairs
+        .map((p) => `<span class="tag">${esc(p.pair)} <b>${p.count}</b></span>`)
+        .join(' ')}</p>`
+    : '';
+
+  const rows = h.handoffs
+    .map((x) => {
+      // 并行的负间隔显示成"重叠 X"：负号容易被读成"提前了"
+      const gap =
+        x.gapMs == null
+          ? '—'
+          : x.kind === 'overlap'
+            ? `重叠 ${fmtDur(-x.gapMs)}`
+            : `+${fmtDur(x.gapMs)}`;
+      const cls = x.kind === 'overlap' ? 'warn' : x.stale ? 'warn' : '';
+      const fromLink = x.fromLastSession
+        ? `<a href="/s?agent=${encodeURIComponent(x.from)}&amp;id=${encodeURIComponent(x.fromLastSession.id)}">${esc(x.fromLastSession.title)}</a>`
+        : '—';
+      const toLink = x.toFirstSession
+        ? `<a href="/s?agent=${encodeURIComponent(x.to)}&amp;id=${encodeURIComponent(x.toFirstSession.id)}">${esc(x.toFirstSession.title)}</a>`
+        : '—';
+      return `<tr class="${cls}">
+        <td class="agent">${esc(x.from)}</td>
+        <td class="agent">${esc(x.to)}</td>
+        <td class="num">${esc(gap)}</td>
+        <td>${fromLink}</td>
+        <td>${toLink}</td>
+      </tr>`;
+    })
+    .join('');
+
+  return layout(
+    `${tildify(h.project)} · 接力`,
+    `<p><a href="/p?path=${encodeURIComponent(h.project)}">← ${esc(tildify(h.project))}</a></p>
+     <h1>跨 Agent 接力</h1>
+     <p class="sub">${h.sessions} 场会话压成 ${h.runs} 段 · ${h.agentCount} 家 Agent ·
+       ${fmtDate(h.first)} → ${fmtDate(h.last)}</p>
+     <div class="cards">${stat}</div>
+     ${pairs}
+     <p class="hint">「并行」= 上一段还没结束下一段就开始了，不是真正的交接；
+       「长期中断」= 隔了一周以上。间隔越长，新 Agent 越不知道前面发生了什么。</p>
+     <table class="handoff">
+       <thead><tr><th>从</th><th>到</th><th>间隔</th><th>离开时最后一场</th><th>接手时第一场</th></tr></thead>
+       <tbody>${rows}</tbody>
+     </table>`
   );
 }
 
@@ -1214,6 +1350,20 @@ td.dim, .dim { color: var(--dim); }
 .card span { font-size: 12px; color: var(--dim); }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
 @media (max-width: 680px) { .two-col { grid-template-columns: 1fr; gap: 0; } }
+/* 交接表：从/到两列是 Agent 名，间隔列右对齐便于纵向比较 */
+table.handoff { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.handoff th { text-align: left; font-weight: 500; color: var(--dim); font-size: 12px;
+                   padding: 6px 8px; border-bottom: 1px solid var(--line); }
+table.handoff td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.handoff td.agent { white-space: nowrap; color: var(--agent); }
+table.handoff td.num { white-space: nowrap; text-align: right;
+                       font-variant-numeric: tabular-nums; color: var(--dim); }
+table.handoff tr.warn td.num { color: var(--warn); }
+table.handoff td a { color: var(--fg); text-decoration: none; }
+table.handoff td a:hover { text-decoration: underline; }
+@media (max-width: 680px) {
+  table.handoff th:nth-child(4), table.handoff td:nth-child(4) { display: none; }
+}
 .finding { border-top: 1px solid var(--line); padding: 12px 0; }
 .finding b { font-weight: 500; font-size: 14px; }
 .finding p { margin: 5px 0 0; font-size: 13px; line-height: 1.7; }
