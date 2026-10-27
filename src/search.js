@@ -478,7 +478,7 @@ function messagesToText(messages) {
   const out = [];
   for (const m of messages) {
     for (const p of m.parts) {
-      if (p.kind === 'text') out.push(p.text);
+      if (p.kind === 'text') out.push(stripEmbeddedTranscript(p.text));
       else if (p.kind === 'tool') {
         const detail = p.input ? summarize(p.input) : '';
         out.push(`[${p.name}${detail ? ' ' + detail : ''}]`);
@@ -486,6 +486,92 @@ function messagesToText(messages) {
     }
   }
   return out.join('\n');
+}
+
+/**
+ * 剥掉子代理 prompt 里"嵌入的父会话 transcript / 待审动作"。
+ *
+ * ## 这是什么
+ *
+ * Codex 有一类子代理（guardian）不是去做活，而是**审阅**父会话。它每审一个
+ * 动作，就收到一条这样的消息：
+ *
+ *     The following is the Codex agent history whose request action you are assessing...
+ *     >>> TRANSCRIPT START
+ *     [1] user: ...
+ *     ...（父会话的完整片段，含工具输出、测试日志、文件内容）
+ *     >>> TRANSCRIPT END
+ *     The Codex agent has requested the following action:
+ *     >>> APPROVAL REQUEST START
+ *     Planned action JSON: { ... }
+ *     >>> APPROVAL REQUEST END
+ *
+ * 而且**一场子代理里有几十轮**：本机实测最大的一场 718 KB 里嵌了 30+ 组，
+ * 每一组都是"父会话片段 + 一个待审动作"。父会话那边本来就有这些内容。
+ *
+ * ## 为什么要剥
+ *
+ * 本机实测 1543 场子代理里 650 场是这类，合计 74.7 M 字符，占子代理索引
+ * 总量的 86%。同一份对话被索引两遍，搜索「支付回调」时命中结果被复制品
+ * 挤占。顺带：这些嵌入片段里常有明文 API key（实测就有），少索引一份就
+ * 少一个泄漏面。
+ *
+ * ## 剥到什么程度
+ *
+ * 只剥标记包住的部分，**标记之外全部保留**——那里才是这场子代理的产出：
+ * 它对每个动作的判断（"allow"/"deny" 及理由）。那是父会话没有的信息。
+ *
+ * 用全局正则而不是 indexOf：一场里有几十组，只剥第一组等于没剥。
+ *
+ * 导出是为了能单独测：这条规则直接决定索引里存什么，不该只能靠建完整
+ * 索引来验证。
+ */
+export function stripEmbeddedTranscript(text) {
+  if (typeof text !== 'string' || !text) return text;
+
+  let out = text;
+
+  // 1) 嵌入的父会话片段。
+  //
+  // 有两种变体，而且**会嵌套**：DELTA 块（"自上次审阅以来的增量"）有时整块
+  // 落在普通 TRANSCRIPT 块内部。必须**先剥 DELTA 再剥普通块**——
+  // 反过来的话，非贪婪匹配会先吃掉外层的 START...END，把内层 DELTA 的
+  // END 留成一个孤立的标记（实测残留 96 场）。
+  out = out.replace(
+    />>> TRANSCRIPT DELTA START[\s\S]*?>>> TRANSCRIPT DELTA END/g,
+    '（已剥离：父会话增量副本）'
+  );
+  out = out.replace(
+    />>> TRANSCRIPT START[\s\S]*?>>> TRANSCRIPT END/g,
+    '（已剥离：此处嵌入了父会话的 transcript 副本）'
+  );
+  // 没有 END 的截断情况：从 START 剥到末尾。
+  // 两种变体都要覆盖，且 DELTA 优先。
+  out = out.replace(/>>> TRANSCRIPT (?:DELTA )?START[\s\S]*$/, '（已剥离：截断的父会话 transcript）');
+  // 配对缺失后残留的孤立 END 标记也清掉，否则它会留在索引里当噪音
+  out = out.replace(/>>> TRANSCRIPT (?:DELTA )?END/g, '');
+
+  // 2) 待审动作的计划 JSON。它同样是从父会话抄来的，且常含明文密钥。
+  out = out.replace(
+    />>> APPROVAL REQUEST START[\s\S]*?>>> APPROVAL REQUEST END/g,
+    '（已剥离：此处是待审动作的完整参数）'
+  );
+  out = out.replace(/>>> APPROVAL REQUEST START[\s\S]*$/, '（已剥离：截断的待审动作）');
+
+  // 3) 剥完后如果只剩一堆同样的引导句，压成一句，避免 30 份模板噪音
+  const boiler =
+    'The following is the Codex agent history whose request action you are assessing.';
+  if (out.includes(boiler)) {
+    const firstIdx = out.indexOf(boiler);
+    const head = out.slice(0, firstIdx);
+    const tail = out.slice(firstIdx);
+    // 引导句本身保留一份，其余重复的清掉
+    const cleanedTail = tail.split(boiler).filter(Boolean).join('\n');
+    out = `${head}${boiler}\n${cleanedTail}`;
+  }
+
+  const trimmed = out.replace(/\n{3,}/g, '\n\n').trim();
+  return trimmed || '（这场子代理的 prompt 全部是嵌入的父会话副本，已从索引中剥离）';
 }
 
 function summarize(input) {

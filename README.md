@@ -207,6 +207,53 @@ Codex 支持**多级委派**：子代理还能再派子代理。本机 1543 场�
 但每条都带 `[子代理]` 标记，用户读到一段细节时得知道那是子代理查到的，
 不是主对话说过的。只想要主会话时传 `includeSubagents: false`。
 
+### 剥离嵌入的父会话副本
+
+子代理被采集之后，索引体积一度从 143 MB 涨到 386 MB。查下来不是"子代理本身
+就该这么大"，而是有一类子代理在**复制父会话**：
+
+Codex 的 guardian 子代理不做活，专门审阅父会话的每个动作。它收到的 prompt 长这样：
+
+```
+The following is the Codex agent history whose request action you are assessing...
+>>> TRANSCRIPT START
+[1] user: ...          ← 父会话的完整片段，含工具输出、测试日志、文件内容
+>>> TRANSCRIPT END
+The Codex agent has requested the following action:
+>>> APPROVAL REQUEST START
+Planned action JSON: {...}
+>>> APPROVAL REQUEST END
+```
+
+**而且一场子代理里有几十轮**——每审一个动作就嵌一份。本机实测 1543 场子代理里
+650 场是这类，合计 74.7 M 字符，占子代理索引量的 86%。同一份对话被索引两遍，
+搜「支付回调」时命中结果被复制品挤占。顺带：这些嵌入片段里常有明文 API key。
+
+所以索引层加了 `stripEmbeddedTranscript()`，剥掉标记包住的部分：
+
+| 块 | 处理 |
+|---|---|
+| `TRANSCRIPT START … END` | 剥（父会话副本） |
+| `TRANSCRIPT DELTA START … END` | 剥（增量副本，**且会嵌套在上一块里**） |
+| `APPROVAL REQUEST START … END` | 剥（待审动作的完整参数） |
+
+**只剥标记内，标记外全部保留**——那里才是这场子代理的产出：它对每个动作的
+判断（`{"outcome":"allow","rationale":"..."}`）。那是父会话没有的信息。
+
+两个踩过的坑，都写进注释了：
+
+1. **只认 `TRANSCRIPT START` 会漏掉 DELTA 变体**。第一版剥完仍有 400K+，
+   因为后面几十轮用的是 `TRANSCRIPT DELTA START`。
+2. **必须先剥 DELTA 再剥普通块**。DELTA 块有时整块落在普通块内部，反过来的话
+   非贪婪匹配先吃掉外层，把内层 DELTA 的 END 留成孤立标记（实测残留 96 场）。
+
+效果：索引 386 MB → **205 MB**，子代理正文 82.7 M → 19.9 M 字符。
+主会话 1433 场**一场都没被碰**（规则只匹配带 `>>>` 前缀的标记，
+正常对话里提到 "transcript" 这个词不会命中）。
+
+验证方式：拿 31 场原始 rollout 直接跑规则，残留 0；再对全库查标记，只剩 1 场
+——那是我们正在讨论这个话题的会话本身。
+
 ## 跨 Agent 接力：`handoff`
 
 时间线按会话列，一个项目几百场就没人看得完。`handoff` 换一个角度：
