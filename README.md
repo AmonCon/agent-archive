@@ -579,12 +579,14 @@ doctor 也不提，用户会以为"这工具不支持我的 Agent"，然后卸�
 未适配的会话存储（启发式猜测）
   这些目录不在已接入范围内，但内容看起来像会话记录。
   只是"看到什么"，不下结论——是不是、要不要支持，需要人判断。
-  ? ~/AppData/Roaming/SomeAgent        57.2MB  1 个 sessions 类子目录 · 6 个会话形态文件
-  ? ~/.some-agent-cli                               21.5MB  2 个 sessions 类子目录 · 4 个会话形态文件
-  ? ~/AppData/Roaming/AnotherApp                        1.9MB  1 个 sessions 类子目录 · 9 个会话形态文件
-  ? ~/.yet-another                                      11.4MB  1 个 sessions 类子目录 · 37 个会话形态文件
+  ? ~/AppData/Roaming/SomeAgent                    57.2MB  1 个 sessions 类子目录 · 6 个会话形态文件
+  ? ~/.some-agent-cli                              21.5MB  2 个 sessions 类子目录 · 4 个会话形态文件
+  ? ~/AppData/Roaming/AnotherApp                    1.9MB  1 个 sessions 类子目录 · 9 个会话形态文件
+  ? ~/.yet-another                                  11.4MB  1 个 sessions 类子目录 · 37 个会话形态文件
   如果要支持其中某个，把这一行（路径 + 里面有什么）提到 issue 即可。
 ```
+
+（路径与数字是示意——真实输出会列出**你这台机器上**装了什么。）
 
 同样的信息也经 MCP 的 `session_stats` 的 `unknownStores` 字段给到其他 Agent。
 

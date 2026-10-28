@@ -94,6 +94,23 @@ function trackedFiles() {
 const findings = [];
 const deny = loadDenyList();
 
+/**
+ * 词表里的词有带连字符的，也有带空格的，还可能夹着中文。
+ * 纯 ASCII 词按词边界匹配，否则带空格的短词会把 `plugin id` 这类
+ * 正常文本也算命中；含中文的词没法用 `\b`（中文没有词边界），退回子串匹配。
+ */
+function denyMatcher(word) {
+  if (!/^[\x20-\x7e]+$/.test(word)) {
+    const low = word.toLowerCase();
+    return (line) => line.toLowerCase().includes(low);
+  }
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, 'i');
+  return (line) => re.test(line);
+}
+
+const denyRules = deny.map((w) => ({ word: w, test: denyMatcher(w) }));
+
 for (const rel of trackedFiles()) {
   if (SKIP_PREFIXES.some((p) => rel.startsWith(p))) continue;
   const abs = path.join(repoRoot, rel);
@@ -118,9 +135,9 @@ for (const rel of trackedFiles()) {
         findings.push({ rule: rule.id, why: rule.why, file: rel, line: i + 1, sample: mask(m[0]) });
       }
     }
-    for (const word of deny) {
-      if (line.toLowerCase().includes(word.toLowerCase())) {
-        findings.push({ rule: 'deny', why: '本机词表', file: rel, line: i + 1, sample: word[0] + '***' });
+    for (const d of denyRules) {
+      if (d.test(line)) {
+        findings.push({ rule: 'deny', why: '本机词表', file: rel, line: i + 1, sample: d.word[0] + '***' });
       }
     }
   }
