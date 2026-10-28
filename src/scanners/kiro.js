@@ -4,6 +4,7 @@ import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, assertUnder } from '../messages.js';
 import { userDataCandidates, findUnder } from '../platform.js';
 import { isDirEntry } from '../fsentry.js';
+import { extraRoots } from '../config.js';
 
 /**
  * Kiro 会话扫描。
@@ -32,9 +33,11 @@ export const name = 'kiro';
 const AGENT_REL = 'User/globalStorage/kiro.kiroagent';
 
 function agentRoot() {
-  const found = findUnder(userDataCandidates('Kiro'), AGENT_REL);
+  // 配置文件里的根 = "Kiro" 这一层应用数据目录，排在最前
+  const roots = [...extraRoots(name), ...userDataCandidates('Kiro')];
+  const found = findUnder(roots, AGENT_REL);
   if (found) return found;
-  return path.join(userDataCandidates('Kiro')[0], 'User', 'globalStorage', 'kiro.kiroagent');
+  return path.join(roots[0], 'User', 'globalStorage', 'kiro.kiroagent');
 }
 
 export function discover() {

@@ -4,6 +4,7 @@ import os from 'node:os';
 import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
+import { extraRoots } from '../config.js';
 
 /**
  * Hermes 会话扫描。
@@ -52,6 +53,8 @@ function hermesDir() {
   const override = process.env.HERMES_HOME;
   const home = os.homedir();
   const candidates = [
+    // 配置文件里的根排最前（用户显式指的优先）
+    ...extraRoots(name),
     override && String(override).trim(),
     path.join(home, '.hermes'),
     process.platform === 'win32' && process.env.LOCALAPPDATA

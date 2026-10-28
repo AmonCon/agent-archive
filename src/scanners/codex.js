@@ -4,6 +4,7 @@ import os from 'node:os';
 import zlib from 'node:zlib';
 import { openReadOnly, findVersionedDb } from '../sqlite-read.js';
 import { isDirEntry, isFileEntry } from '../fsentry.js';
+import { extraRoots } from '../config.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
 
@@ -68,6 +69,9 @@ function codexDirs() {
     if (!out.some((x) => sameNorm(x, norm))) out.push(norm);
   };
 
+  // 配置文件里写的根排最前：用户显式指的地方优先于环境变量和平台默认。
+  // 见 config.js 里为什么配置文件比环境变量更适合 GUI 拉起的场景。
+  for (const p of extraRoots(name)) add(p);
   for (const p of envOverrideList('CODEX_HOME')) add(p);
   add(path.join(os.homedir(), '.codex'));
 

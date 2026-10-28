@@ -4,6 +4,7 @@ import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, assertUnder } from '../messages.js';
 import { userDataCandidates, findUnder } from '../platform.js';
 import { isDirEntry, isFileEntry } from '../fsentry.js';
+import { extraRoots } from '../config.js';
 
 /**
  * GitHub Copilot Chat 会话扫描。
@@ -34,9 +35,11 @@ export const name = 'copilot';
 const WS_REL = 'User/workspaceStorage';
 
 function workspaceRoot() {
-  const found = findUnder(userDataCandidates('Code'), WS_REL);
+  // 配置文件里的根 = "Code" 这一层应用数据目录，排在最前
+  const roots = [...extraRoots(name), ...userDataCandidates('Code')];
+  const found = findUnder(roots, WS_REL);
   if (found) return found;
-  return path.join(userDataCandidates('Code')[0], 'User', 'workspaceStorage');
+  return path.join(roots[0], 'User', 'workspaceStorage');
 }
 
 export function discover() {

@@ -4,6 +4,7 @@ import os from 'node:os';
 import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
+import { extraRoots } from '../config.js';
 
 /**
  * Gemini / Antigravity 会话扫描。
@@ -48,6 +49,14 @@ export const name = 'antigravity';
 const ROOT_NAMES = ['antigravity'];
 
 function geminiDir() {
+  // 配置文件里的根 = `.gemini` 这一层，取第一个真实存在的
+  for (const r of extraRoots(name)) {
+    try {
+      if (fs.statSync(r).isDirectory()) return r;
+    } catch {
+      /* 试下一个 */
+    }
+  }
   return path.join(os.homedir(), '.gemini');
 }
 

@@ -5,6 +5,7 @@ import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '../messages.js';
 import { withOverrides } from '../platform.js';
 import { isDirEntry } from '../fsentry.js';
+import { extraRoots } from '../config.js';
 
 /**
  * Claude Code 会话扫描。
@@ -30,12 +31,18 @@ import { isDirEntry } from '../fsentry.js';
 
 export const name = 'claude-code';
 
-/** 所有候选的 projects 根目录（覆盖优先）。 */
+/** 所有候选的 projects 根目录（配置 > 环境变量 > 平台默认）。 */
 function projectDirs() {
   const defaults = [
     path.join(os.homedir(), '.claude', 'projects'),
     path.join(os.homedir(), '.config', 'claude', 'projects'),
   ];
+
+  // 配置文件里的根：含义是 `.claude` 那一层，也可能用户直接指到 projects，
+  // 两种都接受（与环境变量的处理保持一致）
+  const configured = extraRoots(name).map((p) =>
+    path.basename(p) === 'projects' ? p : path.join(p, 'projects')
+  );
 
   // 覆盖变量指向的是 .claude 本身，要拼上 projects；
   // 但也可能用户直接指到 projects，两种都接受
@@ -43,7 +50,7 @@ function projectDirs() {
     path.basename(p) === 'projects' ? p : path.join(p, 'projects')
   );
 
-  return [...overrides, ...defaults];
+  return [...configured, ...overrides, ...defaults];
 }
 
 export function discover() {

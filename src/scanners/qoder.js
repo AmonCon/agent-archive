@@ -5,6 +5,7 @@ import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
 import { pathKey } from '../platform.js';
 import { isDirEntry, isFileEntry } from '../fsentry.js';
+import { extraRoots } from '../config.js';
 
 /**
  * Qoder 会话扫描。
@@ -44,6 +45,8 @@ function configRoots() {
     .map((s) => (s === '~' ? home : s.startsWith('~/') || s.startsWith('~\\') ? path.join(home, s.slice(2)) : s));
 
   return [
+    // 配置文件里的根排最前（用户显式指的优先）
+    ...extraRoots(name),
     ...overrides,
     path.join(home, '.qoder'),
     path.join(home, '.qoder-cn'),

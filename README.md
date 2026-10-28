@@ -460,6 +460,50 @@ README 里写的那些反直觉事实，比如 **OpenCode 在 macOS 上也用 `~
 走整读、SQLite 走每会话指纹）——magpie 就是这么分的，见
 `research/upstream/LESSONS.md`。
 
+## 配置：路径在别人机器上不一样
+
+```bash
+agent-archive config init     # 生成一份配置模板
+agent-archive config          # 看当前配置生效成什么样
+agent-archive config path     # 配置文件在哪
+```
+
+`~/.agent-archive/config.json`：
+
+```json
+{
+  "roots": {
+    "codex": ["D:/archive/.codex"],
+    "claude-code": ["/Volumes/work/.claude"]
+  },
+  "disabled": ["kiro"]
+}
+```
+
+`roots.<agent>` 里每一项的含义 = 该 Agent 的**家目录**（`~/.codex`、`~/.claude`
+那一层）。往下怎么拼（Codex 是 `sessions/`、Hermes 是 `state.db`）由扫描器自己
+知道，用户不需要懂。`disabled` 里的 Agent 不会被扫描。
+
+### 为什么不能只靠环境变量
+
+大部分 Agent 都支持环境变量覆盖（`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、
+`HERMES_HOME`…），终端里很好用。但两种真实场景下很别扭：
+
+1. **GUI 拉起的 MCP server**：Claude Desktop / Cursor 启动子进程时不一定继承
+   你 shell 里设的变量。用户改了半天"没生效"，也不知道为什么。
+2. **一台机器上有多份数据**：`CODEX_HOME` 只能指一个。用户想同时看本机盘和
+   外置盘上的两份，环境变量表达不了。
+
+配置文件两个问题都能解决，而且与环境变量**不冲突**：配置里的根排在前面
+（用户显式写的优先），环境变量与平台默认继续作为后备候选。
+
+### 三条边界
+
+- **没有配置文件是正常状态**，不是错误。
+- **配置写坏了只让这一层失效**：当作空配置继续跑，原因在 `agent-archive config`
+  里显示。配置是让事情变方便，不该成为新的单点故障。
+- **改完立即生效**：按 `(mtime, size)` 缓存，长驻的 serve / MCP 也能感知。
+
 ## 扩展：给别人家的 Agent 写一个扫描器
 
 内置的十一家是"我们碰巧知道"的。世界上的 Agent 远不止这些，而且新的一家随时
@@ -504,6 +548,14 @@ export function closeStore() {}            // 可选，用完关句柄
 
 **三、它是代码，不是配置。** 用户扫描器在本进程里执行，能读写任何东西。
 README 不假装它是沙箱——只该放自己信任的文件。
+
+### 扫描器和配置的分工
+
+| 你的情况 | 用哪个 |
+|---|---|
+| 同一个 Agent，数据在别的位置 | `config.json` 的 `roots`（不用写代码） |
+| 一家我们不认识的 Agent | `scanner init` 写一个扫描器 |
+| 某家不用 / 太慢 / 坏了 | `config.json` 的 `disabled` |
 
 ### 和「反向发现」是同一个闭环
 

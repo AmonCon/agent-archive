@@ -5,6 +5,7 @@ import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
 import { dataCandidates } from '../platform.js';
+import { extraRoots } from '../config.js';
 
 /**
  * OpenCode 会话扫描。
@@ -62,6 +63,12 @@ function dbPaths() {
   const dataDir = process.env.OPENCODE_DATA_DIR;
   if (dataDir && String(dataDir).trim()) {
     add(path.join(expandHome(String(dataDir).trim()), 'opencode.db'));
+  }
+
+  // 配置文件里的根：含义是 opencode 的数据目录（也可以直接给 db 文件）
+  for (const r of extraRoots(name)) {
+    const p = expandHome(r);
+    add(/\.(db|sqlite)$/i.test(p) ? p : path.join(p, 'opencode.db'));
   }
 
   // XDG

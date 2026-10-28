@@ -4,6 +4,7 @@ import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
 import { editorDataCandidates, findUnder } from '../platform.js';
+import { extraRoots } from '../config.js';
 
 /**
  * Cursor 会话扫描。
@@ -43,7 +44,8 @@ const DB_REL = 'User/globalStorage/state.vscdb';
 const CURSOR_APPS = ['Cursor', 'Cursor - Insiders', 'Cursor Nightly'];
 
 function cursorRoots() {
-  return editorDataCandidates(CURSOR_APPS);
+  // 配置文件里的根 = "Cursor" 这一层应用数据目录，排在最前
+  return [...extraRoots(name), ...editorDataCandidates(CURSOR_APPS)];
 }
 
 function dbPath() {

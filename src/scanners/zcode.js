@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { openReadOnly } from '../sqlite-read.js';
+import { extraRoots } from '../config.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
 
@@ -22,6 +23,17 @@ import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
 export const name = 'zcode';
 
 function dbPath() {
+  // 配置文件里可以写多个 `.zcode` 根（外置盘、备份盘……），
+  // 取第一个真实存在的；都没有就回默认位置，让 discover 报"没有"。
+  for (const root of extraRoots(name)) {
+    const p = path.join(root, 'cli', 'db', 'db.sqlite');
+    try {
+      fs.accessSync(p, fs.constants.R_OK);
+      return p;
+    } catch {
+      /* 试下一个 */
+    }
+  }
   return path.join(os.homedir(), '.zcode', 'cli', 'db', 'db.sqlite');
 }
 

@@ -1787,6 +1787,82 @@ function printSkillUsage(r, opts) {
  * 这一组命令是为了让"支持一家新 Agent"不需要改我们的代码——用户自己写一个
  * 文件放进目录就生效。见 scanner-loader.js 的契约说明。
  */
+/**
+ * 配置管理。
+ *
+ * 存在的理由很具体：环境变量在终端里好用，但 GUI 拉起的 MCP server 不一定
+ * 继承它们，而且一个环境变量只能指一个位置。配置文件两个问题都能解决。
+ */
+async function cmdConfig(opts) {
+  const { configPath, loadUserConfig, extraRoots, disabledAgents } = await import('./config.js');
+  const sub = (opts.positionals[0] || 'show').toLowerCase();
+
+  if (sub === 'path') {
+    console.log(configPath());
+    return;
+  }
+
+  if (sub === 'init') {
+    const file = configPath();
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      if (fs.existsSync(file)) {
+        console.error(`已经存在：${file}`);
+        process.exit(2);
+      }
+      const tpl = {
+        _comment: [
+          'roots.<agent> 里每一项的含义 = 该 Agent 的“家目录”',
+          '（也就是 ~/.codex、~/.claude 那一层）。扫描器自己知道往下怎么拼。',
+          '这里写的路径排在环境变量和平台默认之前。',
+          'disabled 里的 Agent 不会被扫描。',
+        ],
+        roots: {},
+        disabled: [],
+      };
+      fs.writeFileSync(file, JSON.stringify(tpl, null, 2) + '\n', 'utf8');
+      console.log(`已生成 ${file}`);
+      console.log(c(C.dim, '在 roots 里加路径，例如 {"codex": ["D:/archive/.codex"]}'));
+    } catch (e) {
+      console.error(`写不了 ${file}：${e.message}`);
+      process.exit(2);
+    }
+    return;
+  }
+
+  // show（默认）
+  const cfg = loadUserConfig();
+  const agents = Object.keys(cfg.roots);
+  const disabled = [...disabledAgents()];
+
+  if (opts.json) {
+    console.log(
+      JSON.stringify({ path: configPath(), roots: cfg.roots, disabled, error: cfg.error }, null, 2)
+    );
+    return;
+  }
+
+  console.log(c(C.bold, '配置'));
+  console.log(c(C.dim, `  文件 ${configPath()}`));
+  if (cfg.error) {
+    console.log(c(C.warn, `  ✗ 读不出来：${cfg.error}（当作空配置处理）`));
+  }
+  if (!agents.length && !disabled.length) {
+    console.log(c(C.dim, '  还没有配置任何东西（默认配置）。用 agent-archive config init 生成一份。'));
+  }
+  for (const a of agents) {
+    console.log(`  ${c(C.agent, a.padEnd(14))} ${cfg.roots[a].length} 个额外根`);
+    for (const r of cfg.roots[a]) console.log(c(C.dim, `     ${tildify(r)}`));
+  }
+  if (disabled.length) {
+    console.log(c(C.dim, `  已禁用：${disabled.join('、')}`));
+  }
+  console.log('');
+  console.log(
+    c(C.dim, '  提示：这里的路径排在 环境变量（如 CODEX_HOME）与平台默认之前。')
+  );
+}
+
 async function cmdScanner(opts) {
   const { listScanners, userScannerDir, scannerTemplate, validateScanner, loadIssues } = await import(
     './scanner-loader.js'
@@ -2159,6 +2235,8 @@ async function main() {
     case 'scanner':
     case 'scanners':
       return cmdScanner(opts);
+    case 'config':
+      return cmdConfig(opts);
     case 'doctor':
     case 'check':
       return cmdDoctor(opts);

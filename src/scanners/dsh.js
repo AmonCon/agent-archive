@@ -6,6 +6,7 @@ import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '../messages.js';
 import { envOverrides } from '../platform.js';
 import { isDirEntry, isFileEntry } from '../fsentry.js';
+import { extraRoots } from '../config.js';
 
 /**
  * DeepSeek Harness（dsh）会话扫描。
@@ -56,6 +57,8 @@ function isDir(p) {
 function dshDirs() {
   const home = os.homedir();
   const roots = [
+    // 配置文件里的根排最前（用户显式指的优先）
+    ...extraRoots(name),
     ...envOverrides(['DSH_HOME']),
     path.join(home, '.dsh'),
     path.join(home, 'DeepSeekHarness'),

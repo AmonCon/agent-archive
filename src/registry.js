@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { statePath } from './paths.js';
+import { disabledAgents } from './config.js';
 
 import * as claudeCode from './scanners/claude-code.js';
 import * as codex from './scanners/codex.js';
@@ -288,6 +289,8 @@ function sameStatOnly(a, b) {
 export function scanAll({ noCache = false, only = null } = {}) {
   const cache = noCache ? {} : loadCache();
   const wanted = only && only.length ? new Set(only) : null;
+  // 用户可以在配置文件里禁用某几家（不用、坏了、或者扫描太慢）
+  const disabled = disabledAgents();
   // 只扫一部分时，必须**保留**其余 Agent 的缓存条目。
   // 否则保存时会把整份缓存覆盖成子集，下一次全量扫描等于全部重解析
   // （本机实测 50 秒），而且用户完全看不出发生了什么。
@@ -297,6 +300,7 @@ export function scanAll({ noCache = false, only = null } = {}) {
 
   for (const scanner of scanners) {
     if (wanted && !wanted.has(scanner.name)) continue;
+    if (disabled.has(scanner.name)) continue;
     let files;
     try {
       files = scanner.discover();

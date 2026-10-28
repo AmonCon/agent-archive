@@ -140,6 +140,11 @@ Qoder / Cursor / 注册表 / 跨平台路径 / 反向发现），以及未知 Ag
    `scanner init/path/check/list`。支持一家新 Agent 不再需要改我们的代码。
    这是"通用产品"最实质的一条——见 README 的扩展章节。
 
+4. **配置覆盖数据根** **已完成**：`config.js` + `config init/show/path`。
+   `roots.<agent>` 指该 Agent 的家目录，`disabled` 跳过某家。
+   解决两件环境变量表达不了的事：GUI 拉起的 MCP server 不继承 shell 变量、
+   一个 `CODEX_HOME` 只能指一个位置。
+
 
 3. **Hermes 内容保真**（magpie 已解决）
    解码 `\x00json:` 前缀、过滤 `display_metadata.model_only`、按显示身份去重。
