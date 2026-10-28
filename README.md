@@ -1498,28 +1498,34 @@ Linux 严格区分（在 Linux 上忽略大小写是个真实的绕过口子）�
 - **在后台服务（launchd）里跑时 `HOME` 可能不是用户家目录**。
   Hermes 源码专门用 `pwd.getpwuid(os.getuid()).pw_dir` 兜底。
 
-> **验证状态**：Windows 上 10 家 Agent 全部实测通过（1131 场会话，
-> 解析失败 0、重复 id 0）。macOS / Linux 的**代码路径**已核对并纳入 CI：
-> `.github/workflows/test.yml` 在 ubuntu / macOS / Windows 三平台 × Node
-> 22.15 / 24 上跑全部测试（22.15 是 `engines` 声明的最低版本，等于顺带
-> 验证那句话是不是真的）。
+> **验证状态**：
 >
-> **有 Mac 或 Linux 机器的话，一条命令就能自己验完：**
+> | 平台 | 状态 | 证据 |
+> |---|---|---|
+> | Windows 11 | ✅ 真机 | 10 家 Agent、1131 场会话、解析失败 0、重复 id 0 |
+> | macOS 26.7.1 (Darwin 25.6, x64) | ✅ 真机 | 97 个用例全过（2.0 s）；`doctor` 在干净机器上跑通 |
+> | Linux | ⏳ 仅 CI | `.github/workflows/test.yml` 的 ubuntu job |
+>
+> **macOS 那次真机验证抓出两个只有干净机器才会暴露的问题**：
+> 零会话时 doctor 首屏全是 ✗（覆盖率分母为 0 被当成失败）；反向发现的
+> "已知路径"排除清单因为读错字段（`paths` vs `hits`）**一直是空的**，
+> 导致同一屏里既写"已接入：Qoder"又把它列成"未适配"。两个都修了。
+>
+> CI 在三平台 × Node 22.15 / 24 上跑同一套测试（22.15 是 `engines` 声明的
+> 最低版本，等于顺带验证那句话是不是真的）。
+>
+> **想在另一台机器上验，一条命令：**
 >
 > ```bash
-> git clone https://github.com/AmonCon/agent-archive.git
-> cd agent-archive && npm test     # 零依赖，不需要 npm install
+> node research/probes/remote-verify.mjs --host user@192.168.1.10 \
+>   --node-bin /tmp/node/bin        # 远端没装 Node 时，指向临时解压出来的 bin
 > ```
 >
-> 90 多个用例、两秒内跑完，全部在临时目录里造假数据，**不读也不改你机器上
-> 任何 Agent 的真实数据**。装机上没装 Agent 也能跑——这正是它们被写成
-> 自造 fixture 的原因。
+> 它把当前 HEAD 打包传过去、跑测试、把结果带回来，跑完删远端临时目录。
+> 远端不需要装依赖（项目零依赖），只要求能免密 ssh 登录。全程不碰远端
+> 任何 Agent 的真实数据——测试都在临时目录里自造数据。
 >
-> 想连真实数据一起体检（只读），跑：
->
-> ```bash
-> node research/probes/mac-check.mjs    # 单文件、零依赖，输出一份报告
-> ```
+> 如果只是想看路径层面（不跑测试、不动数据）：`node research/probes/mac-check.mjs`。
 >
 > **已用上游源码做过一次交叉核对**（magpie 是跨平台的，它的路径函数按 GOOS
 > 参数化并有 darwin/windows 测试）：Hermes、Claude Code、Qoder、DSH、ZCode
