@@ -234,13 +234,14 @@ function parseYamlMcpServers(text) {
     const subM = line.match(/^ {4}([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
     if (subM) {
       const [, k, v] = subM;
-      curSub = k === 'env' ? 'env' : null;
+      curSub = k === 'env' ? 'env' : k === 'args' ? 'args' : null;
       if (k === 'env') {
         out[cur].env = out[cur].env || {};
         continue;
       }
       const val = v.trim();
       if (!val) {
+        // `args:` 后面跟块状列表（每行 `- 值`），见下面 argsListM
         if (k === 'args') out[cur].args = out[cur].args || [];
         continue;
       }
@@ -250,6 +251,22 @@ function parseYamlMcpServers(text) {
           .map((m) => unquote(m[1] ?? m[2] ?? m[3] ?? ''))
           .filter(Boolean);
       }
+      continue;
+    }
+
+    // args 的块状列表：
+    //     args:
+    //       - "-y"
+    //       - "@modelcontextprotocol/server-github"
+    //
+    // 必须支持。不支持的话 args 会读成空数组，服务指纹退化成只有
+    // `command: npx`——本机每一种 npx 拉起的服务都会被合并成同一条，
+    // 而且不报错。这是"静默出错"里最坏的一种：用户看到的是"我配了 5 个
+    // 服务，它说只有 1 个"。
+    const argsItemM = line.match(/^ {6,}-\s+(.+)$/);
+    if (argsItemM && curSub === 'args') {
+      const v = unquote(argsItemM[1].replace(/\s+#.*$/, '').trim());
+      if (v) out[cur].args.push(v);
       continue;
     }
 

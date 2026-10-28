@@ -494,6 +494,7 @@ export function groupByHash(installs) {
         versions: new Set(),
         agents: new Set(),
         names: new Set(),
+        dirNames: new Set(),
         locations: [],
         bytes: s.bytes,
         hashMissing: !s.hash,
@@ -507,6 +508,7 @@ export function groupByHash(installs) {
     if (s.version) g.versions.add(s.version);
     g.agents.add(s.agent);
     g.names.add(s.name);
+    if (s.dirName) g.dirNames.add(s.dirName);
     g.locations.push({
       agent: s.agent,
       path: s.path,
@@ -520,8 +522,14 @@ export function groupByHash(installs) {
   for (const g of map.values()) {
     out.push({
       name: g.name,
-      // 同一个哈希在不同目录里可能被写成不同名字，都留着
-      aliases: [...g.names].filter((n) => n !== g.name).sort(),
+      // 同一个技能在不同 Agent 里可能装成不同**目录名**（frontmatter 的
+      // name 一样，目录却叫 alpha-copy）。这些才是真正需要展示的别名：
+      // 按名字认会把它当成两个技能。
+      //
+      // 注意不是按 frontmatter 的 name 收集——哈希覆盖整份 SKILL.md，
+      // 同名不同内容必然不同哈希，所以同一个哈希组里不可能有第二个 name。
+      // 那个字段曾经是死代码。
+      aliases: [...g.dirNames].filter((n) => n !== g.name).sort(),
       description: g.description,
       hash: g.hash,
       hashMissing: g.hashMissing,
