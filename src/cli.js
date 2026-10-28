@@ -1866,14 +1866,27 @@ async function cmdCalls(opts) {
   console.log('');
 
   const label = { agent: 'Agent', model: '模型', provider: '供应商', session: '会话' }[by] || '分组';
-  console.log(c(C.dim, `  ${label.padEnd(18)}${'调用'.padStart(7)}${'输入'.padStart(12)}${'输出'.padStart(11)}${'缓存命中'.padStart(9)}${'费用'.padStart(10)}`));
+  // 列名不能写"费用"：网关日志里的 credits 是**供应商自报的额度消耗**，
+  // 单位由各家自己定（次数/积分/美元都有），我们不换算、也不当钱看。
+  // 写"费用"会让人拿它去做预算决策，那是错的。
+  console.log(
+    c(
+      C.dim,
+      `  ${label.padEnd(18)}${'调用'.padStart(7)}${'输入'.padStart(12)}${'输出'.padStart(11)}${'缓存命中'.padStart(9)}${'credits'.padStart(10)}`
+    )
+  );
+  console.log(
+    c(C.dim, '  credits = 供应商自报的额度消耗，单位由各家自定，不是货币金额')
+  );
 
   const top = opts.showAll ? rows : rows.slice(0, 15);
   for (const g of top) {
     const name = g.key.length > 17 ? g.key.slice(0, 16) + '…' : g.key;
     const cost = g.creditsKnown ? g.credits.toFixed(1) : '—';
     const hit = g.cacheHit == null ? '—' : `${Math.round(g.cacheHit * 100)}%`;
+    // 失败数和本地拒绝分开标：拒绝不是"这个模型坏了"，是网关没让它出去
     const fail = g.failed ? c(C.when, ` ✗${g.failed}`) : '';
+    const rej = g.rejected ? c(C.dim, ` ⊘${g.rejected}`) : '';
     console.log(
       '  ' +
         c(C.agent, name.padEnd(18)) +
@@ -1882,7 +1895,8 @@ async function cmdCalls(opts) {
         fmtNum(g.out).padStart(11) +
         hit.padStart(9) +
         cost.padStart(10) +
-        fail
+        fail +
+        rej
     );
   }
   if (rows.length > top.length) {

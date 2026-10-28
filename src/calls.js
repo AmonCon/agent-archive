@@ -46,10 +46,15 @@ const SOURCES = [
   },
 ];
 
-function findSources() {
+/**
+ * @param {object} [opts]
+ * @param {Array} [opts.sources] 覆盖日志源（测试用：指向 fixture，不依赖本机装了网关）
+ */
+function findSources(opts = {}) {
+  const list = Array.isArray(opts.sources) && opts.sources.length ? opts.sources : SOURCES;
   const out = [];
-  for (const s of SOURCES) {
-    for (const p of s.paths) {
+  for (const s of list) {
+    for (const p of s.paths || []) {
       try {
         const st = fs.statSync(p);
         if (st.isFile() && st.size > 0) out.push({ ...s, path: p, size: st.size, mtimeMs: st.mtimeMs });
@@ -92,8 +97,8 @@ function toDate(v) {
  * 逐行解析而不是整体 JSON.parse：日志是 append-only 的 NDJSON，
  * 最后一行可能正写到一半（并发追加），那行丢掉即可，不该让整个文件失败。
  */
-export function readCalls({ fresh = false } = {}) {
-  const sources = findSources();
+export function readCalls({ fresh = false, sources: srcOverride } = {}) {
+  const sources = findSources({ sources: srcOverride });
   if (!sources.length) {
     return {
       ready: false,
@@ -138,11 +143,18 @@ export function readCalls({ fresh = false } = {}) {
         rawAgent: o.agent || null,
         provider: o.provider || null,
         model: o.model || null,
+        // 网关实际应答的模型。和 req 不一定相同：`req` 可能是路由组别名
+        // （本机 `group/auto-deepseek-v4-1-flash` 解析成 `deepseek-v4.1-flash`），
+        // **不能当成"模型被替换"报出去**——那是两回事。
+        served: o.served || null,
         request: o.req || null,
         // 会话 id：优先 native_session（Agent 自己的 id，和归档一致），
         // 退而用 session（网关请求头里带的那个）
         session: o.native_session || o.session || null,
         sessionFrom: o.native_session ? 'native' : o.session ? 'header' : null,
+        // 网关本地拒绝（如"provider switched off"）。它们**不往上打**，
+        // 没有花 token、credits 为 0，算进"调用次数"和失败率会失真。
+        rejected: o.rejected === true,
         in: num(o.in),
         out: num(o.out),
         cacheRead: num(o.cache_read),
@@ -154,6 +166,8 @@ export function readCalls({ fresh = false } = {}) {
         error: o.err || null,
         errorType: o.err_type || null,
         tries: o.tries == null ? null : Number(o.tries),
+        // 供应商自报的**额度消耗**，不是货币。本机字段名就叫 credits，
+        // 不同供应商的单位不同（次数/积分/美元都有可能），我们不做换算。
         credits: o.credits == null ? null : num(o.credits),
         effort: o.effort || null,
         tier: o.tier_served || null,
@@ -211,6 +225,7 @@ export function summarizeCalls({ calls, groupBy = 'agent' } = {}) {
       g = {
         key,
         calls: 0,
+        rejected: 0,
         ok: 0,
         failed: 0,
         retried: 0,
@@ -232,6 +247,17 @@ export function summarizeCalls({ calls, groupBy = 'agent' } = {}) {
     }
 
     g.calls++;
+
+    // 网关本地拒绝（如 provider 被关掉）单独计数后跳过：
+    // 它没有往上打、没有花 token、credits 是 0。混进 calls/失败率/平均耗时里
+    // 会让"这个模型很慢很爱失败"这种结论完全失真。
+    if (c.rejected) {
+      g.rejected++;
+      if (!g.first || c.time < g.first) g.first = c.time;
+      if (!g.last || c.time > g.last) g.last = c.time;
+      continue;
+    }
+
     if (isOk(c)) g.ok++;
     else g.failed++;
     if (c.tries && c.tries > 1) g.retried++;
@@ -261,6 +287,9 @@ export function summarizeCalls({ calls, groupBy = 'agent' } = {}) {
     const input = g.in + g.cacheRead + g.cacheWrite;
     rows.push({
       ...g,
+      // 真正打到上游的调用数。calls 里含本地拒绝，rejected 单列，
+      // 三个数字一起看才不会被"错误率很高"误导。
+      upstreamCalls: g.calls - g.rejected,
       input,
       // 缓存命中率：缓存读 /（缓存读 + 未缓存输入）。
       // 缓存写不算命中——它是为下一次付的钱，不是这一次省的钱。
@@ -278,21 +307,28 @@ export function summarizeCalls({ calls, groupBy = 'agent' } = {}) {
 /**
  * 把调用挂到会话上。
  *
- * 只有拿到 session id 的调用能挂上。返回 matched / total，
- * 让调用方能把覆盖率一起报出来——这是这个模块最重要的诚实性保证。
+ * ## 为什么必须带 agent 一起匹配
+ *
+ * 只看 session id 会**跨家错挂**：ZCode 和 OpenCode 都用 `session_xxx` 这类 id，
+ * 两家的会话 id 撞车时，一场 qoder 的调用会被算到 opencode 的会话头上。
+ * 本机实测过这种同构 id 形态，所以按 `agent|id` 做主键。
+ *
+ * 网关侧的 agent 名和扫描器名不总是一致（`claude` vs `claude-code`），
+ * 所以两边都过一遍 `canonicalAgent`。
+ *
+ * 返回 matched / total，让调用方能把覆盖率一起报出来——只报匹配数会让人
+ * 以为覆盖率是 100%。
  */
 export function attachToSessions(calls, sessionIndex) {
-  const byId = new Map();
+  const byKey = new Map();
   for (const s of sessionIndex) {
-    // 归档里同一场会话可能被多个扫描器写出不同的 id 形态，
-    // 这里同时收原样和小写两版
-    byId.set(s.id, s);
+    byKey.set(`${canonicalAgent(s.agent)}|${s.id}`, s);
   }
 
   const matched = [];
   const unmatched = [];
   for (const c of calls) {
-    if (c.session && byId.has(c.session)) matched.push(c);
+    if (c.session && byKey.has(`${c.agent}|${c.session}`)) matched.push(c);
     else unmatched.push(c);
   }
 
@@ -303,6 +339,8 @@ export function attachToSessions(calls, sessionIndex) {
     totalCalls: calls.length,
     // 有多少调用本身就没有 session id（不走网关的 Agent 常见）
     withoutSession: calls.filter((c) => !c.session).length,
+    // 网关本地拒绝的量单独报——它们不该参与"成本/速度"的任何分母
+    rejectedCalls: calls.filter((c) => c.rejected).length,
   };
 }
 

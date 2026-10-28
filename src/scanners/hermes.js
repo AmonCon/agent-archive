@@ -331,6 +331,30 @@ function cleanText(s) {
  *
  * 空的 assistant 消息（只有 tool_calls 没有 content）跳过——
  * 它们不是"说了什么"，是"调了什么"，工具调用单独成条。
+ *
+ * ## 查过、但**没有**采用的三个上游做法
+ *
+ * MAGPIE 处理 Hermes 时做了三件事，我们逐条对着本机真实数据核过，
+ * 结论是都不适用——写在这里，免得以后有人再调研一遍或照着改错：
+ *
+ * 1. **解码 `\x00json:` 前缀**：本机 state.db 里含 NUL 字节的 content
+ *    只有 9 行，且内容长度为 0（是空消息，不是被编码的 JSON）。
+ *    照抄会得到一段永远走不到的代码。
+ *    （注：SQLite 的 LIKE 遇到 NUL 会失真，用它统计会得出 18940 这种假数字，
+ *    要用 instr()。）
+ *
+ * 2. **过滤 `display_metadata.model_only`**：本机 133 行有 display_metadata，
+ *    内容全是 `{"gateway_input_owner": ...}`，没有 model_only 这个键。
+ *
+ * 3. **按 display_identity 去重**：看着像"同一份内容被重放几十次"，
+ *    实际查下来是 **Agent 真的重试了几十次**——本机一个会话里同一段工具输出
+ *    出现了 85 次，各有不同的 message_uid 和不同的时间戳，散布在 284 条
+ *    其他消息之间。按内容或按 identity 去重会把真实的重试过程删掉。
+ *    另有一处用户连问三次同一句话（间隔 32 分钟），同样不能动。
+ *    而且 active=1 的行里没有任何 display_identity 重复，去重对我们是空操作。
+ *
+ * 一句话：**重复不代表冗余**。宁可原样显示，也不能把"重试了 85 次"这个
+ * 事实抹成一次。
  */
 export function readMessages(session) {
   const src = String(session.source || '');
