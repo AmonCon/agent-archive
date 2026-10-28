@@ -147,19 +147,26 @@ export function listScanners() {
  */
 export function scannerTemplate(name = 'myagent') {
   return `import fs from 'node:fs';
-import path from 'node:path';
 import os from 'node:os';
-import { makeSession } from '${pathToFileURL(path.join(process.cwd(), 'src', 'model.js')).href}';
+import path from 'node:path';
 
 /**
  * ${name} 的扫描器。
  *
- * 契约见 README「扩展：给别人家的 Agent 写一个扫描器」。
+ * 契约见 CONTRIBUTING.md「给一家新 Agent 加支持」。
  * 这个骨架能跑通：discover() 返回空数组，所以不会报错也不会产生噪声。
- * 把下面两处 TODO 换成真实的路径与解析即可。
+ * 把下面的 TODO 换成真实的路径与解析即可。
+ *
+ * 注意：**不需要 import 这个项目的任何模块**。parse/parseAll 返回普通对象
+ * 就行，缺省值由宿主补（agent 用 name、kind 用 main、时间接受 Date/ISO/毫秒）。
  */
 
 export const name = '${name}';
+
+/** 我会去哪些目录找数据。doctor 与反向发现都用它，别忘了写。 */
+export function candidateRoots() {
+  return [path.join(os.homedir(), '.${name}')];
+}
 
 /** TODO: 这家把会话存在哪？返回文件路径数组（可以是 0 个）。 */
 export function discover() {
@@ -195,15 +202,14 @@ export function parse(file) {
     return null;
   }
 
-  return makeSession({
-    agent: name,
+  return {
     id: first.sessionId || path.basename(file, '.jsonl'),
-    project: first.cwd || null,
+    project: first.cwd || null,        // 拿不到就 null，不要猜
     title: first.title || null,
     start: first.createdAt || null,
     end: first.updatedAt || null,
-    source: file,
-  });
+    source: file,                       // readMessages 用它读正文
+  };
 }
 `;
 }

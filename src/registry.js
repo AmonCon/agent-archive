@@ -4,6 +4,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { statePath } from './paths.js';
 import { disabledAgents } from './config.js';
+import { makeSession } from './model.js';
 
 import * as claudeCode from './scanners/claude-code.js';
 import * as codex from './scanners/codex.js';
@@ -538,13 +539,74 @@ function isPlaceholder(title) {
 function parseFile(scanner, file) {
   try {
     if (typeof scanner.parseAll === 'function') {
-      return { sessions: scanner.parseAll(file) || [], ok: true };
+      return { sessions: normalizeAll(scanner, scanner.parseAll(file)), ok: true };
     }
     const one = scanner.parse(file);
-    return { sessions: one ? [one] : [], ok: true };
+    return { sessions: normalizeAll(scanner, one ? [one] : []), ok: true };
   } catch {
     return { sessions: [], ok: false };
   }
+}
+
+/**
+ * 把扫描器返回的对象整理成统一会话模型。
+ *
+ * 这一步是为了**让用户写的扫描器不必 import 我们的内部模块**。
+ * 原来的契约要求用户 `import { makeSession } from '<仓库绝对路径>/src/model.js'`，
+ * 仓库一移动或一升级就断——对"别人写的扫描器"来说这是硬伤。
+ *
+ * 现在只要返回一个普通对象就行，缺省值在这里补：
+ *   agent 缺省 = 扫描器名；kind 缺省 = main；标题空 = '(untitled)'；
+ *   时间接受 Date / ISO 字符串 / 毫秒数 / 秒数（model.js 里统一处理）。
+ *
+ * 对内置扫描器是幂等的：它们本来就用 makeSession 造，再过一遍结果不变。
+ */
+function normalizeAll(scanner, list) {
+  if (!Array.isArray(list) || !list.length) return [];
+  const roots = agentRootsOf(scanner);
+  const out = [];
+  for (const raw of list) {
+    if (!raw || raw.id === undefined || raw.id === null || raw.id === '') continue;
+    const s = makeSession({
+      ...raw,
+      agent: raw.agent || scanner.name,
+    });
+    if (!s.id) continue;
+
+    // 项目路径落在**该 Agent 自己的数据目录**里时，当作"没有项目"。
+    //
+    // 实测（Accio）：有些会话的 cwd 是它自己的内部工作区
+    // `~/.accio/accounts/<id>/agents/<agentId>/project`。那不是用户的项目，
+    // 当项目列出来会污染项目清单——而错的路径比缺数据难发现得多。
+    // 放在这里而不是每个扫描器各写一遍：任何一家都可能犯这个错。
+    if (s.project && isUnder(s.project, roots)) s.project = null;
+
+    out.push(s);
+  }
+  return out;
+}
+
+/** 某个扫描器声明过的根（缓存，扫描时会被反复问）。 */
+const rootCache = new WeakMap();
+function agentRootsOf(scanner) {
+  if (rootCache.has(scanner)) return rootCache.get(scanner);
+  let roots = [];
+  try {
+    if (typeof scanner.candidateRoots === 'function') {
+      roots = (scanner.candidateRoots() || []).filter((p) => typeof p === 'string' && p);
+    }
+  } catch {
+    roots = [];
+  }
+  const prepared = roots.map((p) => path.resolve(p).toLowerCase().replace(/\\/g, '/'));
+  rootCache.set(scanner, prepared);
+  return prepared;
+}
+
+function isUnder(target, roots) {
+  if (!roots.length) return false;
+  const t = path.resolve(target).toLowerCase().replace(/\\/g, '/');
+  return roots.some((r) => t === r || t.startsWith(r + '/'));
 }
 
 /** 缓存里存 ISO 字符串，避免 JSON 对 Date 的隐式转换歧义。 */
