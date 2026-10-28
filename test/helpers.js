@@ -66,6 +66,20 @@ export function sandbox(prefix = 'aa-test-') {
           USERPROFILE: home,
           HOME: home,
           AGENT_ARCHIVE_HOME: state,
+
+          // 平台默认根也要一起改掉，光换家目录是不够的。
+          //
+          // `%APPDATA%` / `%LOCALAPPDATA%` / XDG 是**独立于家目录**的环境变量：
+          // Cursor、Kiro、Copilot、Hermes 走的是它们，不是 `~`。不换这几个的话，
+          // 这些扫描器在测试里会读到跑测试那台机器的真实会话——
+          // 本机就有过一次：装包自测时输出里冒出了开发者的真实项目名，
+          // 因为只隔离了家目录。
+          APPDATA: path.join(dir, 'appdata'),
+          LOCALAPPDATA: path.join(dir, 'localappdata'),
+          XDG_DATA_HOME: path.join(dir, 'xdg-data'),
+          XDG_CONFIG_HOME: path.join(dir, 'xdg-config'),
+          XDG_CACHE_HOME: path.join(dir, 'xdg-cache'),
+
           // 明确清掉可能存在的覆盖变量，否则真实环境的设置会漏进来
           CODEX_HOME: null,
           CLAUDE_CONFIG_DIR: null,

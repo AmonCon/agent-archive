@@ -138,12 +138,39 @@ codex       → claude-code     +17.6h 接续
 `sameProject()` 会把"只记项目名"和"记完整路径"的条目并成同一个项目，
 否则 `my-app` 和 `e:/my-app` 会在列表里并排两行。
 
-## 用法
+## 装
 
 需要 **Node 22.15 或更高**。理由不是口味：读 `.zst` 压缩会话要用 zlib 的 zstd
 支持（22.15 起），读各家 SQLite 会话库要用 `node:sqlite`（22.5 起）。
 版本不够时入口会直接说清楚缺什么、要升到哪个版本，而不是在某个 scanner 里
 抛一段看不懂的 TypeError——第一个跑起来的用户很可能就在老 Node 上。
+
+还没发布到 npm registry，所以直接从 Git 装：
+
+```bash
+# 装成全局命令，之后用 agent-archive
+npm install -g github:AmonCon/agent-archive
+agent-archive projects
+
+# 不装，直接跑一次
+npx github:AmonCon/agent-archive projects
+
+# 或者克隆下来跑源码（改代码时用这个）
+git clone https://github.com/AmonCon/agent-archive && cd agent-archive
+node src/cli.js projects
+```
+
+第一次运行会在 stderr 打一行 `ExperimentalWarning: SQLite is an experimental
+feature`——那是 Node 对 `node:sqlite` 的提示，不是错误。为什么用这个还在实验期的
+API：它是避免引入第三方依赖的唯一办法，而且入口自检已确认它在你的 Node 上可用。
+嫌吵可以加 `NODE_NO_WARNINGS=1`，但这条警告本身是有信息量的，我们没替你静音。
+
+零 npm 依赖，所以装上不会因为原生模块编译失败，也没有 `node_modules` 要下。
+
+## 用法
+
+下面用 `node src/cli.js` 演示（跑源码的写法）。装成全局命令的话，
+把 `node src/cli.js` 换成 `agent-archive` 即可。
 
 ```bash
 # 本机有哪些项目（自动过滤掉家目录、桌面、临时目录）

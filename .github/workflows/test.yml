@@ -59,6 +59,29 @@ jobs:
             exit 1
           fi
 
+      - name: 装出来的包能跑
+        # 用户的第一个动作是「装」，而 --dry-run 只看打包内容、不看装完能不能用。
+        # 这里真的装一遍、真的跑一次——包括两个入口是否都生成了。
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/inst" && cd "$RUNNER_TEMP/inst"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/agent-archive-*.tgz
+
+          # 家目录与平台默认根都指到临时目录：既不读 runner 上的东西，结果也稳定
+          export HOME="$RUNNER_TEMP/home" USERPROFILE="$RUNNER_TEMP/home"
+          export APPDATA="$RUNNER_TEMP/appdata" LOCALAPPDATA="$RUNNER_TEMP/localappdata"
+          export AGENT_ARCHIVE_HOME="$RUNNER_TEMP/state"
+          # 各家的覆盖变量也要清掉：runner 上通常没有，但本机跑同一个脚本时会漏
+          unset DSH_HOME HERMES_HOME CODEX_HOME CLAUDE_CONFIG_DIR QODER_CONFIG_DIR CURSOR_CONFIG_DIR KIRO_HOME
+          mkdir -p "$HOME" "$APPDATA" "$LOCALAPPDATA" "$AGENT_ARCHIVE_HOME"
+
+          echo "--- 两个入口都要在"
+          ls node_modules/.bin/agent-archive node_modules/.bin/agent-archive-mcp
+
+          echo "--- 空家目录下跑一次，必须正常退出"
+          ./node_modules/.bin/agent-archive projects
+
   privacy:
     name: 隐私检查
     # 这是个公开仓库：真实项目名、本机路径、密钥一旦提交就等于公开，
