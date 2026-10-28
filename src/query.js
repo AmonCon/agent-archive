@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { scanCached, scanners } from './registry.js';
+import { getOrLoad } from './transcript-cache.js';
 import {
   projectKey,
   normalizeProject,
@@ -220,6 +221,12 @@ export function groupByAgent(sessions) {
  *
  * 不清洗路径：越界校验在 scanner 内部（messages.assertUnder）完成，
  * 因为只有它知道自己的根目录在哪。
+ *
+ * 走一层正文缓存：读一场大会话要 1 秒（Codex 的 .zst 整文件解压 + 逐行解析），
+ * 而网页刷新、`cat`、导出、摘要都会各读一次。缓存按源文件指纹失效，
+ * 文件一变就重读。见 transcript-cache.js。
+ *
+ * **返回的数组可能是共享引用，调用方不要修改它。**
  */
 export async function readSessionContent(session) {
   const scanner = scanners.find((s) => s.name === session.agent);
@@ -228,7 +235,9 @@ export async function readSessionContent(session) {
   if (typeof scanner.readMessages !== 'function') {
     throw new Error(`${session.agent} 的正文读取还没实现`);
   }
-  return scanner.readMessages(session);
+  return getOrLoad(`${session.agent}|${session.id}`, session, () =>
+    scanner.readMessages(session)
+  );
 }
 
 /**
