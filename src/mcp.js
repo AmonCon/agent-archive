@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// 同 cli.js：环境自检必须排在所有静态 import 之前，否则提示跑不到。
+import './boot.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionContent } from './query.js';

@@ -94,37 +94,59 @@ function samePathNorm(a, b) {
   return pathKey(a) === pathKey(b);
 }
 
-/** 某个桌面应用的用户数据目录候选（按当前平台优先排序）。 */
-export function userDataCandidates(appName) {
-  const home = os.homedir();
+/**
+ * 某个桌面应用的用户数据目录候选（按当前平台优先排序）。
+ *
+ * `opts` 只为测试存在：默认取真实平台/家目录/环境变量，传了就按传的算。
+ * 这样能在本机断言"在 macOS 上会得到什么"——否则跨平台路径假设只能靠
+ * 真机验证，而这个项目在 macOS/Linux 上一直没跑过（见 README 的验证状态）。
+ *
+ * @param {string} appName
+ * @param {{platform?: string, home?: string, env?: object}} [opts]
+ */
+export function userDataCandidates(appName, opts = {}) {
+  const platform = opts.platform || process.platform;
+  const home = opts.home || os.homedir();
+  const env = opts.env || process.env;
   const out = [];
-  const add = makeAdder(out);
+  const add = makeAdder(out, platform);
 
-  if (process.platform === 'darwin') add(path.join(home, 'Library', 'Application Support', appName));
-  if (process.platform === 'win32') add(path.join(appDataRoaming(home), appName));
+  if (platform === 'darwin') add(path.join(home, 'Library', 'Application Support', appName));
+  if (platform === 'win32') add(path.join(appDataRoaming(home, env), appName));
 
   // Linux / XDG
   add(path.join(home, '.config', appName));
 
   // 兜底：其它平台的约定，换机或跨平台拷贝时可能命中
   add(path.join(home, 'Library', 'Application Support', appName));
-  add(path.join(appDataRoaming(home), appName));
+  add(path.join(appDataRoaming(home, env), appName));
   add(path.join(home, '.config', appName.toLowerCase()));
 
   return out;
 }
 
-/** XDG 风格的数据目录候选（用于 opencode 这类存 db 的应用）。 */
-export function dataCandidates(appName) {
-  const home = os.homedir();
+/**
+ * XDG 风格的数据目录候选（用于 opencode 这类存 db 的应用）。
+ *
+ * 注意 OpenCode 在 macOS 上**不用** Application Support：它源码里写死
+ * `XDG_DATA_HOME || ~/.local/share`，没有 darwin 分支。所以这里
+ * `~/.local/share` 排第一，Application Support 只在 darwin 时作为附加候选。
+ *
+ * @param {string} appName
+ * @param {{platform?: string, home?: string, env?: object}} [opts]
+ */
+export function dataCandidates(appName, opts = {}) {
+  const platform = opts.platform || process.platform;
+  const home = opts.home || os.homedir();
+  const env = opts.env || process.env;
   const out = [];
-  const add = makeAdder(out);
+  const add = makeAdder(out, platform);
 
   add(path.join(home, '.local', 'share', appName));
-  if (process.platform === 'win32') {
-    add(path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), appName));
+  if (platform === 'win32') {
+    add(path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), appName));
   }
-  if (process.platform === 'darwin') {
+  if (platform === 'darwin') {
     add(path.join(home, 'Library', 'Application Support', appName));
   }
   add(path.join(home, '.config', appName));
@@ -139,8 +161,8 @@ export function dataCandidates(appName) {
  * `~/.config/cursor` 是同一个地方；按原样去重会把同一个目录列两遍，
  * 白白多 stat 一次。Linux 区分大小写，保持原样。
  */
-function makeAdder(out) {
-  const caseInsensitive = process.platform === 'win32' || process.platform === 'darwin';
+function makeAdder(out, platform = process.platform) {
+  const caseInsensitive = platform === 'win32' || platform === 'darwin';
   const seen = new Set();
   return (p) => {
     if (!p) return;
@@ -176,8 +198,8 @@ function samePath(a, b) {
   return ci ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
-function appDataRoaming(home) {
-  return process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+function appDataRoaming(home, env = process.env) {
+  return env.APPDATA || path.join(home, 'AppData', 'Roaming');
 }
 
 /**

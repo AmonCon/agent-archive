@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// 环境自检必须在最前：后面的模块会静态 import node:sqlite，
+// 在过老的 Node 上那一步就直接崩，检查来不及跑。见 boot.js。
+import './boot.js';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionContent } from './query.js';
@@ -102,8 +105,9 @@ cat 的会话参数:
 
 示例:
   agent-archive projects
-  agent-archive timeline E:\\my-app
-  agent-archive cat --project . 
+  agent-archive timeline ~/code/my-app
+  agent-archive handoff ~/code/my-app
+  agent-archive cat --project .
   agent-archive cat 1d551b54 --tools
   agent-archive search 迁移
   agent-archive serve
@@ -728,7 +732,7 @@ async function cmdExport(target, opts) {
 
   if (!target) {
     console.error(
-      '需要目标。例：agent-archive export E:\\my-app\n' +
+      '需要目标。例：agent-archive export ~/code/my-app\n' +
         '            agent-archive export 01a11a93 --session'
     );
     process.exit(2);
@@ -1132,7 +1136,7 @@ async function cmdDigest(target, opts) {
   const { loadConfig } = await import('./llm.js');
 
   if (!target) {
-    console.error('需要项目路径。例：agent-archive digest E:\\my-app');
+    console.error('需要项目路径。例：agent-archive digest ~/code/my-app');
     process.exit(2);
   }
 

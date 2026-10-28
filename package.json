@@ -1,14 +1,38 @@
 {
   "name": "agent-archive",
   "version": "0.1.0",
-  "private": true,
-  "description": "跨 Agent 的项目级会话档案馆",
+  "description": "跨 Agent 的项目级会话档案馆：把同一项目在各家 AI Agent 里的会话合并成一条时间线，并提供 MCP 接口给其他 Agent 读取",
+  "keywords": [
+    "ai-agent",
+    "session",
+    "archive",
+    "mcp",
+    "claude-code",
+    "codex",
+    "cursor",
+    "opencode",
+    "timeline"
+  ],
   "license": "MIT",
   "type": "module",
   "bin": {
     "agent-archive": "./src/cli.js",
     "agent-archive-mcp": "./src/mcp.js"
   },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AmonCon/agent-archive.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AmonCon/agent-archive/issues"
+  },
+  "homepage": "https://github.com/AmonCon/agent-archive#readme",
   "scripts": {
     "test": "node --no-warnings --test",
     "start": "node --no-warnings src/cli.js",
@@ -18,6 +42,6 @@
     "mcp": "node --no-warnings src/mcp.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.15.0"
   }
 }

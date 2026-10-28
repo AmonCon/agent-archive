@@ -31,6 +31,11 @@
 
 ## 用法
 
+需要 **Node 22.15 或更高**。理由不是口味：读 `.zst` 压缩会话要用 zlib 的 zstd
+支持（22.15 起），读各家 SQLite 会话库要用 `node:sqlite`（22.5 起）。
+版本不够时入口会直接说清楚缺什么、要升到哪个版本，而不是在某个 scanner 里
+抛一段看不懂的 TypeError——第一个跑起来的用户很可能就在老 Node 上。
+
 ```bash
 # 本机有哪些项目（自动过滤掉家目录、桌面、临时目录）
 node src/cli.js projects
@@ -363,9 +368,43 @@ npm test          # node --no-warnings --test
 
 上游改了格式，这些用例会先红——比用户机器上静默少数据好。
 
-**还缺的**：目前只覆盖 Codex 和注册表。Hermes（`\x00json:` 编码、compaction
-摘要）、DSH（多帧 zstd）、Qoder（新旧两套存储）、Cursor（protobuf）都还没有
-契约测试。按 `test/codex.test.js` 的形状加即可。
+**还缺的**：目前只覆盖 Codex、注册表和跨平台路径。Hermes（`\x00json:` 编码、
+compaction 摘要）、DSH（多帧 zstd）、Qoder（新旧两套存储）、Cursor（protobuf）
+都还没有契约测试。按 `test/codex.test.js` 的形状加即可。
+
+### 跨平台路径也是被测的
+
+这个工具只在 Windows 上真机跑过，macOS / Linux 的路径假设全部来自官方文档和
+源码核对。造不出一台 Mac，但可以让路径解析**接受平台注入**：
+
+```js
+userDataCandidates('Cursor', { platform: 'darwin', home: '/Users/demo', env: {} })
+// → ['/Users/demo/Library/Application Support/Cursor', ...]
+```
+
+于是能在本机断言"在 macOS 上会得到什么候选列表"。`test/platform.test.js` 锁住了
+README 里写的那些反直觉事实，比如 **OpenCode 在 macOS 上也用 `~/.local/share`**
+（它源码没有 darwin 分支）。哪天有人"顺手"给它加个 Application Support 分支，
+测试会红。
+
+这**不替代真机验证**：它验证的是"我们怎么想"，不是"系统怎么表现"。
+真机验证仍然待做——`research/probes/mac-check.mjs` 就是为此准备的。
+
+## 打包与发布
+
+`npm pack` 出来 226 KB / 43 个文件，只含 `src/` 和三个文档：
+
+```json
+"files": ["src/", "README.md", "LICENSE", "NOTICE.md"]
+```
+
+`research/`（含第三方源码副本与调研脚本）和 `test/` 不进包——安装的人不需要
+它们，而 `research/reference-src/` 里有别人的代码，随包分发只会带来许可上的混乱。
+
+`bin` 两个入口都带 shebang，`npx agent-archive` 和全局安装都能直接用。
+
+**许可**：MIT。`research/reference-src/` 下是 MIT 项目的源码副本，版权与许可
+声明在 `NOTICE.md`——这也是它不随 npm 包分发的原因之一。
 
 ## 跟踪上游参照
 
