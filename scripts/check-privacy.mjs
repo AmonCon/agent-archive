@@ -1,37 +1,46 @@
 #!/usr/bin/env node
 /**
- * 隐私检查：这个仓库是公开的，所以「本机标识」和「密钥」一旦进了提交就等于公开。
+ * 隐私检查：仓库是公开的，所以「本机标识」和「密钥」一旦进了提交就等于公开。
  *
- * 为什么需要这个脚本：扫会话的工具本身很容易把开发者的真实环境写进注释和
- * 测试数据——真实项目名、真实局域网地址、真实用户名，都是顺手写下来的。
- * 这些东西不会让任何测试失败，只会安静地留在 git 历史里。
+ * 为什么需要它：写代码的人很容易把真实环境顺手写进注释和测试数据——
+ * 真实项目名、真实局域网地址、真实用户名。这些东西不会让任何测试失败，
+ * 只会安静地留在 git 历史里。
  *
- * 检查范围只有 `git ls-files`：没被跟踪的文件不会公开，不用管。
+ * 查两个地方，缺一不可：
+ *   1. 被跟踪文件的内容（只查 git 跟踪的，没跟踪的不会公开）
+ *   2. 提交的作者与提交者身份——这是最容易漏的一处，文件改得再干净也碰不到它
  *
- * 输出**不能打印命中的原文**。CI 日志在公开仓库里也是公开的，
- * 把密钥打进日志等于换个地方泄露。所以只给文件、行号、规则名和掩码。
+ * 输出**不打印命中的原文**：CI 日志在公开仓库里也是公开的，
+ * 把密钥打进日志等于换个地方泄露。
+ *
+ * 可选文件：
+ *   .privacy-skip   一行一个路径前缀，声明「这些是第三方代码，不查」
+ *   .privacy-deny   一行一个词，本机私有词表（应加入 .gitignore）
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = path.resolve(import.meta.dirname, '..');
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// 文档和测试里必然要有示例，这些是公认的占位符
+// 文档和测试里必然有示例，这些是公认的占位符
 const PLACEHOLDER_USERS = new Set([
   'x', 'X', 'me', 'you', 'user', 'yourname', 'demo', 'a', 'b', 'bob', 'alice',
   'foo', 'bar', 'test', 'someone', 'username', 'name', 'xxx', '...',
 ]);
 
-// 第三方源码副本（research/reference-src）不检查：那是别人上游的代码，
-// 我们既不改也不署名，里面的示例路径属于上游作者，不是本机标识。
-const SKIP_PREFIXES = ['research/reference-src/'];
-
-// 局域网地址本身不算敏感，容易被写进文档的是「某一台具体的机器」
+// 局域网地址本身不敏感，容易写进文档的是「某一台具体的机器」
 const PLACEHOLDER_IPS = new Set([
   '192.168.1.9', '192.168.1.10', '10.0.0.1',
   '192.0.2.1', '198.51.100.1', '203.0.113.1',
 ]);
+
+// 依赖与产物目录：不是我们的代码
+const DEFAULT_SKIP = [
+  'node_modules/', 'vendor/', 'third_party/', 'dist/', 'build/',
+  '.next/', 'target/', 'coverage/', 'public/vendor/',
+];
 
 const RULES = [
   {
@@ -48,10 +57,7 @@ const RULES = [
     id: 'home-path',
     why: '本机用户目录',
     re: /(?:[A-Za-z]:[\\/]+Users[\\/]+([A-Za-z0-9._-]+)|\/(?:Users|home)\/([A-Za-z0-9._-]+))/g,
-    ok: (m) => {
-      const name = m[1] || m[2];
-      return PLACEHOLDER_USERS.has(name);
-    },
+    ok: (m) => PLACEHOLDER_USERS.has(m[1] || m[2]),
   },
   {
     id: 'lan-ip',
@@ -64,40 +70,44 @@ const RULES = [
     why: '机器名',
     re: /\bDESKTOP-[A-Z0-9]{7,}\b/g,
   },
-  {
-    id: 'email',
-    why: '真实邮箱',
-    re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(?:com|cn|net|org|io|dev|me)\b/g,
-    ok: (m) => /@(?:example\.(?:com|org)|test\.|localhost)/.test(m[0]) || /^(?:noreply|no-reply)@/.test(m[0]),
-  },
+  // 刻意**不查文件里的邮箱**。
+  //
+  // 试过，噪声会淹没信号：真实项目里到处是测试夹具——`@example.invalid`、
+  // `@evilgmail.com`、`@gmail.com.attacker.test`——它们恰恰是在测邮箱校验逻辑。
+  // 而真正会漏的那种（作者的真实邮箱）不在文件里，在**提交元数据**里，
+  // 一个提交只有一个身份，信号极高。所以邮箱只在下面查提交身份。
+  //
+  // 如果某个文件确实写了真实地址，把它加进 .privacy-deny。
 ];
 
-// 维护者自己的词表：一行一个，`#` 注释。放在 .privacy-deny 里（已 gitignore），
-// 这样「某个项目名不能公开」这件事本身也不必公开。
-function loadDenyList() {
-  const p = path.join(repoRoot, '.privacy-deny');
+const mask = (s) => (s.length <= 8 ? s[0] + '***' : s.slice(0, 3) + '***' + s.slice(-2) + ` (${s.length} 字符)`);
+
+const readList = (name) => {
+  const p = path.join(repoRoot, name);
   if (!fs.existsSync(p)) return [];
   return fs
     .readFileSync(p, 'utf8')
     .split('\n')
     .map((l) => l.replace(/#.*$/, '').trim())
     .filter(Boolean);
-}
+};
 
-const mask = (s) => (s.length <= 8 ? s[0] + '***' : s.slice(0, 3) + '***' + s.slice(-2) + ` (${s.length} 字符)`);
+const skip = [...DEFAULT_SKIP, ...readList('.privacy-skip')];
+const deny = readList('.privacy-deny');
+
+const git = (args) => execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 28 });
 
 function trackedFiles() {
-  const out = execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8' });
-  return out.split('\0').filter(Boolean);
+  try {
+    return git(['ls-files', '-z']).split('\0').filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
-const findings = [];
-const deny = loadDenyList();
-
 /**
- * 词表里的词有带连字符的，也有带空格的，还可能夹着中文。
- * 纯 ASCII 词按词边界匹配，否则带空格的短词会把 `plugin id` 这类
- * 正常文本也算命中；含中文的词没法用 `\b`（中文没有词边界），退回子串匹配。
+ * 词表里可能夹着中文。纯 ASCII 词按词边界匹配，否则带空格的短词会把
+ * `plugin id` 这类正常文本也算命中；中文没有词边界，退回子串匹配。
  */
 function denyMatcher(word) {
   if (!/^[\x20-\x7e]+$/.test(word)) {
@@ -110,84 +120,65 @@ function denyMatcher(word) {
 }
 
 const denyRules = deny.map((w) => ({ word: w, test: denyMatcher(w) }));
+const findings = [];
 
-for (const rel of trackedFiles()) {
-  if (SKIP_PREFIXES.some((p) => rel.startsWith(p))) continue;
-  const abs = path.join(repoRoot, rel);
+const files = trackedFiles();
+for (const rel of files) {
+  if (skip.some((p) => rel.startsWith(p))) continue;
   let text;
   try {
-    text = fs.readFileSync(abs, 'utf8');
+    text = fs.readFileSync(path.join(repoRoot, rel), 'utf8');
   } catch {
     continue;
   }
-  if (text.includes('\u0000')) continue; // 二进制
+  if (text.includes('\u0000')) continue;
 
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // 行内豁免：识别密钥的代码本身必然包含密钥形状
-    if (line.includes('privacy-ok')) continue;
+    if (line.includes('privacy-ok')) continue; // 行内豁免：识别密钥的代码本身含密钥形状
     for (const rule of RULES) {
       rule.re.lastIndex = 0;
       let m;
       while ((m = rule.re.exec(line))) {
         if (rule.ok && rule.ok(m)) continue;
-        findings.push({ rule: rule.id, why: rule.why, file: rel, line: i + 1, sample: mask(m[0]) });
+        findings.push({ why: rule.why, where: `${rel}:${i + 1}`, sample: mask(m[0]) });
       }
     }
     for (const d of denyRules) {
-      if (d.test(line)) {
-        findings.push({ rule: 'deny', why: '本机词表', file: rel, line: i + 1, sample: d.word[0] + '***' });
-      }
+      if (d.test(line)) findings.push({ why: '本机词表', where: `${rel}:${i + 1}`, sample: d.word[0] + '***' });
     }
   }
 }
 
-/**
- * 提交元数据也要查。
- *
- * 这是漏得最狠的地方：文件内容改起来看得见，而作者邮箱藏在每个提交里，
- * 没人会去点开看。`git log` 一跑就全在——而且它比文件名稳定得多，
- * QQ 号 / 手机号邮箱一旦写进 global config，之后每个仓库、每个提交都带着它。
- *
- * 只允许 GitHub 的 noreply 地址和公认占位符。
- */
-function checkCommitIdentities() {
-  let out;
-  try {
-    out = execFileSync('git', ['log', '--all', '--format=%ae%n%ce'], { cwd: repoRoot, encoding: 'utf8' });
-  } catch {
-    return [];
-  }
-  const bad = new Map();
-  for (const email of out.trim().split('\n')) {
-    const e = email.trim();
-    if (!e) continue;
+// 提交身份：只放行 GitHub 的 noreply 地址和公认占位符
+try {
+  const out = git(['log', '--all', '--format=%ae%n%ce']);
+  const seen = new Map();
+  for (const e of out.split('\n').map((x) => x.trim()).filter(Boolean)) {
     if (/@users\.noreply\.github\.com$/.test(e)) continue;
     if (/@(?:example\.(?:com|org)|localhost|test\.)/.test(e)) continue;
-    bad.set(e, (bad.get(e) || 0) + 1);
+    seen.set(e, (seen.get(e) || 0) + 1);
   }
-  return [...bad.entries()].map(([e, n]) => ({
-    rule: 'commit-email',
-    why: '提交作者邮箱',
-    file: '（提交元数据）',
-    line: n + ' 个提交',
-    sample: e.replace(/^(.{2}).*(@.*)$/, '$1***$2'),
-  }));
+  for (const [e, n] of seen) {
+    findings.push({
+      why: '提交作者邮箱',
+      where: `（提交元数据）${n} 个提交`,
+      sample: e.replace(/^(.{2}).*(@.*)$/, '$1***$2'),
+    });
+  }
+} catch {
+  /* 不是 git 仓库就只能查文件 */
 }
 
-findings.push(...checkCommitIdentities());
-
 if (!findings.length) {
-  console.log('隐私检查通过：' + trackedFiles().length + ' 个被跟踪文件、全部提交的作者身份里没有本机标识或密钥');
+  console.log(`隐私检查通过：${files.length} 个被跟踪文件、全部提交的作者身份里没有本机标识或密钥`);
   process.exit(0);
 }
 
 console.error('隐私检查失败：以下内容会被公开');
 console.error('');
-for (const f of findings) {
-  console.error(`  ${f.file}:${f.line}  [${f.why}]  ${f.sample}`);
-}
+for (const f of findings) console.error(`  ${f.where}  [${f.why}]  ${f.sample}`);
 console.error('');
 console.error('修法：文件里的真实值换成占位符（my-app / 192.168.1.10 / C:\\Users\\me）；');
 console.error('提交邮箱用 GitHub 的 noreply 地址——`git config user.email "<id>+<login>@users.noreply.github.com"`。');
