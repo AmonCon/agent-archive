@@ -46,11 +46,12 @@ const opt = (name, fallback = null) => {
 };
 const has = (name) => args.includes(`--${name}`);
 const usage = () => {
-  console.log(`用法: node research/probes/remote-verify.mjs --host <user@host> [--dry-run] [--keep]
+  console.log(`用法: node research/probes/remote-verify.mjs --host <user@host> [--dry-run] [--keep] [--node-bin DIR]
 
-  --host     远端（macOS/Linux），形如 user@192.168.1.9
-  --dry-run  只打印将要执行的命令，不真的连
-  --keep     跑完保留远端临时目录（默认删掉，方便看现场时用）
+  --host      远端（macOS/Linux），形如 user@192.168.1.9
+  --node-bin  远端没装 Node 时，指向临时解压出来的 bin 目录（只在本次会话生效）
+  --dry-run   只打印将要执行的命令，不真的连
+  --keep      跑完保留远端临时目录（默认删掉，方便看现场时用）
 
 远端需要：Node >= 22.15、能免密 ssh 登录。`);
 };
@@ -69,6 +70,8 @@ const dry = has('dry-run');
 const keep = has('keep');
 const repo = process.cwd();
 const remoteDir = `/tmp/agent-archive-verify-${Date.now()}`;
+// 远端没装 Node 时，可以指向一个临时解压出来的 Node（见 README 的说明）
+const nodeBin = opt('node-bin', null);
 // 默认用一把专门为验证生成的钥匙，免得和日常 key 混在一起
 const identity = opt('identity', path.join(os.homedir(), '.ssh', 'id_ed25519_agentarchive'));
 const sshOpts = [
@@ -93,19 +96,23 @@ function archive() {
 
 /** 远端要跑的脚本。一步失败就停，并把失败点打出来。 */
 function remoteScript() {
+  // 远端可能没装 Node（比如一台干净的 Mac）：允许把临时解压出来的 node bin
+  // 目录塞进 PATH。这不改变系统环境，只在这次 ssh 会话里生效。
+  const pathPrefix = nodeBin ? `export PATH=${JSON.stringify(nodeBin)}:$PATH\n` : '';
   return `
 set -e
-cd /tmp
+${pathPrefix}cd /tmp
 mkdir -p ${remoteDir}
 cd ${remoteDir}
 tar -xf /tmp/aa-verify.tar
 echo "=== 环境 ==="
 node -v
-node -e "const z=require('node:zlib');const s=require('node:sqlite');if(typeof z.zstdDecompressSync!=='function'||typeof s.DatabaseSync!=='function'){console.error('缺 zstd 或 node:sqlite（Node 需要 >= 22.15）');process.exit(1)}console.log('能力自检通过', process.platform)"
+node -e "const z=require('node:zlib');const s=require('node:sqlite');if(typeof z.zstdDecompressSync!=='function'||typeof s.DatabaseSync!=='function'){console.error('缺 zstd 或 node:sqlite（Node 需要 >= 22.15）');process.exit(1)}console.log('能力自检通过', process.platform, process.arch)"
 echo "=== 测试 ==="
 npm test
 echo "=== 打包检查 ==="
-npm pack --dry-run 2>&1 | tail -5
+# macOS 的 BSD tail 不认 \`-5\`，必须写 \`-n 5\`（第一版就踩了）
+npm pack --dry-run 2>&1 | tail -n 5
 `;
 }
 
@@ -161,8 +168,12 @@ try {
 }
 
 // 3) 远端执行
+// 脚本走 **stdin**（bash -s），不当参数传：把带换行的脚本塞进一个 shell 参数
+// 需要跨 cmd → ssh → 远端 shell 三层转义，`\n` 会被 JSON 转义成字面量而
+// 不是换行（第一版就这么失败的，症状是整段脚本被当成一行、什么也没跑）。
 const script = remoteScript();
-const ssh = spawnSync('ssh', sshArgs(`bash -lc ${JSON.stringify(script)}`), {
+const ssh = spawnSync('ssh', sshArgs('bash -s'), {
+  input: script,
   encoding: 'utf8',
   timeout: 600000,
   maxBuffer: 64 * 1024 * 1024,

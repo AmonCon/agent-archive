@@ -821,8 +821,19 @@ async function cmdDoctor(opts) {
   console.log(c(C.dim, `  ${r.files} 个文件 · ${r.total} 场会话${subNote} · 解析失败 ${r.failures} · 重复 id ${r.duplicates} 组`) + keptNote);
   console.log('');
 
-  // 覆盖率三根支柱
-  console.log(c(C.bold, '覆盖率'));
+  // 零会话时不要再报覆盖率。
+  //
+  // 这是在一台干净的 Mac 上发现的：一场会话都没有时，"时间覆盖率 0.0%"
+  // 会被判成 ✗ 并进"待办"，首屏全是红叉——新用户会以为工具坏了。
+  // 零会话不是缺陷，只是"这台机器上还没有我们认识的数据"。这时候该说的是
+  // 下一步能做什么，而不是三条 0% 的进度条。
+  if (!r.total) {
+    console.log(c(C.warn, '  这台机器上还没有找到任何已接入 Agent 的会话。'));
+    console.log(c(C.dim, '  可能还没装，也可能装在下面没适配的位置——先看「存储位置」和「未适配的会话存储」。'));
+    console.log('');
+  } else {
+    // 覆盖率三根支柱
+    console.log(c(C.bold, '覆盖率'));
   const bar = (v) => {
     const n = Math.round(v * 20);
     const filled = '█'.repeat(n) + '░'.repeat(20 - n);
@@ -877,6 +888,7 @@ async function cmdDoctor(opts) {
     )
   );
   console.log('');
+  } // ← if (r.total) 结束
 
   // 子代理归属：子会话被采集之后，唯一会坏的就是"挂不到父会话"
   if (r.subagent.total) {
@@ -978,22 +990,30 @@ async function cmdDoctor(opts) {
 
   // 结论一句话。只有"真的该修"的才进待办——
   // 临时路径和占位标题都是设计如此，不该长期挂着当未完成项。
+  //
+  // 零会话时覆盖率全是 0%，据此算出来的"时间缺失/标题"是假警报：没有数据
+  // 不等于数据坏了。所以这一整段只在有会话时给结论。
   const problems = [];
-  if (r.coverage.time < 0.99) problems.push('时间缺失');
-  if (r.coverage.cleanTitle < 0.9) problems.push('标题');
-  if (r.duplicates) problems.push('重复 id');
+  if (r.total) {
+    if (r.coverage.time < 0.99) problems.push('时间缺失');
+    if (r.coverage.cleanTitle < 0.9) problems.push('标题');
+    if (r.duplicates) problems.push('重复 id');
+  }
   if (missing.length) problems.push(`${missing.length} 个 Agent 未接入`);
 
   if (!problems.length) {
-    console.log(c(C.ok, '采集正常') + c(C.dim, '：所有支持范围内的会话都读到了、读对了。'));
-    if (r.coverage.project < 0.9) {
+    console.log(
+      c(C.ok, r.total ? '采集正常' : '没有可体检的数据') +
+        c(C.dim, r.total ? '：所有支持范围内的会话都读到了、读对了。' : '：先让至少一家 Agent 产生会话，再回来体检。')
+    );
+    if (r.total && r.coverage.project < 0.9) {
       console.log(
         c(C.dim, `  项目覆盖率 ${(r.coverage.project * 100).toFixed(1)}%，差额来自临时工作区（设计如此）。`)
       );
     }
   } else {
     console.log(c(C.when, '待办：') + problems.join('、'));
-    if (r.coverage.project < 0.9) {
+    if (r.total && r.coverage.project < 0.9) {
       console.log(
         c(C.dim, `  项目覆盖率 ${(r.coverage.project * 100).toFixed(1)}%，差额来自临时工作区（设计如此）。`)
       );

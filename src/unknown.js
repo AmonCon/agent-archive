@@ -86,6 +86,15 @@ const SKIP_NAMES = new Set([
 ]);
 
 /**
+ * 系统自带组件的名字前缀。
+ *
+ * 实测在 macOS 上会把 `com.apple.RemoteManagementAgent` 报成"未适配的
+ * 会话存储"——那是苹果自己的远程管理组件，不是 AI Agent。这类 `com.apple.*`
+ * 目录一律跳过：用户不会想看到"你可能有苹果的新 AI 工具"。
+ */
+const SYSTEM_PREFIXES = ['com.apple.'];
+
+/**
  * 扫一遍本机，返回可疑但未适配的会话存储候选。
  *
  * @param {object} opts
@@ -121,6 +130,7 @@ export function scanUnknownStores(opts = {}) {
       const full = path.join(root, e.name);
       if (!isDir(e, full)) continue;
       if (SKIP_NAMES.has(e.name.toLowerCase())) continue;
+      if (SYSTEM_PREFIXES.some((p) => e.name.toLowerCase().startsWith(p))) continue;
       if (isKnown(full, known) || isKnown(full, exclude)) continue;
       // 不要报"某个扫描根的上级"：~/.local 本身不该是候选，
       // 我们要的是它下面具体的应用目录
