@@ -113,6 +113,12 @@ function dbPath() {
   return dbPaths()[0];
 }
 
+/** 声明"我会去哪里找数据"（opencode 数据目录那一层；给 doctor 与反向发现用）。 */
+export function candidateRoots() {
+  // dbPaths() 给的是文件，这里退回它们所在的目录
+  return [...new Set(dbPaths().map((p) => path.dirname(p)))];
+}
+
 export function discover() {
   const out = [];
   for (const p of dbPaths()) {

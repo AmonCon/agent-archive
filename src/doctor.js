@@ -354,21 +354,9 @@ export function detectGaps() {
         { p: homePath('.qoder-cn/cache/projects'), kind: 'dir' },
         { p: homePath('.qoder/projects'), kind: 'dir' },
         { p: homePath('.qoder-cn/projects'), kind: 'dir' },
-        // macOS 上 Qoder 还有一套应用数据目录，扫描器一直在看它
-        // （见 scanners/qoder.js 的 configRoots）。这份清单漏了，导致
-        // 同一屏里既写"已接入：Qoder"、又把这条列成"未适配"——
-        // 2026-10-28 在真 Mac 上撞出来的。
-        //
-        // 只加 darwin：userDataCandidates 在 Windows 上返回 %APPDATA%\<name>，
-        // 而 Qoder 在 Windows 并不看那里。加进来会把这些路径标成"已知"，
-        // 反而遮住真正该报的候选。
-        ...(process.platform === 'darwin'
-          ? [
-              ...appPaths('com.qodercn.app.stable', '').map((p) => ({ p, kind: 'dir' })),
-              ...appPaths('com.qoder.app.stable', '').map((p) => ({ p, kind: 'dir' })),
-            ]
-          : []),
       ],
+      // 这些 paths 只作兜底：实际以 scanners/qoder.js 的 candidateRoots()
+      // 为准（它还含 macOS 的应用数据目录），见下面循环里的说明。
     },
     {
       name: 'DeepSeek Harness',
@@ -403,16 +391,38 @@ export function detectGaps() {
   ];
 
   const known = new Set(scanners.map((s) => s.name));
+  const byName = new Map(scanners.map((s) => [s.name, s]));
   const out = [];
 
   for (const c of candidates) {
+    const scanner = byName.get(c.agent);
+    // 候选路径以**扫描器自己声明的**为准。
+    //
+    // 以前这里维护一份手写清单，扫描器另有一套逻辑，两边会漂：
+    // 真 Mac 上就出现过"已接入：Qoder"与"未适配 Qoder 的目录"同屏，
+    // 原因是扫描器会看 `~/Library/Application Support/com.qodercn.app.stable`，
+    // 而这份清单没写。
+    //
+    // 没接入的（Trae / Windsurf / Cline）没有扫描器，仍用清单里的路径——
+    // 它们的用途只是"确认这里确实有数据、但读不了"。
+    let roots;
+    if (scanner && typeof scanner.candidateRoots === 'function') {
+      try {
+        roots = scanner.candidateRoots().map((p) => ({ p, kind: null }));
+      } catch {
+        roots = c.paths;
+      }
+    } else {
+      roots = c.paths;
+    }
+
     const hits = [];
-    for (const t of c.paths) {
+    for (const t of roots || []) {
       if (!t.p) continue;
       try {
         const st = fs.statSync(t.p);
         const size = st.isDirectory() ? null : st.size;
-        hits.push({ path: t.p, kind: t.kind, size });
+        hits.push({ path: t.p, kind: t.kind || (st.isDirectory() ? 'dir' : 'file'), size });
       } catch {
         /* 不存在 */
       }

@@ -40,6 +40,11 @@ function agentRoot() {
   return path.join(roots[0], 'User', 'globalStorage', 'kiro.kiroagent');
 }
 
+/** 声明"我会去哪里找数据"（Kiro 应用数据目录那一层；给 doctor 与反向发现用）。 */
+export function candidateRoots() {
+  return [...extraRoots(name), ...userDataCandidates('Kiro')];
+}
+
 export function discover() {
   const root = agentRoot();
   const out = [];

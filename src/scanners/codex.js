@@ -83,6 +83,17 @@ function codexDir() {
   return codexDirs()[0];
 }
 
+/**
+ * 声明"我会去哪里找数据"。
+ *
+ * 这是给 doctor 和反向发现用的：两者的"已知范围"必须和扫描器**同一份**，
+ * 否则同一个目录会被扫描器读到、又被反向发现报成"未适配"——
+ * 真 Mac 上就出现过"已接入 Qoder"与"未适配 Qoder"同屏。
+ */
+export function candidateRoots() {
+  return codexDirs();
+}
+
 export function discover() {
   const all = [];
 

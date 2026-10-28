@@ -87,6 +87,11 @@ function conversationsDir(rootDir) {
   return path.join(rootDir, 'conversations');
 }
 
+/** 声明"我会去哪里找数据"（`.gemini` 这一层；给 doctor 与反向发现用）。 */
+export function candidateRoots() {
+  return [geminiDir()];
+}
+
 export function discover() {
   const out = [];
   for (const r of roots()) {

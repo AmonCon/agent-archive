@@ -137,11 +137,23 @@ function sourceOf(id) {
   return `db:${id}`;
 }
 
+/** 声明"我会去哪里找数据"（`.hermes` 这一层；给 doctor 与反向发现用）。 */
+export function candidateRoots() {
+  const home = os.homedir();
+  return [
+    ...extraRoots(name),
+    process.env.HERMES_HOME && String(process.env.HERMES_HOME).trim(),
+    path.join(home, '.hermes'),
+    process.platform === 'win32' && process.env.LOCALAPPDATA
+      ? path.join(process.env.LOCALAPPDATA, 'hermes')
+      : null,
+  ].filter(Boolean);
+}
+
 export function discover() {
   // registry 的缓存键是文件路径，这里用 db 路径本身。
   // 时间/大小从 db 文件与 wal 取，任何一边变了都要重扫。
-  const p = dbPath();
-  try {
+  const p = dbPath();  try {
     fs.accessSync(p, fs.constants.R_OK);
   } catch {
     return [];

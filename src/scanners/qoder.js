@@ -98,10 +98,20 @@ function allRoots() {
   return [...cacheRoots(), ...projectRoots()];
 }
 
+/**
+ * 声明"我会去哪里找数据"（`.qoder` / `.qoder-cn` / mac 的应用数据目录那一层）。
+ *
+ * doctor 和反向发现都消费这个，所以它必须包含**所有**会扫的地方——
+ * 真 Mac 上就是因为 doctor 的清单少了 mac 那两条，出现"已接入 Qoder"
+ * 与"未适配 Qoder 的目录"同屏。
+ */
+export function candidateRoots() {
+  return configRoots();
+}
+
 export function discover() {
   const out = [];
-  const seen = new Set();
-  const add = (file) => {
+  const seen = new Set();  const add = (file) => {
     // 同一个目录可能通过两个候选根都被看到（符号链接、大小写）。
     // 去重规则跟随文件系统，和 platform.js 保持一致——别在这里另写一份。
     const key = pathKey(file);

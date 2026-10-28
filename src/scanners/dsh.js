@@ -155,6 +155,11 @@ function pickSessionFile(dir) {
   return best ? best.file : null;
 }
 
+/** 声明"我会去哪里找数据"（DSH 的数据根那一层；给 doctor 与反向发现用）。 */
+export function candidateRoots() {
+  return dshDirs();
+}
+
 export function discover() {
   const out = [];
   for (const root of dshDirs()) {

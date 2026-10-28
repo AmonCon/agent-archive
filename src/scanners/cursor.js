@@ -54,6 +54,11 @@ function dbPath() {
   return path.join(cursorRoots()[0], 'User', 'globalStorage', 'state.vscdb');
 }
 
+/** 声明"我会去哪里找数据"（Cursor 应用数据目录那一层；给 doctor 与反向发现用）。 */
+export function candidateRoots() {
+  return cursorRoots();
+}
+
 export function discover() {
   const p = dbPath();
   try {

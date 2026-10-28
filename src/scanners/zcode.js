@@ -37,9 +37,13 @@ function dbPath() {
   return path.join(os.homedir(), '.zcode', 'cli', 'db', 'db.sqlite');
 }
 
+/** 声明"我会去哪里找数据"（`.zcode` 这一层；给 doctor 与反向发现用）。 */
+export function candidateRoots() {
+  return [...extraRoots(name), path.join(os.homedir(), '.zcode')];
+}
+
 export function discover() {
-  const p = dbPath();
-  try {
+  const p = dbPath();  try {
     fs.accessSync(p, fs.constants.R_OK);
   } catch {
     return [];

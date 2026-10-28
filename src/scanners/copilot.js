@@ -42,6 +42,11 @@ function workspaceRoot() {
   return path.join(roots[0], 'User', 'workspaceStorage');
 }
 
+/** 声明"我会去哪里找数据"（VS Code 应用数据目录那一层；给 doctor 与反向发现用）。 */
+export function candidateRoots() {
+  return [...extraRoots(name), ...userDataCandidates('Code')];
+}
+
 export function discover() {
   const root = workspaceRoot();
   const out = [];

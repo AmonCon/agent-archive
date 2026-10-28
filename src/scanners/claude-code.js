@@ -53,10 +53,25 @@ function projectDirs() {
   return [...configured, ...overrides, ...defaults];
 }
 
+/**
+ * 声明"我会去哪里找数据"（给 doctor 与反向发现用，见 codex.js 的说明）。
+ *
+ * 这里给的是 `.claude` 这一层的应用根，不是 `projects/` 子目录——
+ * 两处消费者要的都是"这个应用的数据放哪儿"这个粒度。
+ */
+export function candidateRoots() {
+  const home = os.homedir();
+  return [
+    ...extraRoots(name),
+    ...withOverrides(['CLAUDE_CONFIG_DIR'], []),
+    path.join(home, '.claude'),
+    path.join(home, '.config', 'claude'),
+  ];
+}
+
 export function discover() {
   const out = [];
   const seen = new Set();
-
   for (const root of projectDirs()) {
     let dirs;
     try {
