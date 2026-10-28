@@ -39,6 +39,7 @@
     "stats": "node --no-warnings src/cli.js stats",
     "doctor": "node --no-warnings src/cli.js doctor",
     "secrets": "node --no-warnings src/cli.js secrets",
+    "privacy": "node scripts/check-privacy.mjs",
     "mcp": "node --no-warnings src/mcp.js"
   },
   "engines": {

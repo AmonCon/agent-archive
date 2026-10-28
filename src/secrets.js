@@ -65,7 +65,7 @@ const PATTERNS = [
     id: 'private-key',
     label: '私钥文件内容',
     re: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g,
-    mask: () => '-----BEGIN PRIVATE KEY-----（内容未展示）',
+    mask: () => '-----BEGIN PRIVATE KEY-----（内容未展示）', // privacy-ok 这是掩码文本，不是密钥
     severity: 'critical',
   },
   {

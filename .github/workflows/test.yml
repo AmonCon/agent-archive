@@ -53,3 +53,15 @@ jobs:
             echo "打包内容里混进了 research/ 或 test/"
             exit 1
           fi
+
+  privacy:
+    name: 隐私检查
+    # 这是个公开仓库：真实项目名、本机路径、密钥一旦提交就等于公开，
+    # 而它们不会让任何测试失败。所以单独一道门，只查被跟踪的文件。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm run privacy
