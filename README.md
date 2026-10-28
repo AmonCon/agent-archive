@@ -29,6 +29,115 @@
 事实层（扫描、归一、时间线）是确定性的、可复现的、零成本的；
 总结、归纳、蒸馏交给用户自己的模型——通过 MCP，不通过我们的 API Key。
 
+## 它长什么样
+
+一个项目、四场会话、三家 Agent。下面是**真实输出**——用合成数据跑出来的，
+项目名和对话是编的，格式、排序和换手判断都是真的。
+
+```bash
+$ node src/cli.js timeline C:/example/my-app
+C:/example/my-app
+4 个会话 · claude-code / codex / qoder · 2026-03-02 17:12 → 2026-03-05 16:52 · 累计 2.3h
+
+2026-03-02
+  codex        17:12  36min  我的应用里，登录之后刷新页面就掉登录态。帮我看下。
+
+2026-03-03
+  qoder        18:00  31min  登录问题昨天在 Codex 那边修了，但测试环境还是复现。
+
+2026-03-04
+  codex        22:03  38min  购物车在 Safari 上数字不更新，Chrome 正常。
+
+2026-03-05
+  claude-code  16:20  32min  把这三件事的修复写进 CHANGELOG，并补两个回归用例。
+```
+
+`handoff` 把同一批会话压成**接力链**——谁在什么时候接手、中间隔了多久：
+
+```bash
+$ node src/cli.js handoff C:/example/my-app
+4 场会话压成 4 段 · 3 家 Agent · 2026-03-02 17:12 → 2026-03-05 16:52
+
+换手概况
+  3 次接续
+  接续间隔中位数 1.0d
+  最常走的接力线：codex→qoder(1)  qoder→codex(1)  codex→claude-code(1)
+
+codex       → qoder            +1.0d 接续
+    离开: 我的应用里，登录之后刷新页面就掉登录态。帮我看下。
+    接手: 登录问题昨天在 Codex 那边修了，但测试环境还是复现。
+qoder       → codex            +1.1d 接续
+    离开: 登录问题昨天在 Codex 那边修了，但测试环境还是复现。
+    接手: 购物车在 Safari 上数字不更新，Chrome 正常。
+codex       → claude-code     +17.6h 接续
+    离开: 购物车在 Safari 上数字不更新，Chrome 正常。
+    接手: 把这三件事的修复写进 CHANGELOG，并补两个回归用例。
+```
+
+**间隔是重点。** 隔了一天再换手，新 Agent 不会知道前面修过什么——除非你
+手动把上下文粘过去。「接续间隔中位数 1.0d」这个数字，比任何摘要都更能说明
+问题出在哪：你换了工具，但记忆没跟着换。
+
+`handoff` 也会如实区分"并行"（上一段还没结束下一段就开始了，不是真正的交接）
+和"长期中断"（隔了一周以上），不会把两种完全不同的情况混成一个数字。
+
+
+## 当前支持
+
+| Agent | 存储位置 | 备注 |
+|---|---|---|
+| Claude Code | `~/.claude/projects/<项目>/<uuid>.jsonl` | 斜杠命令需过滤 |
+| Codex | `~/.codex/sessions/`、`~/.codex/archived_sessions/` | zstd；续接会话需合并 |
+| ZCode | `~/.zcode/cli/db/db.sqlite` | `semantics.origin` 区分注入 |
+| OpenCode | `~/.local/share/opencode/opencode.db` | 与 ZCode 同源结构 |
+| Qoder | `~/.qoder[-cn]/projects/<工作区>/<uuid>.jsonl`（新）· `cache/projects/...`（旧） | 新格式带时间戳和 cwd；旧格式只能靠 mtime |
+| DeepSeek Harness | `$DSH_HOME/sessions/<cwd>/<session>/session.v<N>.jsonl[.zstd]` | 多帧 zstd；子代理跳过 |
+| Hermes | **`~/.hermes/state.db`**（SQLite） | 多数无 cwd；`sessions/*.jsonl` 已废弃 |
+| Cursor | `%APPDATA%/Cursor/User/globalStorage/state.vscdb` | VSCode 键值库 |
+| Antigravity | `~/.gemini/antigravity/conversation_summaries.db` | 部分会话是加密 .pb |
+| Kiro | `%APPDATA%/Kiro/.../kiro.kiroagent/` | 正文在执行包里 |
+| Copilot Chat | `%APPDATA%/Code/User/workspaceStorage/<hash>/chatSessions/` | 大量空会话 |
+
+**格式差异就是适配成本。** 每家的坑都不一样，都在各自扫描器里写明了：
+
+- **OpenCode** 与 ZCode 同源（session/message/part 三表），但没有
+  `semantics.origin`，只能靠 part 类型过滤。108 场里 57 场是子代理、
+  3 场归档，真实顶层会话 48 场。
+- **Cursor** 消息顺序不在 KV 表里，在
+  `composerData.fullConversationHeadersOnly`——按 key 排序会得到乱序对话。
+  项目路径要从 `workspaceProjectDir`（`c:\...\.cursor\projects\e-my-app`）
+  反解成 `e:/my-app`。
+- **Antigravity** 有三套并存的数据。索引库（FTS5）覆盖 21 场，但只有
+  3 场有明文 `transcript_full.jsonl`，另 18 场是 `.pb`（熵 8.0，
+  gzip/deflate/brotli 全解不开）。**元数据能搜到，正文读不到**——
+  doctor 会如实报 1/3 而不是假装能读。
+- **Kiro** 的会话文件里 assistant 正文全是占位符 `"On it."`，真回复在
+  执行包里（`actions[].output.message`），靠 `executionId` 关联。
+- **Copilot** 的 16 个会话文件里 14 个 `requests` 是空数组，文件存在
+  不代表有对话。
+- **Qoder** 有两套存储。`cache/projects/.../conversation-history/` 是旧格式，
+  没有时间戳也没有 cwd，只能靠文件 mtime 和目录名近似；`projects/<工作区>/<uuid>.jsonl`
+  是现在的主存储，每行带 `timestamp` / `cwd` / `sessionId`，工具调用和结果都在文件里。
+  本机实测新格式 291 场、旧格式只有 19 场——**只读旧格式会漏掉九成以上**。
+  新格式里 `attachment`（技能清单）、`active-leaf`（对话树指针）、
+  `file-history-snapshot`（文件备份）是运行时事件，不是对话内容，读正文时按类型过滤。
+- **DeepSeek Harness** 的会话文件默认是 `.zstd`，而且是**多帧追加**——
+  每批事件单独一帧，不是一个大帧。Node 的 `zstdDecompressSync` 只解第一帧，
+  直接读会得到一行 header 就结束；扫描器按帧魔数切开逐帧解。
+  Windows 桌面版把 `DSH_HOME` 指到 `~/DeepSeekHarness`，不是 `~/.dsh`。
+  子代理也是独立 session 文件（header 带 `parentSession`），和 Codex 子代理一样跳过。
+  正文里 `user/message` / `assistant/message` / `tool/call` / `tool/result` 是对话，
+  `*-chunks` 是流式增量、`request/*` 是请求头，读进来只会重复。
+- **Hermes** 的主存储是 `state.db`（SQLite），**不是 `sessions/*.jsonl`**。
+  这是本项目最大的一次数据修正：早期只扫 jsonl，本机读到 34 场，
+  而库里实际有 219 场（211 场有消息，去掉子代理和空会话后 165 场）。
+  Hermes 官方文档也写明旧版 `*.jsonl` 不再写入或读取。
+  **有 cwd 的只有 46/219**——多数是接飞书渠道的聊天，不绑定目录，
+  但那 46 场必须归到项目，硬编码 `project: null` 会让它们永远进不了时间线。
+
+`sameProject()` 会把"只记项目名"和"记完整路径"的条目并成同一个项目，
+否则 `my-app` 和 `e:/my-app` 会在列表里并排两行。
+
 ## 用法
 
 需要 **Node 22.15 或更高**。理由不是口味：读 `.zst` 压缩会话要用 zlib 的 zstd
@@ -102,6 +211,18 @@ node src/cli.js serve --port 8000
 ```
 
 通用选项：`--json` 输出机器可读结果，`--no-cache` 强制全量重扫。
+
+## 深入：按主题看
+
+上面的用法够日常用了。以下是每个设计决定**为什么这么定**——都是踩过之后写下的，
+按主题分组，可以按需跳读：
+
+- **扫描与合并**：搜索与中文分词 · 续接会话合并 · 子代理会话 · 时间戳 · 符号链接 · 解析失败 · 缓存原子写
+- **接口**：跨 Agent 接力 · 导出 · MCP server · 本地网页查看器 · `cat`
+- **成本与安全**：调用层 `calls` · 凭证扫描 `secrets`
+- **环境层**：MCP / 技能 / 记忆 · 采集体检 `doctor`
+- **跨平台**：三个系统的路径差异 · 为何只有 10 家
+- **扩展**：给别人家的 Agent 写扫描器 · 反向发现没适配的存储 · 设计要点 · 下一步
 
 ## 搜索：为什么需要索引，以及中文怎么切
 
@@ -1143,62 +1264,6 @@ Codex 的 `{command:["powershell.exe","-NoProfile",...]}`、ZCode 的
 `--json` 给其他 Agent 或脚本消费，结构是 `{session, messages}`，
 消息里是 `{role, parts, ts, meta}`，`parts` 保持原顺序——
 说了什么和干了什么是交织的，打乱会读错。
-
-## 当前支持
-
-| Agent | 存储位置 | 备注 |
-|---|---|---|
-| Claude Code | `~/.claude/projects/<项目>/<uuid>.jsonl` | 斜杠命令需过滤 |
-| Codex | `~/.codex/sessions/`、`~/.codex/archived_sessions/` | zstd；续接会话需合并 |
-| ZCode | `~/.zcode/cli/db/db.sqlite` | `semantics.origin` 区分注入 |
-| OpenCode | `~/.local/share/opencode/opencode.db` | 与 ZCode 同源结构 |
-| Qoder | `~/.qoder[-cn]/projects/<工作区>/<uuid>.jsonl`（新）· `cache/projects/...`（旧） | 新格式带时间戳和 cwd；旧格式只能靠 mtime |
-| DeepSeek Harness | `$DSH_HOME/sessions/<cwd>/<session>/session.v<N>.jsonl[.zstd]` | 多帧 zstd；子代理跳过 |
-| Hermes | **`~/.hermes/state.db`**（SQLite） | 多数无 cwd；`sessions/*.jsonl` 已废弃 |
-| Cursor | `%APPDATA%/Cursor/User/globalStorage/state.vscdb` | VSCode 键值库 |
-| Antigravity | `~/.gemini/antigravity/conversation_summaries.db` | 部分会话是加密 .pb |
-| Kiro | `%APPDATA%/Kiro/.../kiro.kiroagent/` | 正文在执行包里 |
-| Copilot Chat | `%APPDATA%/Code/User/workspaceStorage/<hash>/chatSessions/` | 大量空会话 |
-
-**格式差异就是适配成本。** 每家的坑都不一样，都在各自扫描器里写明了：
-
-- **OpenCode** 与 ZCode 同源（session/message/part 三表），但没有
-  `semantics.origin`，只能靠 part 类型过滤。108 场里 57 场是子代理、
-  3 场归档，真实顶层会话 48 场。
-- **Cursor** 消息顺序不在 KV 表里，在
-  `composerData.fullConversationHeadersOnly`——按 key 排序会得到乱序对话。
-  项目路径要从 `workspaceProjectDir`（`c:\...\.cursor\projects\e-my-app`）
-  反解成 `e:/my-app`。
-- **Antigravity** 有三套并存的数据。索引库（FTS5）覆盖 21 场，但只有
-  3 场有明文 `transcript_full.jsonl`，另 18 场是 `.pb`（熵 8.0，
-  gzip/deflate/brotli 全解不开）。**元数据能搜到，正文读不到**——
-  doctor 会如实报 1/3 而不是假装能读。
-- **Kiro** 的会话文件里 assistant 正文全是占位符 `"On it."`，真回复在
-  执行包里（`actions[].output.message`），靠 `executionId` 关联。
-- **Copilot** 的 16 个会话文件里 14 个 `requests` 是空数组，文件存在
-  不代表有对话。
-- **Qoder** 有两套存储。`cache/projects/.../conversation-history/` 是旧格式，
-  没有时间戳也没有 cwd，只能靠文件 mtime 和目录名近似；`projects/<工作区>/<uuid>.jsonl`
-  是现在的主存储，每行带 `timestamp` / `cwd` / `sessionId`，工具调用和结果都在文件里。
-  本机实测新格式 291 场、旧格式只有 19 场——**只读旧格式会漏掉九成以上**。
-  新格式里 `attachment`（技能清单）、`active-leaf`（对话树指针）、
-  `file-history-snapshot`（文件备份）是运行时事件，不是对话内容，读正文时按类型过滤。
-- **DeepSeek Harness** 的会话文件默认是 `.zstd`，而且是**多帧追加**——
-  每批事件单独一帧，不是一个大帧。Node 的 `zstdDecompressSync` 只解第一帧，
-  直接读会得到一行 header 就结束；扫描器按帧魔数切开逐帧解。
-  Windows 桌面版把 `DSH_HOME` 指到 `~/DeepSeekHarness`，不是 `~/.dsh`。
-  子代理也是独立 session 文件（header 带 `parentSession`），和 Codex 子代理一样跳过。
-  正文里 `user/message` / `assistant/message` / `tool/call` / `tool/result` 是对话，
-  `*-chunks` 是流式增量、`request/*` 是请求头，读进来只会重复。
-- **Hermes** 的主存储是 `state.db`（SQLite），**不是 `sessions/*.jsonl`**。
-  这是本项目最大的一次数据修正：早期只扫 jsonl，本机读到 34 场，
-  而库里实际有 219 场（211 场有消息，去掉子代理和空会话后 165 场）。
-  Hermes 官方文档也写明旧版 `*.jsonl` 不再写入或读取。
-  **有 cwd 的只有 46/219**——多数是接飞书渠道的聊天，不绑定目录，
-  但那 46 场必须归到项目，硬编码 `project: null` 会让它们永远进不了时间线。
-
-`sameProject()` 会把"只记项目名"和"记完整路径"的条目并成同一个项目，
-否则 `my-app` 和 `e:/my-app` 会在列表里并排两行。
 
 ## 环境层：`env`——这台机器上各 Agent 会什么
 
