@@ -940,7 +940,21 @@ async function cmdDoctor(opts) {
     }
   }
   if (unused.length) {
-    console.log(c(C.dim, `  · 已接入：${unused.map((g) => g.name).join('、')}`));
+    // "目录存在"和"真的有会话"是两件事：装过 Codex CLI 但没聊过，
+    // ~/.codex 也会在。混成一个"已接入"会让用户以为有数据可看。
+    const hasSessions = new Set((r.agents || []).filter((a) => a.total > 0).map((a) => a.agent));
+    const withData = unused.filter((g) => hasSessions.has(g.agent));
+    const emptyOnly = unused.filter((g) => !hasSessions.has(g.agent));
+
+    if (withData.length) {
+      console.log(c(C.dim, `  · 已接入：${withData.map((g) => g.name).join('、')}`));
+    }
+    if (emptyOnly.length) {
+      console.log(
+        c(C.warn, `  · 有目录但没有会话：${emptyOnly.map((g) => g.name).join('、')}`) +
+          c(C.dim, '（装过，可能没用它聊过）')
+      );
+    }
   }
   const absent = gaps.filter((g) => !g.present);
   if (absent.length) {
