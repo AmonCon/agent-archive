@@ -161,6 +161,28 @@ export function discover() {
         if (!isFileEntry(f, path.join(dir, f.name)) || !uuidFile.test(f.name)) continue;
         add(path.join(dir, f.name));
       }
+
+      // 子代理会话：<工作区>/<会话id>/subagents/agent-*.jsonl
+      //
+      // 主循环只收工作区**顶层**的 UUID 文件，这一层以前整家漏掉——本机实测
+      // 78 个这样的文件，一个都没采到。它们记录的是子代理实际干的活，
+      // 和 Codex/DSH 的子代理是同一类东西：丢掉等于只存一半事实。
+      for (const sd of files) {
+        const sdDir = path.join(dir, sd.name);
+        if (!isDirEntry(sd, sdDir)) continue;
+        const subDir = path.join(sdDir, 'subagents');
+        let subs;
+        try {
+          subs = fs.readdirSync(subDir, { withFileTypes: true });
+        } catch {
+          continue; // 大多数会话目录没有 subagents
+        }
+        for (const f of subs) {
+          const full = path.join(subDir, f.name);
+          if (!isFileEntry(f, full) || !f.name.endsWith('.jsonl')) continue;
+          add(full);
+        }
+      }
     }
   }
 
@@ -190,7 +212,82 @@ export function parse(file) {
     return null;
   }
 
+  // 子代理文件：每一行都带 isSidechain=true 和 agentId。
+  // 必须先判它，否则会被当成普通项目会话——而普通路径会跳过所有
+  // isSidechain 行，结果是一场空会话，什么都读不出来。
+  if (first && first.agentId && first.isSidechain) {
+    return parseSubagentSession(file, lines, first);
+  }
+
   return isProjectFormat(first) ? parseProjectSession(file, lines, first) : parseLegacy(file, lines);
+}
+
+/**
+ * 子代理会话：`<工作区>/<会话id>/subagents/agent-*.jsonl`。
+ *
+ * 与主会话的三个区别：
+ *   1. id 是 `agentId`（自己），不是 `sessionId`（那是父会话）
+ *   2. 没有"人类输入"——它的第一句 user 消息就是派给它的任务，
+ *      所以不能套用主会话那条"没有真人输入就丢弃"的规则
+ *   3. 每一行都是 isSidechain，读正文时不能过滤
+ */
+function parseSubagentSession(file, lines, first) {
+  const parent = first.sessionId ? String(first.sessionId) : null;
+  const id = first.agentId ? String(first.agentId) : path.basename(file, '.jsonl');
+
+  let project = first.cwd || null;
+  let title = null;
+  let fallbackTitle = null;
+  let start = null;
+  let end = null;
+
+  for (const line of lines) {
+    let o;
+    try {
+      o = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!project && o.cwd) project = o.cwd;
+
+    const d = toDate(o.timestamp);
+    if (d) {
+      if (!start || d < start) start = d;
+      if (!end || d > end) end = d;
+    }
+
+    if (o.type === 'ai-title' && o.title) title = o.title;
+    if (!title && o.type === 'user' && o.message) {
+      const t = cleanUserText(extractText(o.message));
+      if (t && !isToolEnvelope(t)) title = t;
+    }
+    if (!fallbackTitle && o.type === 'assistant' && o.message) {
+      fallbackTitle = extractText(o.message.content);
+    }
+  }
+
+  if (!start && !end) {
+    try {
+      const mtime = fs.statSync(file).mtime;
+      start = mtime;
+      end = mtime;
+    } catch {
+      return null;
+    }
+  }
+
+  return makeSession({
+    agent: name,
+    id,
+    project,
+    title: title || fallbackTitle,
+    start,
+    end: end || start,
+    source: file,
+    resume: null,
+    kind: 'subagent',
+    parent,
+  });
 }
 
 /**
@@ -438,7 +535,16 @@ export function readMessages(session) {
     return [];
   }
 
-  return isProjectFormat(first) ? readProjectMessages(lines) : readLegacyMessages(lines);
+  // 子代理会话的每一行都是 isSidechain，读正文时不能过滤掉——
+  // 过滤了就什么都没了。主会话文件里夹带的 sidechain 行仍然要跳过
+  // （那是它派出去的子代理，单独有一场）。
+  const allowSidechain = !!(session && session.kind === 'subagent');
+  if (first && first.agentId && first.isSidechain) {
+    return readProjectMessages(lines, { allowSidechain: true });
+  }
+  return isProjectFormat(first)
+    ? readProjectMessages(lines, { allowSidechain })
+    : readLegacyMessages(lines);
 }
 
 function readLegacyMessages(lines) {
@@ -493,9 +599,10 @@ function readLegacyMessages(lines) {
  * attachment（技能清单）、active-leaf（对话树指针）、file-history-snapshot
  * （文件备份）、runtime-config、progress 都是运行时记录，不是对话内容。
  */
-function readProjectMessages(lines) {
+function readProjectMessages(lines, opts = {}) {
   const out = [];
   const pending = new Map();
+  const allowSidechain = opts.allowSidechain === true;
 
   for (const line of lines) {
     let o;
@@ -504,7 +611,9 @@ function readProjectMessages(lines) {
     } catch {
       continue;
     }
-    if (o.isSidechain) continue;
+    // 主会话里夹带的 sidechain 行属于它派出去的子代理，单独有一场；
+    // 子代理文件本身每一行都是 sidechain，那就不能过滤
+    if (o.isSidechain && !allowSidechain) continue;
 
     const ts = o.timestamp;
 

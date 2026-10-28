@@ -110,7 +110,12 @@ export function parseAll(file) {
   try {
     rows = db
       .prepare(
-        `select composerId, createdAt, isArchived, isSubagent
+        // workspaceId 必须取：下面 buildSession 要用它查
+        // workspaceStorage/<workspaceId>/workspace.json 拿权威项目路径。
+        // 之前漏了这一列，`row.workspaceId` 恒为 undefined，
+        // 于是"权威来源优先"这条规则从未生效过——一直靠目录名反解，
+        // 而反解有损（`Users-a-my-app` 可能是 /Users/a/my-app 或 /Users/a/my/app）。
+        `select composerId, workspaceId, createdAt, isArchived, isSubagent
          from composerHeaders
          where coalesce(isSubagent, 0) = 0`
       )
