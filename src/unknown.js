@@ -419,15 +419,25 @@ function hintOf(c) {
 /**
  * 把 doctor 的已知路径摊平成 Set，供排除用。
  *
- * @param {Array<{paths: Array<{p?: string}>}>} gaps detectGaps() 的输出
- * @param {string} [home] 家目录（用来展开 ~ 写法）
+ * 注意字段名：`detectGaps()` 的输出里是 **`hits`**（只含真实存在的路径），
+ * 不是内部的 `paths`（候选列表）。第一版照着候选写成了 `paths`，
+ * 结果排除清单**一直是空的**——之前之所以看着能用，只是因为
+ * "已发现文件的锚点"那一路碰巧覆盖了大部分。
+ *
+ * 用 hits 也正好合适：不存在的路径不可能成为候选，不需要排除。
+ *
+ * @param {Array<{hits?: Array<{path?: string}>, paths?: Array<{p?: string}>}>} gaps
+ * @param {string} [home]
  */
 export function knownPathsFromGaps(gaps, home = os.homedir()) {
   const out = new Set();
   for (const g of gaps || []) {
+    for (const t of g.hits || []) {
+      if (t && t.path) out.add(String(t.path));
+    }
+    // 兼容内部结构（如果哪天有人传 candidates 进来）
     for (const t of g.paths || []) {
-      if (!t || !t.p) continue;
-      out.add(String(t.p).replace(/^~/, home));
+      if (t && t.p) out.add(String(t.p).replace(/^~/, home));
     }
   }
   return out;

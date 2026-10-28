@@ -22,7 +22,7 @@ import { scanAll, scanners } from './registry.js';
 import { readSessionContent } from './query.js';
 import { projectKey, isProjectPath, isSubagent, mainOnly } from './model.js';
 import { userDataCandidates, dataCandidates, candidatesWith } from './platform.js';
-import { scanUnknownStores, anchorsFromSources } from './unknown.js';
+import { scanUnknownStores, anchorsFromSources, knownPathsFromGaps } from './unknown.js';
 import { stateHome } from './paths.js';
 
 /** 各 Agent 的存储根目录是否存在于本机。 */
@@ -461,12 +461,8 @@ export function detectGaps() {
 export function discoverUnknownStores(opts = {}) {
   try {
     const gaps = detectGaps();
-    const known = new Set();
-    for (const g of gaps) {
-      for (const t of g.paths || []) {
-        if (t && t.p) known.add(t.p);
-      }
-    }
+    // 用 unknown.js 的同一个实现，别在这里抄第二份（第一版两边都读错了字段）
+    const known = knownPathsFromGaps(gaps);
 
     const sessions = opts.sessions || scanAll({}).sessions;
     const sources = sessions.map((s) => s.source).filter(Boolean);
