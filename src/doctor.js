@@ -354,6 +354,20 @@ export function detectGaps() {
         { p: homePath('.qoder-cn/cache/projects'), kind: 'dir' },
         { p: homePath('.qoder/projects'), kind: 'dir' },
         { p: homePath('.qoder-cn/projects'), kind: 'dir' },
+        // macOS 上 Qoder 还有一套应用数据目录，扫描器一直在看它
+        // （见 scanners/qoder.js 的 configRoots）。这份清单漏了，导致
+        // 同一屏里既写"已接入：Qoder"、又把这条列成"未适配"——
+        // 2026-10-28 在真 Mac 上撞出来的。
+        //
+        // 只加 darwin：userDataCandidates 在 Windows 上返回 %APPDATA%\<name>，
+        // 而 Qoder 在 Windows 并不看那里。加进来会把这些路径标成"已知"，
+        // 反而遮住真正该报的候选。
+        ...(process.platform === 'darwin'
+          ? [
+              ...appPaths('com.qodercn.app.stable', '').map((p) => ({ p, kind: 'dir' })),
+              ...appPaths('com.qoder.app.stable', '').map((p) => ({ p, kind: 'dir' })),
+            ]
+          : []),
       ],
     },
     {
