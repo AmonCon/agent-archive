@@ -10,9 +10,10 @@ import { sandbox, withEnv } from './helpers.js';
  * 这里锁的是**在真实存储上验证过的坑**，不是"代码当前怎么写"。每条对应
  * 一种会静默少数据/把时间线弄乱的形状：
  *
- *   1. `.zstd` 是**多帧追加**：每批事件一帧，不是一个大帧。Node 的
- *      zstdDecompressSync 只解第一帧，直接读只会得到一行 header（实机
- *      416KB 的文件只解出 253 字节）。扫描器按帧魔数切开逐帧解。
+ *   1. `.zstd` 是**多帧追加**：每批事件一帧，不是一个大帧。直接整段读会漏内容
+ *      ——Node 24.12 的 zstdDecompressSync 只解第一帧（实机 416KB 的文件只解出
+ *      253 字节）；24.22 起它已经会解全部帧。所以扫描器不依赖某个版本的行为，
+ *      一律按帧魔数切开逐帧解，两种运行时都正确。
  *   2. 数据根不一定是 `~/.dsh`：Windows 桌面版把 DSH_HOME 指到
  *      `~/DeepSeekHarness`。本机就**没有** `~/.dsh`，只写死默认位置会
  *      得到 0 场且不报错。
@@ -113,11 +114,18 @@ test('dsh: .zstd 是多帧追加，后续帧里的事件必须读出来', async 
 
     const file = writeSession(box, { dir: 'session-multi-frame', content: raw });
 
-    // 先证明 fixture 真的有多帧：单帧解压只能看到 header
-    const single = zlib.zstdDecompressSync(raw).toString('utf8');
-    assert.ok(!single.includes('DSH 起的标题'), '前提：Node 自带的单帧解压读不到后续帧');
+    // fixture 真的有多帧。**不要断言"原生解压读不到后续帧"**——
+    // 那是版本相关的运行时行为：Node 24.12 只解第一帧，24.22 已经会解全部帧
+    // （CI 上一跑就红）。测试只锁**我们自己的行为**：不论原生怎么表现，
+    // 扫描器都必须读到后续帧里的内容。
+    const native = zlib.zstdDecompressSync(raw).toString('utf8');
     const multi = scanner.decompressFrames(raw).toString('utf8');
-    assert.ok(multi.length > single.length, '切开逐帧解必须比单帧解出更多内容');
+    assert.ok(multi.includes('DSH 起的标题'), '逐帧解必须读到第二帧里的标题');
+    assert.ok(multi.includes('多帧里的回答'), '逐帧解必须读到第三帧里的回答');
+    assert.ok(
+      multi.length >= native.length,
+      '逐帧解的结果不该比原生解更少（原生在旧版本只解第一帧，逐帧解必须补上其余）'
+    );
 
     await box.run(() => {
       const s = scanner.parse(file);
