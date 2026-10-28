@@ -171,6 +171,42 @@ try {
   /* 不是 git 仓库就只能查文件 */
 }
 
+/**
+ * 提交信息也要查。
+ *
+ * 这一段是补出来的：文件内容和作者身份都挡住了，但**消息正文没人看**——
+ * 而它是公开的，还会被 GitHub 显示在提交列表里。真出过一次：写提交信息时
+ * 打了 `%APPDATA%`，被 cmd 展开成了本机的完整路径，那条消息带着用户名
+ * 被推到了公开仓库上。
+ *
+ * 规则与文件内容一致（含占位符放行），所以 `/Users/alice` 这类示意值不会误报。
+ */
+try {
+  const out = git(['log', '--all', '--format=%h%x01%B%x02']);
+  for (const chunk of out.split('\x02')) {
+    if (!chunk.trim()) continue;
+    const sep = chunk.indexOf('\x01');
+    const short = sep < 0 ? '?' : chunk.slice(0, sep);
+    const msg = sep < 0 ? chunk : chunk.slice(sep + 1);
+    for (const line of msg.split('\n')) {
+      if (line.includes('privacy-ok')) continue;
+      for (const rule of RULES) {
+        rule.re.lastIndex = 0;
+        let m;
+        while ((m = rule.re.exec(line))) {
+          if (rule.ok && rule.ok(m)) continue;
+          findings.push({ why: '提交信息里的' + rule.why, where: short, sample: mask(m[0]) });
+        }
+      }
+      for (const d of denyRules) {
+        if (d.test(line)) findings.push({ why: '提交信息里的本机词表', where: short, sample: d.word[0] + '***' });
+      }
+    }
+  }
+} catch {
+  /* 同上 */
+}
+
 if (!findings.length) {
   console.log(`隐私检查通过：${files.length} 个被跟踪文件、全部提交的作者身份里没有本机标识或密钥`);
   process.exit(0);
