@@ -1,9 +1,14 @@
 name: test
 
 # 这个项目要装到所有人的机器上，所以"在我这台机器上能跑"不算验证。
-# 三个平台 × 两个 Node 版本，每次推送都跑一遍——
+# 每次推送跑 ubuntu + windows 两个平台 × 两个 Node 版本——
 # 其中 22.15.0 是 package.json 里声明的最低版本，等于顺带验证
 # "engines 那句话是不是真的"。
+#
+# macOS 只在手动触发（workflow_dispatch）时跑，原因不是省事：
+# 私有仓库拿不到 macOS runner——实测每个 macOS job 都在排队 901 秒
+# （15 分钟上限）后被取消，一个步骤都没跑过，于是每次推送都是红的。
+# 常年红的门等于没有门。发布前手动点一次，把 macOS 补上。
 on:
   push:
     branches: [main]
@@ -17,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest","windows-latest"]') }}
         node: ['22.15.0', '24']
     steps:
       - uses: actions/checkout@v4
