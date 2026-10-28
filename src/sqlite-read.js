@@ -109,10 +109,10 @@ function copyFor(file, dbStat, walStat) {
   const dbName = path.basename(file);
   const dbPath = path.join(dir, dbName);
   try {
-    fs.copyFileSync(file, dbPath);
+    copyDb(file, dbPath);
     if (walStat && walStat.size > 0) {
       // wal 必须与 db 同名同目录才会被 SQLite 认出来
-      fs.copyFileSync(`${file}-wal`, `${dbPath}-wal`);
+      copyDb(`${file}-wal`, `${dbPath}-wal`);
     }
   } catch {
     safeRm(dir);
@@ -138,6 +138,26 @@ function statOrNull(p) {
     return fs.statSync(p);
   } catch {
     return null;
+  }
+}
+
+/**
+ * 复制一个库文件，尽量用**写时复制**。
+ *
+ * Cursor 的 `state.vscdb` 可能有几个 GB，真复制既慢又占盘。macOS 的 APFS 和
+ * Linux 的 btrfs/XFS 支持 clone（不复制数据块，只共享引用），
+ * `COPYFILE_FICLONE` 会让内核优先走这条路，文件系统不支持时自动退回真复制。
+ *
+ * 这不是可有可无的优化：MAGPIE 为同一件事专门写了 `cursor_clone_darwin.go`
+ * （调 APFS 的 `clonefile`），因为它要快照多 GB 的 Cursor 库。
+ * Node 这个常量是跨平台的等价物，一行就够。
+ */
+function copyDb(from, to) {
+  try {
+    fs.copyFileSync(from, to, fs.constants.COPYFILE_FICLONE);
+  } catch {
+    // 某些文件系统（或旧内核）不认这个 flag，退回普通复制
+    fs.copyFileSync(from, to);
   }
 }
 

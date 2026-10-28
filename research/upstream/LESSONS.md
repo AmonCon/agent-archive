@@ -62,6 +62,50 @@
 
 ---
 
+## macOS 路径交叉核对（2026-10-28，来源：magpie 源码）
+
+我们只在 Windows 真机跑过。既然 magpie 是跨平台的，就逐家拿它的路径规则对照——
+这是目前唯一能在没有 Mac 的情况下验证"我们对 macOS 的假设对不对"的办法。
+
+magpie 的组织方式值得注意：路径函数都接受 `GOOS` 参数（`ZCodeHomeOn(goos, home)`），
+并有同名 `_test.go` 遍历 `darwin`/`windows` 断言结果。这和我们给 `platform.js`
+加平台注入是同一个思路，可以互相印证。
+
+| Agent | magpie 的规则（含源码注释里的实测记录） | 我们的做法 | 结论 |
+|---|---|---|---|
+| Hermes | `$HERMES_HOME`，否则 Windows `%LOCALAPPDATA%\hermes`、其余平台 `~/.hermes` | 同样三条候选 | ✅ 一致 |
+| Claude Code | `$CLAUDE_CONFIG_DIR`，否则 `~/.claude`（三平台相同） | 一致 | ✅ |
+| Qoder | `$QODER_CONFIG_DIR` | 一致 | ✅ |
+| DSH | `$DSH_HOME`，否则 `~/.dsh` | 多探 `~/DeepSeekHarness`（Windows 桌面版默认） | ✅ 超集 |
+| ZCode | **CLI 数据库固定在 Go 的 home**（Windows 是 `USERPROFILE`），**不跟随** `HOME` 覆盖，也不跟随用户改的数据存储路径 | `os.homedir()/.zcode/cli/db/db.sqlite` | ✅ 一致，且**不该"修"** |
+| Cursor | 快照多 GB 库时 macOS 走 APFS `clonefile`，其他平台真复制 | 复制 db+wal（现已改用 `COPYFILE_FICLONE`） | ✅ 已改 |
+| Antigravity | 读 `~/.gemini/antigravity-cli`（CLI 变体，`.system_generated/logs/transcript_full.jsonl`） | 只读 `~/.gemini/antigravity`（桌面版索引库） | ⚠️ **覆盖缺口** |
+
+### 那条"看起来该修、实际不能修"的
+
+ZCode 的注释里有一句实测记录，直接否掉了一个看似合理的改进：
+
+> ZCode 3.14.3 for Windows, run with both, wrote `cli\db\db.sqlite` under
+> USERPROFILE and `v2` under HOME.
+
+也就是说：ZCode 应用本身会在 `$HOME`（用户可能为 Git Bash/MSYS2 设过）下写配置，
+但**它会话数据库永远在 `USERPROFILE\.zcode\cli\db`**。如果照着"应用数据应该在
+HOME 下"的直觉去改，Windows 上反而会读不到。
+
+同样，ZCode 设置里可以改"数据存储路径"（`dataBaseDir`），但那影响的是
+`.zcode/v2` 的配置与登录，不是 CLI 的会话库。
+
+**这两条只有读源码才知道，光看"平台惯例"一定会猜错。**
+
+### 还没解决的
+
+- `~/.gemini/antigravity-cli` 的格式没读过。它和桌面版的 `conversation_summaries.db`
+  是两个位置，可能同时存在。要补的话得先弄清 `transcript_full.jsonl` 的结构。
+- cc-switch 的 session_manager 没有出现 `Application Support` 字样，说明它的
+  macOS 路径可能走另一套抽象（或它只支持固定的几家）。**未核对**。
+
+---
+
 ## 待办（按产品价值排序）
 
 产品要开源给所有人用，标准不是"本机跑通"，而是"别人机器上也能跑通、出错时能

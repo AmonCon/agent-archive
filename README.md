@@ -1277,6 +1277,13 @@ Linux 严格区分（在 Linux 上忽略大小写是个真实的绕过口子）�
 > 解析失败 0、重复 id 0）。**macOS 与 Linux 仍未在真机跑过**——
 > 路径约定已按官方文档和源码核对过，但这个仓库里没有第二台机器可用。
 >
+> **已用上游源码做过一次交叉核对**（magpie 是跨平台的，它的路径函数按 GOOS
+> 参数化并有 darwin/windows 测试）：Hermes、Claude Code、Qoder、DSH、ZCode
+> 五家的 macOS 规则与我们一致，其中 ZCode 的结论值得单独说——它**故意不跟随**
+> `$HOME` 覆盖，会话库始终在 `USERPROFILE\.zcode\cli\db`（上游注释里有
+> ZCode 3.14.3 的实测记录）。详见 `research/upstream/LESSONS.md`。
+> 核对还发现一处覆盖缺口：`~/.gemini/antigravity-cli` 我们没扫。
+>
 > **在 Mac / Linux 上首次使用，跑这一个就够：**
 >
 > ```bash
