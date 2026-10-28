@@ -352,7 +352,6 @@ npm test          # node --no-warnings --test
 "我这台机器能跑"。
 
 ### 用例锁的是踩过的坑，不是当前实现
-
 | 用例 | 锁住的事实 |
 |---|---|
 | 旧版子代理 `session_id` 指向父会话 | `id` 必须是自己，不能拿 `session_id` 当归并键 |
@@ -1500,8 +1499,27 @@ Linux 严格区分（在 Linux 上忽略大小写是个真实的绕过口子）�
   Hermes 源码专门用 `pwd.getpwuid(os.getuid()).pw_dir` 兜底。
 
 > **验证状态**：Windows 上 10 家 Agent 全部实测通过（1131 场会话，
-> 解析失败 0、重复 id 0）。**macOS 与 Linux 仍未在真机跑过**——
-> 路径约定已按官方文档和源码核对过，但这个仓库里没有第二台机器可用。
+> 解析失败 0、重复 id 0）。macOS / Linux 的**代码路径**已核对并纳入 CI：
+> `.github/workflows/test.yml` 在 ubuntu / macOS / Windows 三平台 × Node
+> 22.15 / 24 上跑全部测试（22.15 是 `engines` 声明的最低版本，等于顺带
+> 验证那句话是不是真的）。
+>
+> **有 Mac 或 Linux 机器的话，一条命令就能自己验完：**
+>
+> ```bash
+> git clone https://github.com/AmonCon/agent-archive.git
+> cd agent-archive && npm test     # 零依赖，不需要 npm install
+> ```
+>
+> 90 多个用例、两秒内跑完，全部在临时目录里造假数据，**不读也不改你机器上
+> 任何 Agent 的真实数据**。装机上没装 Agent 也能跑——这正是它们被写成
+> 自造 fixture 的原因。
+>
+> 想连真实数据一起体检（只读），跑：
+>
+> ```bash
+> node research/probes/mac-check.mjs    # 单文件、零依赖，输出一份报告
+> ```
 >
 > **已用上游源码做过一次交叉核对**（magpie 是跨平台的，它的路径函数按 GOOS
 > 参数化并有 darwin/windows 测试）：Hermes、Claude Code、Qoder、DSH、ZCode

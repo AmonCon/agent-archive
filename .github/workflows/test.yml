@@ -1,0 +1,55 @@
+name: test
+
+# 这个项目要装到所有人的机器上，所以"在我这台机器上能跑"不算验证。
+# 三个平台 × 两个 Node 版本，每次推送都跑一遍——
+# 其中 22.15.0 是 package.json 里声明的最低版本，等于顺带验证
+# "engines 那句话是不是真的"。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['22.15.0', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 运行时能力自检
+        # 先确认这台机器上的 Node 真有 zstd 和 node:sqlite，
+        # 免得后面失败时报一个看不出根因的错
+        run: node -e "const z=require('node:zlib');if(typeof z.zstdDecompressSync!=='function'){console.error('缺 zstd');process.exit(1)}if(typeof require('node:sqlite').DatabaseSync!=='function'){console.error('缺 node:sqlite');process.exit(1)}console.log('ok',process.version,process.platform)"
+
+      # 没有 npm 依赖，所以不需要 install —— 也正因为如此，
+      # 这一步在任何平台上都不会因为网络或原生模块编译失败。
+      - name: 单元与契约测试
+        run: npm test
+
+  package:
+    name: 安装包可发布性
+    # 只看一个平台：这里验的是 files 白名单与 bin 入口，跟平台无关
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: npm pack 内容
+        run: |
+          npm pack --dry-run
+          # 包里不该出现别人的源码副本和测试
+          if npm pack --dry-run 2>&1 | grep -q 'reference-src\|^.*test/'; then
+            echo "打包内容里混进了 research/ 或 test/"
+            exit 1
+          fi
