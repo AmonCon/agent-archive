@@ -881,6 +881,16 @@ const isMain = (() => {
   }
 })();
 
-if (isMain) serve();
+if (isMain) {
+  // 用户扫描器要在处理任何请求之前就位（动态 import 是异步的，必须 await）。
+  // 加载失败也不能拦住 MCP 启动——一个坏的用户文件不该让整个 server 起不来。
+  try {
+    const { registerUserScanners } = await import('./scanner-loader.js');
+    await registerUserScanners();
+  } catch {
+    /* 忽略：内置扫描器照常工作 */
+  }
+  serve();
+}
 
 export { TOOLS, dispatch };

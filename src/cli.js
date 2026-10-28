@@ -3,7 +3,8 @@
 // 在过老的 Node 上那一步就直接崩，检查来不及跑。见 boot.js。
 import './boot.js';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionContent } from './query.js';
 import { cacheLocation } from './registry.js';
 import { tildify, durationMs } from './model.js';
@@ -11,6 +12,7 @@ import { buildIndex, search, indexStats, indexPath } from './search.js';
 import { timelineMarkdown, sessionMarkdown, bundleMarkdown } from './export.js';
 import { auditCollection, detectGaps } from './doctor.js';
 import { scanSecrets } from './secrets.js';
+import { registerUserScanners } from './scanner-loader.js';
 const C = {
   reset: '\x1b[0m',
   dim: '\x1b[2m',
@@ -932,6 +934,25 @@ async function cmdDoctor(opts) {
   if (absent.length) {
     console.log(c(C.dim, `  · 本机没有：${absent.map((g) => g.name).join('、')}`));
   }
+
+  // 用户自己写的扫描器：加载成功要看见（否则用户以为没生效），
+  // 加载失败更要看见（否则他会以为是我们不支持他家 Agent）。
+  try {
+    const { listScanners, loadIssues, userScannerDir } = await import('./scanner-loader.js');
+    const mine = listScanners().filter((s) => s.source === 'user');
+    if (mine.length) {
+      console.log(
+        c(C.dim, `  · 用户扫描器 ${mine.length} 个：${mine.map((s) => s.name).join('、')}`)
+      );
+    }
+    if (loadIssues.length) {
+      console.log(c(C.warn, `  · 用户扫描器加载失败 ${loadIssues.length} 个：`));
+      for (const i of loadIssues) console.log(c(C.dim, `     ${i}`));
+      console.log(c(C.dim, `     目录：${userScannerDir()}`));
+    }
+  } catch {
+    /* 辅助信息，读不到不影响体检结论 */
+  }
   console.log('');
 
   // 反向发现：不在已知名单里、但看起来像会话存储的地方。
@@ -947,7 +968,10 @@ async function cmdDoctor(opts) {
       console.log(`  ${c(C.when, '?')} ${u.path.padEnd(44)} ${size.padStart(7)}  ${c(C.dim, u.hint)}`);
     }
     console.log(
-      c(C.dim, '  如果要支持其中某个，把这一行（路径 + 里面有什么）提到 issue 即可。')
+      c(C.dim, '  自己就能接：agent-archive scanner init <名字>  会生成一份可运行的骨架；')
+    );
+    console.log(
+      c(C.dim, '  写完放进同一个目录即生效，不必等我们发版。路径见 agent-archive scanner path')
     );
     console.log('');
   }
@@ -1757,6 +1781,101 @@ function printSkillUsage(r, opts) {
   }
 }
 
+/**
+ * 扫描器管理：列出、看目录、生成骨架、校验。
+ *
+ * 这一组命令是为了让"支持一家新 Agent"不需要改我们的代码——用户自己写一个
+ * 文件放进目录就生效。见 scanner-loader.js 的契约说明。
+ */
+async function cmdScanner(opts) {
+  const { listScanners, userScannerDir, scannerTemplate, validateScanner, loadIssues } = await import(
+    './scanner-loader.js'
+  );
+  const sub = (opts.positionals[0] || 'list').toLowerCase();
+
+  if (sub === 'list') {
+    const all = listScanners();
+    if (opts.json) {
+      console.log(JSON.stringify({ dir: userScannerDir(), scanners: all, issues: loadIssues }, null, 2));
+      return;
+    }
+    console.log(c(C.bold, '扫描器'));
+    for (const s of all) {
+      const tag = s.source === 'user' ? c(C.when, '用户') : c(C.dim, '内置');
+      const body = s.canReadBody ? '' : c(C.dim, '（只能列清单，读不了正文）');
+      console.log(`  ${tag} ${c(C.agent, s.name.padEnd(14))} ${c(C.dim, s.file || '')} ${body}`);
+    }
+    console.log('');
+    console.log(c(C.dim, `用户扫描器目录：${userScannerDir()}`));
+    if (loadIssues.length) {
+      console.log(c(C.warn, `  ${loadIssues.length} 个文件没加载成功：`));
+      for (const i of loadIssues) console.log(c(C.dim, `     ${i}`));
+    }
+    return;
+  }
+
+  if (sub === 'path') {
+    console.log(userScannerDir());
+    return;
+  }
+
+  if (sub === 'init') {
+    const name = (opts.positionals[1] || 'myagent').toLowerCase();
+    const dir = userScannerDir();
+    const file = path.join(dir, `${name}.js`);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      if (fs.existsSync(file)) {
+        console.error(`已经存在：${file}`);
+        process.exit(2);
+      }
+      fs.writeFileSync(file, scannerTemplate(name), 'utf8');
+      console.log(`已生成 ${file}`);
+      console.log(c(C.dim, '改里面的 discover() 和 parse()，下次运行就会生效。'));
+      console.log(c(C.dim, '检查契约：agent-archive scanner check ' + file));
+    } catch (e) {
+      console.error(`写不了 ${file}：${e.message}`);
+      process.exit(2);
+    }
+    return;
+  }
+
+  if (sub === 'check') {
+    const target = opts.positionals[1];
+    if (!target) {
+      console.error('用法：agent-archive scanner check <文件>');
+      process.exit(2);
+    }
+    const abs = path.resolve(target);
+    try {
+      const mod = await import(pathToFileURL(abs).href);
+      // 排除**正在校验的这个文件自己**：CLI 启动时已经把用户扫描器加载进来了，
+      // 拿全量名单去比会把它自己算成重名（第一次写这功能时就踩了）。
+      const self = path.basename(abs);
+      const taken = new Set(
+        listScanners()
+          .filter((s) => s.file !== self)
+          .map((s) => s.name)
+      );
+      const r = validateScanner(mod, taken);
+      if (r.ok) {
+        console.log(`✓ ${path.basename(abs)} 契约合格（name=${mod.name}）`);
+      } else {
+        console.error(`✗ ${path.basename(abs)} 不合格：`);
+        for (const e of r.errors) console.error(`   ${e}`);
+        process.exit(1);
+      }
+    } catch (e) {
+      console.error(`✗ 加载失败：${e && e.message ? e.message : e}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  console.error(`未知子命令：${sub}（可用 list / path / init / check）`);
+  process.exit(2);
+}
+
 async function cmdStats(opts) {
   const { projects, stats, totalSessions, subagentSessions } = listProjects({
     noCache: opts.noCache,
@@ -2015,6 +2134,11 @@ async function main() {
     return;
   }
 
+  // 用户自己写的扫描器要在任何扫描之前注册好。
+  // 放在这里而不是 registry 里：动态 import 是异步的，而 scanAll 是同步的，
+  // 让扫描入口保持同步比把整条链路改成 async 划算得多。
+  await registerUserScanners();
+
   const opts = parseArgs(rest);
   const first = opts.positionals[0];
 
@@ -2032,6 +2156,9 @@ async function main() {
       return cmdAgents(first, opts);
     case 'stats':
       return cmdStats(opts);
+    case 'scanner':
+    case 'scanners':
+      return cmdScanner(opts);
     case 'doctor':
     case 'check':
       return cmdDoctor(opts);

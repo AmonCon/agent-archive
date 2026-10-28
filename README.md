@@ -460,6 +460,57 @@ README 里写的那些反直觉事实，比如 **OpenCode 在 macOS 上也用 `~
 走整读、SQLite 走每会话指纹）——magpie 就是这么分的，见
 `research/upstream/LESSONS.md`。
 
+## 扩展：给别人家的 Agent 写一个扫描器
+
+内置的十一家是"我们碰巧知道"的。世界上的 Agent 远不止这些，而且新的一家随时
+会出现。**支持某家不该需要改我们的代码、提 PR、等发版。**
+
+所以扫描器是开放的：
+
+```bash
+agent-archive scanner init myagent     # 生成一份能跑通的骨架
+agent-archive scanner path             # 看目录（默认 ~/.agent-archive/scanners）
+agent-archive scanner check <文件>      # 校验契约
+agent-archive scanner list             # 看哪些生效了、哪些加载失败
+```
+
+把文件放进那个目录，下次运行就生效。
+
+### 契约
+
+```js
+export const name = 'xxx';                 // 必需，唯一标识
+export function discover() {}              // 必需，返回文件路径数组
+export function parse(file) {}             // 二选一：一个文件一场会话，返回会话或 null
+export function parseAll(file) {}          // 二选一：一个文件多场会话，返回数组
+export function readMessages(session) {}   // 可选，读正文（不写就只进清单）
+export function extraFiles(file) {}        // 可选，参与缓存指纹的附属文件（如 -wal）
+export function enrich(sessions) {}        // 可选，用旁路数据修正元数据
+export function closeStore() {}            // 可选，用完关句柄
+```
+
+会话对象用 `model.js` 的 `makeSession()` 造，字段是
+`{agent, id, project, title, start, end, source, resume, kind, parent}`。
+子代理会话标 `kind: 'subagent'` 并填 `parent`，时间线会自动把它们挂在父会话下。
+
+### 三条边界
+
+**一、一个坏文件不能拖垮整次扫描。** 加载失败、契约不合格、`discover()` 抛错，
+都只影响它自己：其余扫描器和内置的照常工作，`doctor` 与 `scanner list` 会把
+失败原因列出来。开放扩展必须付这个代价——别人的代码跑在我们的进程里，
+至少要保证隔离在**文件**级别。
+
+**二、不能与内置重名。** 重名会让人分不清是哪份在跑，直接拒绝加载。
+
+**三、它是代码，不是配置。** 用户扫描器在本进程里执行，能读写任何东西。
+README 不假装它是沙箱——只该放自己信任的文件。
+
+### 和「反向发现」是同一个闭环
+
+`doctor` 会列出"看起来像会话存储、但我们读不懂"的目录。看到这些之后有两条路：
+提到 issue 等我们支持，**或者自己花二十分钟写一个扫描器**。后者不需要等任何人
+——这也是这个项目愿意开放扫描器的原因。
+
 ## 反向发现：这台机器上还有什么我读不懂
 
 这是"给所有人用"最直接的一条。

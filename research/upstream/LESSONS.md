@@ -129,17 +129,17 @@ Qoder / Cursor / 注册表 / 跨平台路径 / 反向发现），以及未知 Ag
 
 剩下的：
 
-1. **契约式测试**（cc-switch + AutoSwarm 都指向它）
-   我们有 11 个 scanner 解析别人家的格式，零测试。`research/probes/` 那 48 个
-   脚本依赖本机真实数据，只能算人工验收，换台机器就失效。
-   做法：每家一份脱敏 fixture + 期望输出 + 不变量断言（含"不该发生什么"），
-   用 Node 内置 `node --test`，零依赖。
-   漂移样本要覆盖：Codex 三代父 id 写法、导入会话的导入时间戳、DSH 多帧 zstd、
-   Qoder 新旧两套存储、只有 WAL 没有主库。
+1. ~~契约式测试~~ **已完成（2026-10-28）**：86 个用例 / 1.3 秒 / 零跳过，
+   覆盖 Codex / Hermes / DSH / Qoder / Cursor / 注册表 / 跨平台路径 /
+   反向发现 / 调用层口径 / 用户扫描器。漂移样本含 Codex 三代父 id、
+   导入会话时间戳、DSH 多帧 zstd、Cursor 权威路径。
 
-2. **版本号自动发现**（本机 `state_5.sqlite` / `memories_1.sqlite` 都是写死的）
-   上游升版会把 5 改成 6。写死的结果是"这个 Agent 突然没有会话"，而不是报错。
-   必须按 `state_*.sqlite` 取最高版本，并在读不到时明确降级。
+2. ~~版本号自动发现~~ **已完成**：`sqlite-read.findVersionedDb()` 按前缀取最高版本。
+
+3. **扫描器开放扩展** **已完成**：`scanner-loader.js` +
+   `scanner init/path/check/list`。支持一家新 Agent 不再需要改我们的代码。
+   这是"通用产品"最实质的一条——见 README 的扩展章节。
+
 
 3. **Hermes 内容保真**（magpie 已解决）
    解码 `\x00json:` 前缀、过滤 `display_metadata.model_only`、按显示身份去重。
