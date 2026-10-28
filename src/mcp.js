@@ -9,6 +9,7 @@ import { timelineMarkdown } from './export.js';
 import { latestProjectDigest, latestSessionSummary } from './digest.js';
 import { deriveStats } from './derive.js';
 import { durationMs, tildify } from './model.js';
+import { discoverUnknownStores } from './doctor.js';
 
 /**
  * MCP server（stdio 传输）。
@@ -384,11 +385,27 @@ const TOOLS = [
         .filter((g) => g.kind === 'project_digest')
         .reduce((n, g) => n + g.count, 0);
 
+      // byAgent 必须和 sessions 同口径。stats.byAgent 来自扫描器，是**含子代理**
+      // 的总数；直接给出去会和上面的 sessions（主会话）对不上，调用方会以为
+      // 数字算错了——这种"两个数字都真、但放在一起就误导"的情况要避免。
+      const { scanCached } = await import('./registry.js');
+      const mainByAgent = {};
+      let subagentSessions = 0;
+      for (const s of scanCached({}).sessions) {
+        if (s.kind === 'subagent') {
+          subagentSessions++;
+          continue;
+        }
+        mainByAgent[s.agent] = (mainByAgent[s.agent] || 0) + 1;
+      }
+
       return {
         sessions: totalSessions,
+        subagentSessions,
         files: stats.files,
         projects: projects.length,
-        byAgent: stats.byAgent,
+        byAgent: mainByAgent,
+        byAgentWithSubagents: stats.byAgent,
         withoutProject: unbound ? unbound.count : 0,
         index: idx.exists
           ? {
@@ -404,6 +421,22 @@ const TOOLS = [
           projectDigests: digestCount,
           models: [...new Set(der.groups.map((g) => g.model))],
         },
+        // 这台机器上"看起来像会话存储、但我们没适配"的地方。
+        // 只在有候选时返回，且**不给结论**——它只能说明"看到什么"。
+        // 用途：别的 Agent 发现用户装了新工具时，能提醒一句而不是沉默。
+        unknownStores: (() => {
+          try {
+            const list = discoverUnknownStores();
+            if (!list.length) return undefined;
+            return list.slice(0, 5).map((u) => ({
+              path: u.path,
+              megabytes: +(u.bytes / 1e6).toFixed(1),
+              hint: u.hint,
+            }));
+          } catch {
+            return undefined;
+          }
+        })(),
       };
     },
   },

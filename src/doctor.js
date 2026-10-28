@@ -22,6 +22,8 @@ import { scanAll, scanners } from './registry.js';
 import { readSessionContent } from './query.js';
 import { projectKey, isProjectPath, isSubagent, mainOnly } from './model.js';
 import { userDataCandidates, dataCandidates, candidatesWith } from './platform.js';
+import { scanUnknownStores, anchorsFromSources } from './unknown.js';
+import { stateHome } from './paths.js';
 
 /** 各 Agent 的存储根目录是否存在于本机。 */
 export function detectAgents() {
@@ -414,6 +416,56 @@ export function detectGaps() {
   }
 
   return out;
+}
+
+/**
+ * 反向发现：这台机器上有没有"像会话存储、但我们读不懂"的地方。
+ *
+ * ## 它解决的是产品问题，不是技术问题
+ *
+ * 用户装的 Agent 里一定有几个我们没听说过。原来的行为是**什么都不说**——
+ * 列表里没有，doctor 也不提，用户会以为"这工具不支持我的 Agent"，然后卸载。
+ * 我们自己也不知道该补哪一家。
+ *
+ * 这里从数据形状反推：扫常见位置，找含 sessions 类子目录或会话形态文件、
+ * 但不在已知根目录下的地方，列出来让人判断。
+ *
+ * ## 排除逻辑
+ *
+ * 已知范围由两部分组成，缺一不可：
+ *   1. `detectGaps()` 列的数据文件路径（我们自己写的适配清单）
+ *   2. **从已发现会话反推的应用锚点**——见 unknown.js 的 anchorsFromSources。
+ *      少了这一步，`AppData/Roaming/Cursor`、`QoderCN` 这些已适配应用
+ *      会被当成"未适配"报出来（本机实测过一次）。
+ *
+ * 另外排除本工具自己的状态目录，否则 `.agent-archive` 会把自己报成候选。
+ *
+ * @param {object} [opts]
+ * @param {Array}  [opts.sessions] 已扫描的会话（用来推锚点）；不传就现扫一次
+ * @returns {Array} 候选列表，可能为空
+ */
+export function discoverUnknownStores(opts = {}) {
+  try {
+    const gaps = detectGaps();
+    const known = new Set();
+    for (const g of gaps) {
+      for (const t of g.paths || []) {
+        if (t && t.p) known.add(t.p);
+      }
+    }
+
+    const sessions = opts.sessions || scanAll({}).sessions;
+    const sources = sessions.map((s) => s.source).filter(Boolean);
+    for (const a of anchorsFromSources(sources)) known.add(a);
+
+    return scanUnknownStores({
+      knownPaths: known,
+      exclude: new Set([stateHome()]),
+    });
+  } catch {
+    // 反向发现是锦上添花，坏了不能影响体检结论
+    return [];
+  }
 }
 
 export { projectKey };

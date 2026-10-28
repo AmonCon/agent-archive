@@ -796,9 +796,13 @@ async function cmdExport(target, opts) {
 async function cmdDoctor(opts) {
   const gaps = detectGaps();
   const r = await auditCollection({ noCache: opts.noCache });
+  // 反向发现的候选：本机有没有"像会话存储但我们读不懂"的地方。
+  // 它单独跑（要扫家目录），所以放在体检之后，失败也不影响上面的结论。
+  const { discoverUnknownStores } = await import('./doctor.js');
+  const unknown = discoverUnknownStores();
 
   if (opts.json) {
-    console.log(JSON.stringify({ ...r, gaps }, null, 2));
+    console.log(JSON.stringify({ ...r, gaps, unknown }, null, 2));
     return;
   }
 
@@ -929,6 +933,24 @@ async function cmdDoctor(opts) {
     console.log(c(C.dim, `  · 本机没有：${absent.map((g) => g.name).join('、')}`));
   }
   console.log('');
+
+  // 反向发现：不在已知名单里、但看起来像会话存储的地方。
+  // 这是给"装了别家 Agent"的用户看的——不说的话他会以为工具不支持他。
+  if (unknown && unknown.length) {
+    console.log(c(C.bold, '未适配的会话存储（启发式猜测）'));
+    console.log(
+      c(C.dim, '  这些目录不在已接入范围内，但内容看起来像会话记录。')
+    );
+    console.log(c(C.dim, '  只是"看到什么"，不下结论——是不是、要不要支持，需要人判断。'));
+    for (const u of unknown) {
+      const size = u.bytes >= 1048576 ? `${(u.bytes / 1048576).toFixed(1)}MB` : `${Math.round(u.bytes / 1024)}KB`;
+      console.log(`  ${c(C.when, '?')} ${u.path.padEnd(44)} ${size.padStart(7)}  ${c(C.dim, u.hint)}`);
+    }
+    console.log(
+      c(C.dim, '  如果要支持其中某个，把这一行（路径 + 里面有什么）提到 issue 即可。')
+    );
+    console.log('');
+  }
 
   // 结论一句话。只有"真的该修"的才进待办——
   // 临时路径和占位标题都是设计如此，不该长期挂着当未完成项。
