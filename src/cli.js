@@ -191,7 +191,7 @@ async function cmdTimeline(target, opts) {
 
   const { summary, sessions } = r;
   if (!sessions.length) {
-    console.log(`项目 ${abs} 下没有找到会话。`);
+    console.log(`项目 ${target} 下没有找到会话。`);
     console.log(c(C.dim, `（扫描了 ${r.stats.files} 个文件，${r.orphanCount} 个会话未识别出项目路径）`));
     return;
   }
