@@ -10,6 +10,7 @@
     "agent-archive-mcp": "./src/mcp.js"
   },
   "scripts": {
+    "test": "node --no-warnings --test",
     "start": "node --no-warnings src/cli.js",
     "stats": "node --no-warnings src/cli.js stats",
     "doctor": "node --no-warnings src/cli.js doctor",

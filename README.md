@@ -325,6 +325,71 @@ state_5.sqlite 也算进每个 rollout 的指纹，Codex 每写一次状态库�
 
 enrich 自己的读取按 `(size, mtime)` 在进程内记忆，所以重算很便宜。
 
+## 测试
+
+```bash
+npm test          # node --no-warnings --test
+```
+
+14 个用例，1.3 秒。零依赖——用 Node 内置的 `node:test`。
+
+### 测试不依赖这台机器
+
+这是最关键的一条设计。**每个用例自己在临时目录里造一份假机器**：
+
+`os.homedir()` 在运行时跟随 `USERPROFILE`（Windows）/ `HOME`（POSIX），所以
+把家目录指到临时目录之后，**所有扫描器自然只看得到用例造的数据**——不需要给
+每一家单独做环境变量覆盖，也不可能碰到跑测试那台机器上的真实会话。
+
+这件事对开源产品是必须的：真实数据有 2400 多个文件、几个几百 MB 的库，
+全扫一遍要一分多钟；换成空家目录是毫秒级。更重要的是，**别人的机器上路径、
+版本、格式都和我们不一样**，测试如果依赖开发者的家目录，那它只证明了
+"我这台机器能跑"。
+
+### 用例锁的是踩过的坑，不是当前实现
+
+| 用例 | 锁住的事实 |
+|---|---|
+| 旧版子代理 `session_id` 指向父会话 | `id` 必须是自己，不能拿 `session_id` 当归并键 |
+| 新版父 id 在 `parent_thread_id` | 只认旧写法会漏 41 场 |
+| guardian 没有父 id | 如实留 `null`，不推测填一个假值 |
+| 导入会话 | 用 `payload.started_at`/`completed_at`，不用导入时刻 |
+| 明文长文件 | 尾部读取能拿到真实结束时间 |
+| 旁路表 | 用 `state_9.sqlite` 而不是 `state_5`，证明没有写死版本号 |
+| 真实用户第一句 | 不被应用标题覆盖 |
+| 解析失败 | 会话保留、计数正确、下一轮重试、修好后恢复 |
+| 缓存 | 原子写、不留临时文件、损坏不崩 |
+| 空结果 | 不算解析失败（否则本机凭空报 15 个假警报） |
+
+上游改了格式，这些用例会先红——比用户机器上静默少数据好。
+
+**还缺的**：目前只覆盖 Codex 和注册表。Hermes（`\x00json:` 编码、compaction
+摘要）、DSH（多帧 zstd）、Qoder（新旧两套存储）、Cursor（protobuf）都还没有
+契约测试。按 `test/codex.test.js` 的形状加即可。
+
+## 跟踪上游参照
+
+我们借鉴的三个项目（MAGPIE、cc-switch、AutoSwarm）都在持续演进，MAGPIE 几乎
+每天有提交。靠"重新通读一遍"来跟会失控，而且每次重读都会重新推导同样的结论。
+
+所以把它们当成**长期订阅源**：
+
+```bash
+node research/upstream/refresh.mjs            # 只看有没有新提交
+node research/upstream/refresh.mjs --diff     # 拉新版本，只列我们关注范围内的改动
+node research/upstream/refresh.mjs --update   # 读完确认，把 pin 推进到最新
+```
+
+- `research/upstream/sources.json` 记住"我们读到哪一版"（commit）
+- `research/upstream/LESSONS.md` 是判断台账：每条写清**已采用 / pending /
+  不适用 / 已否决**，以及落到了哪个文件
+
+于是"继续研究"变成一次几分钟的 diff 复核。上次跑的时候它立刻发现 AutoSwarm
+在我们读完后又有了新提交——这正是这种机制要解决的问题。
+
+本地镜像放在 `~/.agent-archive/upstream-cache/<id>`，不进仓库：仓库里只保留
+"读到哪一版"和"学到了什么"，不复制别人的源码。
+
 ## 符号链接与 junction：一整家会话可能被静默漏掉
 
 `fs.readdirSync(dir, { withFileTypes: true })` 返回的 Dirent，对符号链接和

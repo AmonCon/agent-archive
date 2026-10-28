@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { findVersionedDb } from '../sqlite-read.js';
 
 /**
  * 识别目标。
@@ -116,7 +117,10 @@ const DB_TARGETS = [
   {
     agent: 'codex',
     kind: 'memory',
-    path: () => path.join(os.homedir(), '.codex', 'memories_1.sqlite'),
+    // 文件名带 schema 版本（memories_1.sqlite），上游升版会改数字。
+    // 写死会在用户升级后静默少报一份记忆——按前缀取最高版本，见 fsentry 之外
+    // 的说明在 sqlite-read.js 的 findVersionedDb()。
+    path: () => findVersionedDb(path.join(os.homedir(), '.codex'), 'memories'),
     scope: 'global',
     // 这张表才是真正的记忆实体（155 行 rollout 摘要）
     entries: { table: 'stage1_outputs', label: '会话记忆条目' },

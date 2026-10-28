@@ -164,4 +164,46 @@ export function copyCount() {
   return copies.size;
 }
 
+/**
+ * 找出一个**带版本号的** SQLite 库，取版本最高的那个。
+ *
+ * ## 为什么不能写死文件名
+ *
+ * 这类应用库的名字里带 schema 版本，升级时会把 `state_5.sqlite` 改成
+ * `state_6.sqlite`（Codex 就是这么做的，cc-switch 的源码注释里也承认
+ * "每次 bump 版本号就改这一处"——那是它自己的维护负担）。
+ *
+ * 对我们更糟：写死等于**在用户升级后静默少掉一部分能力**。本机写死
+ * `state_5.sqlite` 时，读不到只表现为"标题和结束时间又变回粗的"，不报错。
+ *
+ * 所以要按前缀扫描、取数字最大的那个；同时接受无版本号的写法
+ * （`memories.sqlite`），因为它可能是某些版本或某些移植版的形态。
+ *
+ * @param {string} dir 目录
+ * @param {string} base 不带扩展名的前缀，如 'state'、'memories'
+ * @returns {string|null} 找到的完整路径
+ */
+export function findVersionedDb(dir, base) {
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return null;
+  }
+  // state.sqlite / state_5.sqlite / state_12.sqlite，排除 -wal/-shm
+  const re = new RegExp(`^${escapeRe(base)}(?:_(\\d+))?\\.sqlite$`, 'i');
+  let best = null;
+  for (const n of names) {
+    const m = n.match(re);
+    if (!m) continue;
+    const ver = m[1] ? Number(m[1]) : 0;
+    if (!best || ver > best.ver) best = { ver, file: path.join(dir, n) };
+  }
+  return best ? best.file : null;
+}
+
+function escapeRe(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export { crypto };

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import zlib from 'node:zlib';
-import { openReadOnly } from '../sqlite-read.js';
+import { openReadOnly, findVersionedDb } from '../sqlite-read.js';
 import { isDirEntry, isFileEntry } from '../fsentry.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
@@ -612,7 +612,12 @@ function unwrapOutput(raw) {
 }
 
 /**
- * 读 Codex 自己的线程索引（state_5.sqlite 的 threads 表）。
+ * 读 Codex 自己的线程索引（`state_<版本>.sqlite` 的 threads 表）。
+ *
+ * 表名带版本号：Codex 升级会把 `state_5.sqlite` 改成 `state_6.sqlite`，
+ * 写死文件名会让用户升级后**静默**失去"正确结束时间 + 应用标题"这两项，
+ * 只表现为精度变粗、不报错。所以按前缀扫目录取最高版本（见
+ * `sqlite-read.findVersionedDb`）。
  *
  * 这张表是 Codex 应用自己维护的：每个线程一行，带 `updated_at`（最后活动）、
  * `title`（应用生成或用户改名）、`tokens_used`、`cwd`、`rollout_path`。
@@ -632,7 +637,8 @@ function unwrapOutput(raw) {
 let threadIndexMemo = null;
 
 function threadIndex() {
-  const dbPath = path.join(codexDir(), 'state_5.sqlite');
+  const dbPath = findVersionedDb(codexDir(), 'state');
+  if (!dbPath) return null;
   let stamp;
   try {
     const st = fs.statSync(dbPath);

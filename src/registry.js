@@ -277,21 +277,26 @@ function sameStatOnly(a, b) {
  *      绝大多数真实变化都死在这里。
  *   2. stat 相同 → 才去算文件头哈希并比对。只有"看起来没变"的文件才付这笔钱。
  *
- * 反过来（每次都先算头哈希）会把扫描时间翻倍，而收益完全一样。
- *
  * 长驻进程（serve / mcp）不该直接调这个，用 `scanCached()`。
  *
  * @param {object} opts
  * @param {boolean} opts.noCache 忽略磁盘缓存，全量重解析
+ * @param {string[]} [opts.only] 只扫这些 Agent（按 scanner 的 name）；
+ *   给测试用，也给"只想看某一家的采集情况"这种排查场景用
  * @returns {{sessions: Array, stats: object}}
  */
-export function scanAll({ noCache = false } = {}) {
+export function scanAll({ noCache = false, only = null } = {}) {
   const cache = noCache ? {} : loadCache();
-  const nextCache = {};
+  const wanted = only && only.length ? new Set(only) : null;
+  // 只扫一部分时，必须**保留**其余 Agent 的缓存条目。
+  // 否则保存时会把整份缓存覆盖成子集，下一次全量扫描等于全部重解析
+  // （本机实测 50 秒），而且用户完全看不出发生了什么。
+  const nextCache = wanted ? { ...cache } : {};
   const sessions = [];
   const stats = { files: 0, parsed: 0, cached: 0, failures: 0, byAgent: {}, headChecked: 0 };
 
   for (const scanner of scanners) {
+    if (wanted && !wanted.has(scanner.name)) continue;
     let files;
     try {
       files = scanner.discover();
@@ -375,7 +380,7 @@ export function scanAll({ noCache = false } = {}) {
   // 合并成一个条目，时间取包络，source 记成用「|」连接的多段路径，
   // 正文读取时再逐个展开。不合并会让时间线把这场对话显示好几次。
   const merged = mergeByKey(sessions);
-  const enriched = applyEnrichers(merged, stats);
+  const enriched = applyEnrichers(merged, stats, wanted);
   enriched.sort((a, b) => (b.end || b.start || 0) - (a.end || a.start || 0));
   return { sessions: enriched, stats };
 }
@@ -400,10 +405,12 @@ export function scanAll({ noCache = false } = {}) {
  * 约定：enrich 是纯函数，只改自己认得的字段，不改 id/agent/source 这些身份字段；
  * 抛错就把原始列表交回去，不能因为旁路数据坏了就让整个扫描失败。
  */
-function applyEnrichers(sessions, stats) {
+function applyEnrichers(sessions, stats, wanted) {
   let out = sessions;
   for (const scanner of scanners) {
     if (typeof scanner.enrich !== 'function') continue;
+    // 只扫了一部分就只富化那一部分——否则会去读没扫的 Agent 的旁路库
+    if (wanted && !wanted.has(scanner.name)) continue;
     try {
       const next = scanner.enrich(out);
       if (Array.isArray(next) && next.length) out = next;

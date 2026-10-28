@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "上游参照项目的固定版本。每轮研究后由 refresh.mjs 更新。",
+    "commit 是「我们读到哪一版」的凭据：没有它，上次学到了什么无法复现。",
+    "notes 记录这一版里我们实际关注的部分，便于下次只读变化的地方。"
+  ],
+  "sources": [
+    {
+      "id": "magpie",
+      "repo": "https://github.com/yetone/magpie",
+      "why": "个人版模型网关；会话读取、增量校验、零副作用只读打开、旁路表修正",
+      "license": "MIT",
+      "commit": "ee6f8866f33165eebfd16a7e3f6948e04132096e",
+      "fetchedAt": "2026-10-28",
+      "notes": "更新极快，每次只看 diff 内涉及的内部包"
+    },
+    {
+      "id": "cc-switch",
+      "repo": "https://github.com/farion1231/cc-switch",
+      "why": "供应商切换器；会话解析的逐家模块、两级缓存、契约式测试体系",
+      "license": "MIT",
+      "commit": "6d6b7162f122ac0ce1356a14688c8c4f712db3c8",
+      "fetchedAt": "2026-10-28",
+      "notes": "测试体系是主要参照对象（fixture + 不变量 + 漂移样本）"
+    },
+    {
+      "id": "autoswarm",
+      "repo": "https://github.com/HKUDS/AutoSwarm",
+      "why": "多 Agent 编排；状态由事实推导、原子发布、可编程假 CLI 测试",
+      "license": "MIT",
+      "commit": "72f7083e640aa7a7825d3d559327c9b53e96ca95",
+      "fetchedAt": "2026-10-28",
+      "notes": "测试方法论（fixtures/provider.py）是重点"
+    }
+  ]
+}
