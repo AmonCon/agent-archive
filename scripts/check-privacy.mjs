@@ -143,8 +143,43 @@ for (const rel of trackedFiles()) {
   }
 }
 
+/**
+ * 提交元数据也要查。
+ *
+ * 这是漏得最狠的地方：文件内容改起来看得见，而作者邮箱藏在每个提交里，
+ * 没人会去点开看。`git log` 一跑就全在——而且它比文件名稳定得多，
+ * QQ 号 / 手机号邮箱一旦写进 global config，之后每个仓库、每个提交都带着它。
+ *
+ * 只允许 GitHub 的 noreply 地址和公认占位符。
+ */
+function checkCommitIdentities() {
+  let out;
+  try {
+    out = execFileSync('git', ['log', '--all', '--format=%ae%n%ce'], { cwd: repoRoot, encoding: 'utf8' });
+  } catch {
+    return [];
+  }
+  const bad = new Map();
+  for (const email of out.trim().split('\n')) {
+    const e = email.trim();
+    if (!e) continue;
+    if (/@users\.noreply\.github\.com$/.test(e)) continue;
+    if (/@(?:example\.(?:com|org)|localhost|test\.)/.test(e)) continue;
+    bad.set(e, (bad.get(e) || 0) + 1);
+  }
+  return [...bad.entries()].map(([e, n]) => ({
+    rule: 'commit-email',
+    why: '提交作者邮箱',
+    file: '（提交元数据）',
+    line: n + ' 个提交',
+    sample: e.replace(/^(.{2}).*(@.*)$/, '$1***$2'),
+  }));
+}
+
+findings.push(...checkCommitIdentities());
+
 if (!findings.length) {
-  console.log('隐私检查通过：' + trackedFiles().length + ' 个被跟踪文件里没有本机标识或密钥');
+  console.log('隐私检查通过：' + trackedFiles().length + ' 个被跟踪文件、全部提交的作者身份里没有本机标识或密钥');
   process.exit(0);
 }
 
@@ -154,5 +189,6 @@ for (const f of findings) {
   console.error(`  ${f.file}:${f.line}  [${f.why}]  ${f.sample}`);
 }
 console.error('');
-console.error('修法：把真实值换成占位符（my-app / 192.168.1.10 / C:\\Users\\me），不要删掉整段说明。');
+console.error('修法：文件里的真实值换成占位符（my-app / 192.168.1.10 / C:\\Users\\me）；');
+console.error('提交邮箱用 GitHub 的 noreply 地址——`git config user.email "<id>+<login>@users.noreply.github.com"`。');
 process.exit(1);
