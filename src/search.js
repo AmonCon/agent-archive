@@ -183,6 +183,31 @@ function queryFor(q) {
 function openIndex({ create = true } = {}) {
   const file = indexFile();
   if (!create && !fs.existsSync(file)) return null;
+
+  // 读路径一律只读打开：查看器本身是只读的，不需要为了查一次
+  // 去写 schema 或切 WAL。
+  if (!create) {
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      db.prepare('pragma busy_timeout = 5000').run();
+      // 真的读一次库，确认 WAL/SHM 没被别的进程锁死
+      db.prepare('select count(*) c from sqlite_master').get();
+      return db;
+    } catch {
+      try {
+        db.close();
+      } catch {
+        /* 关不掉也不影响后面的兜底 */
+      }
+    }
+    // 索引文件被写锁占住时，普通只读连接可能连 -shm 都建不出来。
+    // 查看器只要求能读，退到 immutable 打开即可，代价是可能读到
+    // 最后一次 checkpoint 的版本——档案场景里这比整页报错好。
+    return new DatabaseSync('file:' + file.replace(/\\/g, '/') + '?immutable=1', {
+      readOnly: true,
+    });
+  }
+
   fs.mkdirSync(indexDir(), { recursive: true });
 
   const db = new DatabaseSync(file);
