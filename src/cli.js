@@ -62,6 +62,9 @@ function usage() {
   agent-archive env audit                      环境层体检
   agent-archive calls                          模型调用成本（按 Agent / 模型 / 会话）
   agent-archive calls --by session             调用挂到具体会话，报匹配率
+  agent-archive usage                         各家 Agent 自己记的 token（不需要网关）
+  agent-archive pricing                       价目表状态（models.dev）
+  agent-archive pricing sync                  同步价目表（会联网一次）
   agent-archive secrets                        扫描归档里的明文凭证
   agent-archive llm                            配置模型接入（查看/设置）
   agent-archive digest <项目>                  生成项目摘要（默认只估算）
@@ -84,13 +87,15 @@ cat 的会话参数:
   --json        输出 JSON
   --no-cache    忽略缓存，全量重扫
   --flat        时间线不按天分组
-  --all         展开全部（env skills 显示所有共享技能；timeline 取全量）
+  --all         展开全部（env skills 显示所有共享技能；timeline 取全量；
+                handoff 列出全部换手，默认只给间隔最大的 12 次）
   --project <路径>        限制在某个项目内查找（cat）
   --agent <名字>          限制在某个 Agent 内查找（cat）
   --port <端口>           网页端口（serve，默认 7788）
   --limit <n>             搜索结果条数（search，默认 20）
   --min-gap <分钟>        handoff 只显示间隔超过这个值的换手
-  --by <维度>             calls 的分组维度：agent / model / provider / session
+  --by <维度>             calls: agent / model / provider / session
+                          usage: agent / model / project / session / day
   --force                 忽略增量判断，重建全部（index）
   --session               导出单场会话（export）
   --bundle                导出项目全部会话（export）
@@ -300,7 +305,12 @@ async function cmdHandoff(target, opts) {
   );
   console.log('');
 
-  for (const h of r.handoffs) {
+  // 按间隔从大到小、默认只列前 12 条：间隔越大越该先看，
+  // 而真实项目上动辄两三百次换手，全打出来第一屏会被淹没。见 handoff.js。
+  const { pickHandoffs } = await import('./handoff.js');
+  const { shown, total, rest } = pickHandoffs(r.handoffs, { all: opts.showAll });
+
+  for (const h of shown) {
     // 间隔的展示分三种：接续是"+Nmin"，并行是"重叠N"，未知是"—"。
     // 并行不能显示成负数分钟——那个负号是时间轴重叠，不是"提前了"。
     let gap;
@@ -325,6 +335,12 @@ async function cmdHandoff(target, opts) {
     if (h.toFirstSession) {
       console.log(c(C.dim, `    接手: ${truncate(h.toFirstSession.title, 64)}`));
     }
+  }
+
+  if (rest > 0) {
+    console.log('');
+    console.log(c(C.dim, `  共 ${total} 次换手，上面按间隔从大到小列了前 ${shown.length} 次。`));
+    console.log(c(C.dim, '  看全部：--all　　只看隔了一天以上的：--min-gap 1440'));
   }
 
   console.log('');
@@ -1075,13 +1091,13 @@ async function cmdMcp(opts) {
 
   console.log(c(C.bold, '把档案馆接到你自己的 Agent 上'));
   console.log('');
-  console.log('这个 server 只读，提供 6 个工具：');
-  console.log(c(C.dim, '  list_projects     有哪些项目'));
-  console.log(c(C.dim, '  project_timeline  某项目的会话清单'));
-  console.log(c(C.dim, '  search_sessions   全文搜索'));
-  console.log(c(C.dim, '  read_session      读正文（分段，默认 8000 字）'));
-  console.log(c(C.dim, '  session_stats     采集统计'));
-  console.log(c(C.dim, '  export_timeline   导出 Markdown'));
+  // 工具清单从 server 的注册表里取，不在这里再抄一份：
+  // 抄一份的下场就是加了三层新工具、这里还写着"提供 6 个"。
+  const { TOOLS } = await import('./mcp.js');
+  console.log(`这个 server 只读，提供 ${TOOLS.length} 个工具：`);
+  for (const t of TOOLS) {
+    console.log(c(C.dim, `  ${t.name.padEnd(21)}${t.title}`));
+  }
   console.log('');
   console.log(c(C.bold, '配置（粘进对应 Agent 的 MCP 配置）'));
   console.log('');
@@ -2165,6 +2181,163 @@ async function cmdCalls(opts) {
   }
 }
 
+/** token 数量级从几千到几十亿，用中文单位比补一串零好认。 */
+function fmtTok(n) {
+  const v = Math.round(Number(n) || 0);
+  const abs = Math.abs(v);
+  if (abs < 10000) return String(v);
+  if (abs < 1e8) return (v / 1e4).toFixed(1) + '万';
+  return (v / 1e8).toFixed(2) + '亿';
+}
+
+/**
+ * 用量层：各家 Agent 自己记的 token。
+ *
+ * 和 `calls` 的区别不是数据新旧，是**能不能看见**：
+ * `calls` 只看得见经过本地网关的请求，没装网关就是空的；
+ * 这里直接读 Agent 自己的账本，装没装网关都有数，代价是粒度参差。
+ *
+ * 三个数必须一起给：总量、覆盖了哪些 Agent、有多少条没有成本。
+ * 少给一个，读者就会把"没算"当成"没花钱"。
+ */
+async function cmdUsage(opts) {
+  const { readUsage, summarizeUsage } = await import('./usage.js');
+  const r = await readUsage();
+
+  if (!r.ready) {
+    const msg = '各家 Agent 的库里都没有找到 token 记录。';
+    if (opts.json) {
+      console.log(JSON.stringify({ ready: false, message: msg, reports: r.reports }, null, 2));
+      return;
+    }
+    console.log(c(C.when, '用量层不可用'));
+    console.log(c(C.dim, '  ' + msg));
+    for (const rep of r.reports) {
+      if (rep.reason) console.log(c(C.dim, `  ${rep.display}: ${rep.reason}`));
+    }
+    return;
+  }
+
+  const by = (opts.by || 'agent').toLowerCase();
+
+  // 项目维度要先把会话挂到项目上；这一步需要扫归档，按 agent 汇总时不做
+  let sessionIndex = [];
+  if (by === 'project' || by === 'session') {
+    const { listProjects } = await import('./query.js');
+    const lp = listProjects({ noCache: opts.noCache, includeSubagents: true, showAll: true });
+    for (const p of lp.projects) {
+      for (const s of p.sessions) sessionIndex.push({ agent: s.agent, id: s.id, project: p.display });
+    }
+  }
+
+  const rows = summarizeUsage({ rows: r.rows, groupBy: by, sessionIndex });
+
+  if (opts.json) {
+    console.log(
+      JSON.stringify(
+        {
+          ready: true,
+          groupBy: by,
+          range: r.range,
+          reports: r.reports,
+          rows,
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  const span = r.range ? `${fmtDate(new Date(r.range.start))} → ${fmtDate(new Date(r.range.end))}` : '—';
+  console.log(c(C.bold, '已观测 token') + c(C.dim, `   ${r.rows.length} 条记录 · ${span}`));
+  console.log('');
+
+  const label = { agent: 'Agent', model: '模型', project: '项目', session: '会话', day: '日期' }[by] || '分组';
+  console.log(
+    c(
+      C.dim,
+      `  ${label.padEnd(20)}${'记录'.padStart(7)}${'未缓存输入'.padStart(12)}${'输出'.padStart(11)}${'缓存读'.padStart(11)}${'命中'.padStart(7)}${'成本'.padStart(11)}`
+    )
+  );
+
+  // 口径未知的来源（目前只有 Codex 的会话总量）单独列：
+  // 它和按请求记的数放同一张表里排名，读者会以为它真的比别人贵几百倍。
+  const known = rows.filter((g) => !g.semantics.includes('unknown'));
+  const unknownOnly = rows.filter((g) => g.semantics.includes('unknown'));
+
+  const printRows = (list) => {
+    const top = opts.showAll ? list : list.slice(0, 15);
+    for (const g of top) {
+      const name = g.key.length > 19 ? g.key.slice(0, 18) + '…' : g.key;
+      const hit = g.cacheHit == null ? '—' : `${Math.round(g.cacheHit * 100)}%`;
+      const hitMark = g.cacheHit != null && g.cacheHitExcluded ? hit + '*' : hit;
+      // 成本：Agent 没报就是 —；只报了部分就在数字后加 +，别让人当成全量
+      let cost = '—';
+      if (g.cost != null) {
+        const partial = g.costUnknown > 0 ? '+' : '';
+        cost = (g.cost > 0 ? '$' + g.cost.toFixed(3) : '0') + partial;
+      }
+      console.log(
+        '  ' +
+          c(C.agent, name.padEnd(20)) +
+          c(C.dim, String(g.rows).padStart(7)) +
+          fmtTok(g.fresh).padStart(12) +
+          fmtTok(g.output).padStart(11) +
+          fmtTok(g.cacheRead).padStart(11) +
+          c(C.dim, hitMark.padStart(7)) +
+          c(g.cost == null ? C.when : C.dim, cost.padStart(11))
+      );
+    }
+    if (list.length > top.length) {
+      console.log(c(C.dim, `  …还有 ${list.length - top.length} 组（--all 展开）`));
+    }
+  };
+
+  printRows(known);
+
+  if (unknownOnly.length) {
+    console.log('');
+    console.log(c(C.bold, '  口径未知（只有会话级总量，不能和上面直接比较）'));
+    const topU = opts.showAll ? unknownOnly : unknownOnly.slice(0, 8);
+    for (const g of topU) {
+      const name = g.key.length > 19 ? g.key.slice(0, 18) + '…' : g.key;
+      console.log(
+        '  ' +
+          c(C.agent, name.padEnd(20)) +
+          c(C.dim, String(g.rows).padStart(7)) +
+          fmtTok(g.fresh).padStart(12)
+      );
+    }
+    if (unknownOnly.length > topU.length) {
+      console.log(c(C.dim, `  …还有 ${unknownOnly.length - topU.length} 组（--all 展开）`));
+    }
+  }
+
+  console.log('');
+  console.log(c(C.dim, '  输入已统一成"不含缓存"：ZCode 的 input 含缓存读，读的时候减掉了。'));
+  console.log(c(C.dim, '  * = 该组里混有口径未知的记录，命中率只按能判断的那部分算。'));
+
+  console.log('');
+  console.log(c(C.bold, '  数据来源'));
+  for (const rep of r.reports) {
+    const mark = rep.ready ? c(C.ok, '✓') : c(C.when, '·');
+    const what = rep.fidelity ? `按${{ request: '请求', 'session-model': '会话×模型', 'session-total': '会话总量' }[rep.fidelity] || rep.fidelity}记` : '';
+    const tail = rep.ready ? c(C.dim, `${rep.rows} 条 · ${what}`) : c(C.dim, rep.reason || '没有数据');
+    console.log(`  ${mark} ${rep.display.padEnd(14)}${tail}`);
+  }
+
+  const noCost = r.rows.filter((x) => x.cost == null).length;
+  console.log('');
+  console.log(
+    c(
+      C.dim,
+      `  ${r.rows.length - noCost}/${r.rows.length} 条带成本（只有 Agent 自报的才算）。` +
+        (noCost ? `另外 ${noCost} 条没有价格——那是"算不出来"，不是 0 元。` : '')
+    )
+  );
+}
+
 /**
  * 参数解析只有一个入口。
  *
@@ -2279,6 +2452,12 @@ async function main() {
       return cmdEnv(opts.positionals[0], opts);
     case 'calls':
       return cmdCalls(opts);
+    case 'usage':
+    case 'tokens':
+      return cmdUsage(opts);
+    case 'pricing':
+    case 'price':
+      return cmdPricing(opts);
     case 'mcp':
       return cmdMcp(opts);
     case 'secrets':

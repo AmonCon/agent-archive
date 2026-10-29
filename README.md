@@ -199,6 +199,11 @@ node src/cli.js doctor
 node src/cli.js calls
 node src/cli.js calls --by session
 
+# 各家 Agent 自己记的 token（不需要网关）
+node src/cli.js usage
+node src/cli.js usage --by model
+node src/cli.js usage --by project
+
 # 扫描归档里的明文凭证（只报告，掩码输出）
 node src/cli.js secrets
 
@@ -246,7 +251,7 @@ node src/cli.js serve --port 8000
 
 - **扫描与合并**：搜索与中文分词 · 续接会话合并 · 子代理会话 · 时间戳 · 符号链接 · 解析失败 · 缓存原子写
 - **接口**：跨 Agent 接力 · 导出 · MCP server · 本地网页查看器 · `cat`
-- **成本与安全**：调用层 `calls` · 凭证扫描 `secrets`
+- **成本与安全**：调用层 `calls` · 用量层 `usage` · 凭证扫描 `secrets`
 - **环境层**：MCP / 技能 / 记忆 · 采集体检 `doctor`
 - **跨平台**：三个系统的路径差异 · 为何只有 10 家
 - **扩展**：给别人家的 Agent 写扫描器 · 反向发现没适配的存储 · 设计要点 · 下一步
@@ -993,7 +998,8 @@ JSON-RPC」，手写足够，不需要引入任何 npm 包。
 | `session_stats` | 采集质量、索引规模、已有摘要数量 |
 | `export_timeline` | 导出 Markdown |
 | `inventory` | **环境层**：各 Agent 的 MCP / 技能 / 使用率 / 记忆（`type` 切换） |
-| `model_calls` | **调用层**：每场会话/每个 Agent 的 token、缓存命中、费用 |
+| `model_calls` | **调用层**：经过网关的请求——token、缓存命中、费用 |
+| `token_usage` | **用量层**：各家 Agent 自己账本里的 token（不需要网关） |
 
 `read_digest` 和 `read_session_summary` 是视图层的入口。它们**只读已有的
 摘要，不会替你调模型**——生成要花钱，必须由用户在终端显式执行。
@@ -1070,6 +1076,63 @@ node src/cli.js calls --by session     # 按会话，并报出与会话层的匹
 **上游有、我们没有的两个字段**：MAGPIE 的日志里有 `handed_on`（失败后转交
 下一跳）和 `source=reported`（客户端自报的直连调用），本机 3.2 万条里
 **一条都没有**，所以不做相应处理。查过、不适用，写在这里免得以后重复调研。
+
+## 用量层：`usage`——不装网关也能看见 token
+
+```bash
+node src/cli.js usage                  # 按 Agent
+node src/cli.js usage --by model       # 按模型
+node src/cli.js usage --by project     # 按项目（要先扫归档，把会话挂上去）
+```
+
+`calls` 读的是网关日志，没装网关就是空的；`usage` 直接读各家 Agent 自己的账本，
+装没装网关都有数。两者不是替代关系：网关记的是"每个请求"，账本记的是
+"这家 Agent 自己认账的用量"，粒度不同，不能相加。
+
+本机本次实测（12,603 条记录，2025-10 至 2026-10）：
+
+| 来源 | 粒度 | 记录 | 未缓存输入 | 缓存读 | 命中 |
+|---|---|---|---|---|---|
+| ZCode | 每个请求 | 10,299 | 7,217 万 | 26.68 亿 | 97% |
+| Hermes | 会话 × 模型 | 390 | 7,531 万 | 8.41 亿 | 92% |
+| OpenCode | 每场会话 | 91 | 2,589 万 | 1.97 亿 | 88% |
+| Claude Code | 每条消息 | 44 | 82 万 | 332 万 | 80% |
+| Codex | 每场会话（只有总量） | 1,779 | 200.37 亿 | — | 口径未知 |
+
+### 同一列 `input_tokens`，四家有三种含义
+
+这是这一层唯一真正难的地方。字段名一样，含义不一样：
+
+| 来源 | 实测证据 | 语义 |
+|---|---|---|
+| ZCode | `provider_total_tokens = input + output`，而 `cache_read` 是 `input` 的子集 | input **含**缓存 |
+| OpenCode | 某场 `cache_read` 6,600 万、`input` 310 万 | input **不含**缓存 |
+| Hermes | `cache_read` 2.2 亿 > `input` 7,500 万 | input **不含**缓存 |
+| Codex | 只有 `threads.tokens_used` 一个会话级总量 | 看不出来 |
+
+所以每条记录都带 `semantic`，统一换算成 `fresh`（不含缓存的输入）之后再比。
+按字面把四家相加，ZCode 那 26 亿缓存读会被按全价算进去，结论差一个数量级。
+
+Codex 这类"只有总量、口径未知"的来源单独列表，也不进缓存命中率——它和按请求
+记的数放在同一张表里排名，会让人以为它真的比别人贵三百倍。命中率的分母同样
+只收语义已知的行：把两种口径塞进同一个分母，算出来的百分比没有意义。
+
+### 成本只报别人报过的
+
+只有 Agent 自己给了钱才显示：Hermes 有 `estimated_cost_usd` / `actual_cost_usd`，
+OpenCode 有 `cost`。其余没有——**没有价就是没有价，不是 0 元**。
+本机 12,603 条里只有 12 条带成本，这个比例本身就是要展示的信息：
+"算不出来"和"免费"是两件事。只报了部分的行会在金额后加 `+`。
+
+自己接价目表是下一步（cc-switch 用内置种子 + models.dev 同步，magpie 用
+models.dev + 用户覆盖 + 供应商倍率），但那属于"估算"，必须单独标来源，
+不能和 Agent 自报的实际费用混在一起。
+
+### 读不到不是错误
+
+各家库的结构会变。缺表、缺列都按"这一家没有用量"处理并给出原因，不影响其他家。
+Hermes 老版本只有 `sessions` 表、缺 `billing_provider` 列也能读——缺的列留空，
+不编一个值。
 
 ## 凭证扫描：`secrets`
 

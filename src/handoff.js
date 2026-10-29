@@ -219,3 +219,31 @@ export function handoffLabel(h) {
   if (h.stale) return '长期中断';
   return '接续';
 }
+
+/** 终端里默认列多少次换手。 */
+export const DISPLAY_LIMIT = 12;
+
+/**
+ * 挑出该给人看的那几次换手。
+ *
+ * 两个决定：
+ *
+ * 1. **按间隔从大到小排。** 间隔越大，接手的 Agent 越不知道前面发生了什么——
+ *    那正是这个命令存在的理由。按时间顺序排，最重要的信息会埋在中间。
+ *    间隔未知（`gapMinutes == null`）排最后：它既说不出"隔了很久"，
+ *    也不该占掉前几名的位置。
+ *
+ * 2. **默认只给前 12 条。** 真实项目上动辄两三百次换手（本机一个项目 233 次），
+ *    全打出来第一屏看不见概况，用户会以为命令卡住了。
+ *
+ * `rest` 是被截掉的条数，CLI 用它提示怎么查看更多。
+ */
+export function pickHandoffs(handoffs, { all = false, limit = DISPLAY_LIMIT } = {}) {
+  const ordered = [...handoffs].sort((a, b) => {
+    const av = a.gapMinutes == null ? Number.NEGATIVE_INFINITY : a.gapMinutes;
+    const bv = b.gapMinutes == null ? Number.NEGATIVE_INFINITY : b.gapMinutes;
+    return bv - av;
+  });
+  const shown = all ? ordered : ordered.slice(0, limit);
+  return { shown, total: ordered.length, rest: ordered.length - shown.length };
+}

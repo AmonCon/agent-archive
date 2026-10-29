@@ -661,6 +661,93 @@ const TOOLS = [
       };
     },
   },
+  {
+    name: 'token_usage',
+    title: '各家 Agent 自己记的 token',
+    description:
+      '读各家 Agent 自己的用量账本（ZCode 的 model_usage、Hermes 的 session_model_usage、' +
+      'OpenCode 的 session、Claude Code 的 jsonl、Codex 的 threads.tokens_used），' +
+      '不需要本地网关。和 model_calls 互补：那个看的是经过网关的请求，这个看的是 Agent 自己记的账。' +
+      '重要：各家 input_tokens 含义不同（ZCode 含缓存读，OpenCode/Hermes 不含），' +
+      '这里统一换算成 fresh（不含缓存）后返回，semantics 标出每条的口径。' +
+      '只有 Agent 自报过费用才有 cost；cost 为 null 表示"算不出来"，不是 0 元。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        groupBy: {
+          type: 'string',
+          enum: ['agent', 'model', 'project', 'session', 'day'],
+          description: '汇总维度（默认 agent）',
+        },
+        agent: {
+          type: 'string',
+          description: '只看某个 Agent（如 zcode、codex、hermes）',
+        },
+        limit: {
+          type: 'number',
+          description: '最多返回多少组（默认 20，上限 100）',
+        },
+      },
+      additionalProperties: false,
+    },
+    handler: async ({ groupBy = 'agent', agent, limit = 20 }) => {
+      const { readUsage, summarizeUsage } = await import('./usage.js');
+      const cap = Math.min(Math.max(Number(limit) || 20, 1), 100);
+
+      const r = await readUsage();
+      if (!r.ready) {
+        return {
+          available: false,
+          reason: '各家 Agent 的库里都没有找到 token 记录',
+          sources: r.reports,
+        };
+      }
+
+      let rows = r.rows;
+      if (agent) rows = rows.filter((x) => x.agent === agent);
+
+      // 项目维度要先把会话挂到项目上，扫一次归档
+      let sessionIndex = [];
+      if (groupBy === 'project' || groupBy === 'session') {
+        const { scanCached } = await import('./registry.js');
+        sessionIndex = scanCached({}).sessions.map((s) => ({
+          agent: s.agent,
+          id: s.id,
+          project: s.project,
+        }));
+      }
+
+      const groups = summarizeUsage({ rows, groupBy, sessionIndex });
+
+      return {
+        available: true,
+        range: r.range,
+        records: rows.length,
+        groupBy,
+        rows: groups.slice(0, cap).map((g) => ({
+          key: g.key,
+          records: g.rows,
+          calls: g.calls,
+          // 不含缓存的输入。缓存读写单独给，不要自己相加当成"输入"
+          uncachedInput: g.fresh,
+          output: g.output,
+          cacheRead: g.cacheRead,
+          cacheWrite: g.cacheWrite,
+          cacheHit: g.cacheHit == null ? null : Number(g.cacheHit.toFixed(3)),
+          cacheHitExcluded: g.cacheHitExcluded,
+          cost: g.cost == null ? null : Number(g.cost.toFixed(4)),
+          costUnknownRecords: g.costUnknown,
+          semantics: g.semantics,
+          agents: g.agents,
+        })),
+        truncated: groups.length > cap,
+        sources: r.reports,
+        note:
+          'uncachedInput 已统一成不含缓存。semantics 含 unknown 的来源只给了会话级总量，' +
+          '不参与命中率，也不能和按请求记的数直接比较。cost=null 是"没有价格"，不是免费。',
+      };
+    },
+  },
 ];
 
 /* ------------------------------ 渲染 ------------------------------ */
@@ -779,18 +866,20 @@ async function dispatch(msg) {
         capabilities: { tools: {} },
         serverInfo: { name: 'agent-archive', version: '0.1.0' },
         instructions:
-          '这是本机跨 Agent 的档案馆，只读。它有三层：' +
+          '这是本机跨 Agent 的档案馆，只读。它有四层：' +
           '**会话层**——list_projects 看有哪些项目 → read_digest 看有没有现成的交接摘要 → ' +
           '没有的话用 search_sessions 或 project_timeline 定位 → read_session 读正文（会截断，按需分段）。' +
           '要接手一个别人做过的项目时，先调 project_handoffs 看它是被哪些 Agent 轮流做过的、' +
           '换手间隔多长——间隔长的地方就是上下文最容易丢的地方，值得优先读那场会话。' +
           '**环境层**——inventory 看这台机器上各 Agent 配了哪些 MCP 服务、装了哪些技能、有哪些记忆。' +
           '刚接触这个环境、或想知道别的 Agent 已具备什么能力时先调 inventory；' +
-          '**调用层**——model_calls 看每场会话/每个 Agent 为模型付了多少（token、缓存命中、费用），' +
-          '数据来自本地网关日志，只覆盖经过网关的调用。' +
+          '**调用层**——model_calls 看经过本地网关的请求花了多少，token_usage 看各家 Agent 自己账本里记的用量。' +
+          '两者的区别是"谁看得见"：没装网关时 model_calls 为空，token_usage 仍有数；' +
+          '但 token_usage 里各家 input 口径不同，返回的 uncachedInput 已换算成不含缓存，' +
+          'cost 为 null 表示没有价格而不是免费。' +
           '子代理会话（kind=subagent）也被采集：它们是主会话内部派出去干的活，' +
           '搜索结果和 read_session 都会标出来，别把子代理查到的细节当成主对话说过的。' +
-          '三层都只提供事实与出处，不替你合并结论，也不回传任何凭证值。',
+          '四层都只提供事实与出处，不替你合并结论，也不回传任何凭证值。',
       };
     }
 
