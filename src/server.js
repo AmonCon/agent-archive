@@ -59,8 +59,11 @@ async function handle(req, res) {
     if (path === '/p') {
       return sendHtml(
         res,
-        pageTimeline(url.searchParams.get('path') || '', url.searchParams.get('all') === '1')
+        await pageTimeline(url.searchParams.get('path') || '', url.searchParams.get('all') === '1')
       );
+    }
+    if (path === '/usage') {
+      return sendHtml(res, await pageUsage(url.searchParams.get('by') || 'agent'));
     }
     if (path === '/search') {
       return sendHtml(res, pageSearch(url.searchParams.get('q') || '', url.searchParams.get('agent') || ''));
@@ -124,6 +127,50 @@ async function handle(req, res) {
           stale: x.stale,
           fromLast: x.fromLastSession && { id: x.fromLastSession.id, title: x.fromLastSession.title },
           toFirst: x.toFirstSession && { id: x.toFirstSession.id, title: x.toFirstSession.title },
+        })),
+      });
+    }
+
+    if (path === '/api/usage') {
+      const { summarizeUsage } = await import('./usage.js');
+      const by = url.searchParams.get('by') || 'agent';
+      const active = USAGE_TABS.some(([k]) => k === by) ? by : 'agent';
+      const { r, catalog, catalogInfo } = await usageSnapshot();
+      if (!r.ready) {
+        return sendJson(res, { ready: false, reports: r.reports }, 200);
+      }
+      let sessionIndex = [];
+      if (active === 'project') {
+        const { scanCached } = await import('./registry.js');
+        sessionIndex = scanCached({}).sessions.map((s) => ({
+          agent: s.agent,
+          id: s.id,
+          project: s.project,
+        }));
+      }
+      const rows = summarizeUsage({ rows: r.rows, groupBy: active, sessionIndex, catalog });
+      return sendJson(res, {
+        ready: true,
+        groupBy: active,
+        records: r.rows.length,
+        range: r.range,
+        pricing: catalog
+          ? { source: catalog.source, fetchedAt: catalog.fetchedAt, models: catalog.count }
+          : { ready: false, reason: catalogInfo.reason },
+        sources: r.reports,
+        rows: rows.map((g) => ({
+          key: g.key,
+          records: g.rows,
+          calls: g.calls,
+          uncachedInput: g.fresh,
+          output: g.output,
+          cacheRead: g.cacheRead,
+          cacheWrite: g.cacheWrite,
+          cacheHit: g.cacheHit == null ? null : Number(g.cacheHit.toFixed(3)),
+          cost: g.cost == null ? null : Number(g.cost.toFixed(4)),
+          estimatedCost: g.costEst == null ? null : Number(g.costEst.toFixed(4)),
+          unpricedRecords: g.unpricedRecords,
+          semantics: g.semantics,
         })),
       });
     }
@@ -894,7 +941,230 @@ function renderFreshnessDetail(fresh, target) {
   return rows.join('');
 }
 
+/**
+ * 用量快照。
+ *
+ * 读一次要扫 5 个库、上万行，页面每次请求都重读会让点击变得很迟钝。
+ * 缓存 60 秒：Agent 还在写库，缓存太久会让用户以为统计不更新；
+ * 缓存太短又等于没缓存。一分钟是"刷新一下能看到变化"的量级。
+ */
+let usageMemo = null;
+
+async function usageSnapshot() {
+  const now = Date.now();
+  if (usageMemo && now - usageMemo.at < 60_000) return usageMemo.value;
+
+  const { readUsage } = await import('./usage.js');
+  const { loadCatalog } = await import('./pricing.js');
+  const r = await readUsage();
+  const catalogInfo = loadCatalog();
+  const value = { r, catalog: catalogInfo.ready ? catalogInfo : null, catalogInfo };
+  usageMemo = { at: now, value };
+  return value;
+}
+
+/** token 数量级跨度大，用中文单位比一排零好读。 */
+function fmtTok(n) {
+  const v = Math.round(Number(n) || 0);
+  const abs = Math.abs(v);
+  if (abs < 10000) return String(v);
+  if (abs < 1e8) return (v / 1e4).toFixed(1) + '万';
+  return (v / 1e8).toFixed(2) + '亿';
+}
+
+const USAGE_TABS = [
+  ['agent', 'Agent'],
+  ['model', '模型'],
+  ['project', '项目'],
+  ['day', '日期'],
+];
+
+/**
+ * 用量页。
+ *
+ * 和 `calls` 的区别要写在页面上，否则读者会把"没装网关时的空表"当成"没花钱"。
+ * 成本永远带前缀：`$` 是 Agent 自报，`~$` 是按价目表估算，两个数不加在一起。
+ */
+async function pageUsage(by) {
+  const { summarizeUsage } = await import('./usage.js');
+  const active = USAGE_TABS.some(([k]) => k === by) ? by : 'agent';
+  const { r, catalog, catalogInfo } = await usageSnapshot();
+
+  const nav = `<nav class="tabs">${USAGE_TABS.map(
+    ([k, label]) => `<a href="/usage?by=${k}" class="${k === active ? 'on' : ''}">${esc(label)}</a>`
+  ).join('')}</nav>`;
+
+  if (!r.ready) {
+    return layout(
+      '用量',
+      `<p><a href="/">← 所有项目</a></p><h1>用量</h1>
+       <p class="sub">各家 Agent 的库里都没有找到 token 记录。</p>
+       ${r.reports
+         .filter((x) => x.reason)
+         .map((x) => `<p class="hint">${esc(x.display)}：${esc(x.reason)}</p>`)
+         .join('')}`
+    );
+  }
+
+  let sessionIndex = [];
+  if (active === 'project') {
+    const { scanCached } = await import('./registry.js');
+    sessionIndex = scanCached({}).sessions.map((s) => ({
+      agent: s.agent,
+      id: s.id,
+      project: s.project,
+    }));
+  }
+
+  const groups = summarizeUsage({ rows: r.rows, groupBy: active, sessionIndex, catalog });
+
+  const tot = groups.reduce(
+    (a, g) => {
+      a.fresh += g.fresh;
+      a.output += g.output;
+      a.cacheRead += g.cacheRead;
+      a.cost += g.cost || 0;
+      a.costEst += g.costEst || 0;
+      a.unpriced += g.unpricedRecords || 0;
+      return a;
+    },
+    { fresh: 0, output: 0, cacheRead: 0, cost: 0, costEst: 0, unpriced: 0 }
+  );
+
+  const costCell = (g) => {
+    if (g.cost != null) return `$${g.cost.toFixed(2)}${g.costUnknown ? '+' : ''}`;
+    if (g.costEst != null) return `~$${g.costEst.toFixed(2)}`;
+    return '—';
+  };
+
+  const rowHtml = (g) => `<tr>
+      <td class="proj">${esc(g.key.length > 42 ? g.key.slice(0, 40) + '…' : g.key)}</td>
+      <td class="num">${g.rows}</td>
+      <td class="num">${fmtTok(g.fresh)}</td>
+      <td class="num">${fmtTok(g.output)}</td>
+      <td class="num">${fmtTok(g.cacheRead)}</td>
+      <td class="num">${g.cacheHit == null ? '—' : Math.round(g.cacheHit * 100) + '%'}</td>
+      <td class="num">${costCell(g)}</td>
+    </tr>`;
+
+  const head = `<thead><tr><th>${
+    { agent: 'Agent', model: '模型', project: '项目', day: '日期' }[active]
+  }</th><th class="num">记录</th><th class="num">未缓存输入</th><th class="num">输出</th><th class="num">缓存读</th><th class="num">命中</th><th class="num">成本</th></tr></thead>`;
+
+  // 口径未知的组（目前是 Codex 的会话总量）单独一张表：
+  // 和按请求记的数排在一起，会让人以为它真的贵几百倍
+  const known = groups.filter((g) => !g.semantics.includes('unknown'));
+  const unknown = groups.filter((g) => g.semantics.includes('unknown'));
+
+  const span = r.range
+    ? `${esc(fmtDate(new Date(r.range.start)))} → ${esc(fmtDate(new Date(r.range.end)))}`
+    : '—';
+
+  const pricingLine = catalog
+    ? `价目表 models.dev · ${catalog.count.toLocaleString('en-US')} 个模型 · 抓取于 ${esc(
+        catalog.fetchedAt ? fmtDate(new Date(catalog.fetchedAt)) : '未知'
+      )}`
+    : `没有价目表：${esc(catalogInfo.reason || '未同步')} · 在终端跑 <code>agent-archive pricing sync</code>`;
+
+  const unknownHtml = unknown.length
+    ? `<h2 class="day">口径未知</h2>
+       <p class="sub">这些来源只给了会话级总量，看不出是否含缓存，不参与命中率，也不该和上表比较。</p>
+       <table><thead><tr><th>${
+         { agent: 'Agent', model: '模型', project: '项目', day: '日期' }[active]
+       }</th><th class="num">记录</th><th class="num">总量</th></tr></thead><tbody>${unknown
+         .map(
+           (g) =>
+             `<tr><td class="proj">${esc(g.key)}</td><td class="num">${g.rows}</td><td class="num">${fmtTok(
+               g.fresh
+             )}</td></tr>`
+         )
+         .join('')}</tbody></table>`
+    : '';
+
+  return layout(
+    '用量',
+    `<p><a href="/">← 所有项目</a> · <a href="/env">能力面</a></p>
+     <h1>用量</h1>
+     <p class="sub">${r.rows.length} 条记录 · ${span} · 数据来自各家 Agent 自己的账本（不需要网关）</p>
+     ${nav}
+     <div class="cards">
+       <div class="card"><b>${fmtTok(tot.fresh)}</b><span>未缓存输入</span></div>
+       <div class="card"><b>${fmtTok(tot.output)}</b><span>输出</span></div>
+       <div class="card"><b>${fmtTok(tot.cacheRead)}</b><span>缓存读</span></div>
+       <div class="card"><b>~$${tot.costEst.toFixed(2)}</b><span>估算成本</span></div>
+       <div class="card"><b>$${tot.cost.toFixed(2)}</b><span>Agent 自报</span></div>
+     </div>
+     <table>${head}<tbody>${known.map(rowHtml).join('')}</tbody></table>
+     ${unknownHtml}
+     <p class="hint">输入已统一成"不含缓存"。<code>~$</code> 是按价目表估算，不是账单；
+     <code>+</code> 表示该组只有一部分记录带自报成本。${
+       tot.unpriced ? `另有 ${tot.unpriced} 条既没自报、价目表里也没有价。` : ''
+     }</p>
+     <p class="hint">${pricingLine}</p>
+     <h2 class="day">数据来源</h2>
+     <p class="sub">${r.reports
+       .map(
+         (x) =>
+           `${x.ready ? '✓' : '·'} ${esc(x.display)} ${
+             x.ready ? `${x.rows} 条` : esc(x.reason || '没有数据')
+           }`
+       )
+       .join(' · ')}</p>`
+  );
+}
+
 function pageTimeline(target, openAll) {
+  return pageTimelineAsync(target, openAll);
+}
+
+/**
+ * 项目页的用量卡。
+ *
+ * 只统计"这个项目的会话 id"对应的记录，按 agent|id 匹配——
+ * 和 calls 层同一个理由：只看 id 会跨家错挂。
+ *
+ * 没有缓存价目表时只给 token 和自报成本，并说明为什么没有钱。
+ */
+async function projectUsageCard(sessions) {
+  if (!sessions.length) return '';
+  let snap;
+  try {
+    snap = await usageSnapshot();
+  } catch {
+    return '';
+  }
+  const { r, catalog } = snap;
+  if (!r.ready) return '';
+
+  const keys = new Set(sessions.map((s) => `${s.agent}|${s.id}`));
+  const rows = r.rows.filter((x) => x.session && keys.has(`${x.agent}|${x.session}`));
+  if (!rows.length) return '';
+
+  const { summarizeUsage } = await import('./usage.js');
+  const groups = summarizeUsage({ rows, groupBy: 'agent', catalog });
+  const t = groups.reduce(
+    (a, g) => {
+      a.fresh += g.fresh;
+      a.output += g.output;
+      a.cacheRead += g.cacheRead;
+      a.cost += g.cost || 0;
+      a.costEst += g.costEst || 0;
+      return a;
+    },
+    { fresh: 0, output: 0, cacheRead: 0, cost: 0, costEst: 0 }
+  );
+  const cost = t.cost > 0 ? `$${t.cost.toFixed(2)}` : t.costEst > 0 ? `~$${t.costEst.toFixed(2)}` : '—';
+
+  return `<div class="cards">
+      <div class="card"><b>${fmtTok(t.fresh)}</b><span>未缓存输入</span></div>
+      <div class="card"><b>${fmtTok(t.output)}</b><span>输出</span></div>
+      <div class="card"><b>${fmtTok(t.cacheRead)}</b><span>缓存读</span></div>
+      <div class="card"><b>${cost}</b><span>成本</span></div>
+    </div>
+    <p class="hint">来自 ${rows.length} 条模型请求的记账 · <a href="/usage?by=project">看全部项目的用量 →</a></p>`;
+}
+
+async function pageTimelineAsync(target, openAll) {
   if (!target) return pageNotFound('缺少项目路径');
 
   const r = projectTimeline(target, {});
