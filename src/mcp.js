@@ -692,9 +692,11 @@ const TOOLS = [
     },
     handler: async ({ groupBy = 'agent', agent, limit = 20 }) => {
       const { readUsage, summarizeUsage } = await import('./usage.js');
+      const { loadCatalog } = await import('./pricing.js');
       const cap = Math.min(Math.max(Number(limit) || 20, 1), 100);
 
       const r = await readUsage();
+      const catalog = loadCatalog();
       if (!r.ready) {
         return {
           available: false,
@@ -717,7 +719,12 @@ const TOOLS = [
         }));
       }
 
-      const groups = summarizeUsage({ rows, groupBy, sessionIndex });
+      const groups = summarizeUsage({
+        rows,
+        groupBy,
+        sessionIndex,
+        catalog: catalog.ready ? catalog : null,
+      });
 
       return {
         available: true,
@@ -737,6 +744,10 @@ const TOOLS = [
           cacheHitExcluded: g.cacheHitExcluded,
           cost: g.cost == null ? null : Number(g.cost.toFixed(4)),
           costUnknownRecords: g.costUnknown,
+          // 估算成本与自报成本分两个字段：一个是供应商认过的，一个是按公开价推的
+          estimatedCost: g.costEst == null ? null : Number(g.costEst.toFixed(4)),
+          estimatedRecords: g.costEstRecords,
+          unpricedRecords: g.unpricedRecords,
           semantics: g.semantics,
           agents: g.agents,
         })),
@@ -744,7 +755,8 @@ const TOOLS = [
         sources: r.reports,
         note:
           'uncachedInput 已统一成不含缓存。semantics 含 unknown 的来源只给了会话级总量，' +
-          '不参与命中率，也不能和按请求记的数直接比较。cost=null 是"没有价格"，不是免费。',
+          '不参与命中率，也不能和按请求记的数直接比较。cost=null 是"没有价格"，不是免费；' +
+          'estimatedCost 是按 models.dev 价目表推的估算，不是账单。',
       };
     },
   },

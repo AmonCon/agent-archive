@@ -95,3 +95,45 @@ test('cli: timeline 能按项目归集跨 Agent 的会话', async () => {
     box.cleanup();
   }
 });
+
+test('cli: timeline 在会话很多时只给最近一段，并说明怎么看全部', async () => {
+  // 真实项目上时间线能到一千多行（本机 924 场），第一屏会被淹没。
+  // 这是显示窗口，不是裁剪数据：--all 必须仍然给全部。
+  const box = sandbox();
+  try {
+    const project = path.join(box.dir, 'work', 'big');
+    box.mkdir('work/big');
+
+    const N = 130;
+    const lines = [];
+    for (let i = 0; i < N; i++) {
+      const ts = new Date(Date.UTC(2026, 0, 1 + (i % 20), 9, i % 60, 0)).toISOString();
+      const id = 'big' + String(i).padStart(3, '0');
+      lines.push(
+        JSON.stringify({ timestamp: ts, type: 'session_meta', payload: { id, session_id: id, cwd: project, timestamp: ts } }),
+        JSON.stringify({
+          timestamp: ts,
+          type: 'response_item',
+          payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '第 ' + i + ' 场' }] },
+        })
+      );
+    }
+    // 每个 session_meta 开启一场会话，所以要写成多个文件
+    for (let i = 0; i < N; i++) {
+      const pair = lines.slice(i * 2, i * 2 + 2).join('\n') + '\n';
+      box.write('.codex/sessions/2026/01/01/rollout-' + String(i).padStart(3, '0') + '.jsonl', pair);
+    }
+
+    const plain = runCli(box, ['timeline', project]);
+    assert.equal(plain.code, 0, plain.out);
+    assert.match(plain.out, new RegExp('共 ' + N + ' 场'));
+    assert.match(plain.out, /看全部：--all/);
+
+    const all = runCli(box, ['timeline', project, '--all']);
+    assert.equal(all.code, 0, all.out);
+    assert.doesNotMatch(all.out, /看全部：--all/);
+    assert.ok(all.out.split('\n').length > plain.out.split('\n').length, '--all 应该比默认更长');
+  } finally {
+    box.cleanup();
+  }
+});

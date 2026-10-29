@@ -87,7 +87,8 @@ cat 的会话参数:
   --json        输出 JSON
   --no-cache    忽略缓存，全量重扫
   --flat        时间线不按天分组
-  --all         展开全部（env skills 显示所有共享技能；timeline 取全量；
+  --all         展开全部（env skills 显示所有共享技能；
+                timeline 列出全部会话，默认只给最近 100 场；
                 handoff 列出全部换手，默认只给间隔最大的 12 次）
   --project <路径>        限制在某个项目内查找（cat）
   --agent <名字>          限制在某个 Agent 内查找（cat）
@@ -211,14 +212,21 @@ async function cmdTimeline(target, opts) {
     )
   );
 
+  // 真实项目上时间线可以很长（本机一个项目 924 场会话、1423 行输出）。
+  // 默认只给最近的一段并明确说明——时间线本身该是完整的，所以这是**显示窗口**，
+  // 不是裁剪数据：--all 拿到的仍是全部，上面那行 summary 也始终描述整个项目。
+  const shown = opts.showAll ? sessions : sessions.slice(-TIMELINE_WINDOW);
+  const hidden = sessions.length - shown.length;
+
   if (opts.flat) {
     console.log('');
-    for (const s of sessions) printSession(s, 0);
+    for (const s of shown) printSession(s, 0);
+    if (hidden > 0) printTimelineWindowNote(sessions.length, shown.length);
     return;
   }
 
   let currentDay = null;
-  for (const s of sessions) {
+  for (const s of shown) {
     const day = s.start ? s.start.toISOString().slice(0, 10) : '(未知日期)';
     if (day !== currentDay) {
       currentDay = day;
@@ -226,6 +234,20 @@ async function cmdTimeline(target, opts) {
     }
     printSession(s, 2);
   }
+  if (hidden > 0) printTimelineWindowNote(sessions.length, shown.length);
+}
+
+/**
+ * 时间线默认显示多少场。
+ *
+ * 100 场大约两百行——一屏能滚完，又够看清最近在做什么。
+ * 更早的历史用 `--all`；也可以先用 projects / agents 缩小范围。
+ */
+const TIMELINE_WINDOW = 100;
+
+function printTimelineWindowNote(total, shownCount) {
+  console.log('');
+  console.log(c(C.dim, `  共 ${total} 场，上面是最近 ${shownCount} 场。看全部：--all`));
 }
 
 function printSession(s, indent) {
@@ -2202,7 +2224,10 @@ function fmtTok(n) {
  */
 async function cmdUsage(opts) {
   const { readUsage, summarizeUsage } = await import('./usage.js');
+  const { loadCatalog } = await import('./pricing.js');
   const r = await readUsage();
+  // 价目表是可选的：没有它只报 token 和 Agent 自报的费用
+  const catalog = loadCatalog();
 
   if (!r.ready) {
     const msg = '各家 Agent 的库里都没有找到 token 记录。';
@@ -2230,7 +2255,7 @@ async function cmdUsage(opts) {
     }
   }
 
-  const rows = summarizeUsage({ rows: r.rows, groupBy: by, sessionIndex });
+  const rows = summarizeUsage({ rows: r.rows, groupBy: by, sessionIndex, catalog: catalog.ready ? catalog : null });
 
   if (opts.json) {
     console.log(
@@ -2240,6 +2265,9 @@ async function cmdUsage(opts) {
           groupBy: by,
           range: r.range,
           reports: r.reports,
+          pricing: catalog.ready
+            ? { source: catalog.source, fetchedAt: catalog.fetchedAt, models: catalog.count }
+            : { ready: false, reason: catalog.reason },
           rows,
         },
         null,
@@ -2272,11 +2300,13 @@ async function cmdUsage(opts) {
       const name = g.key.length > 19 ? g.key.slice(0, 18) + '…' : g.key;
       const hit = g.cacheHit == null ? '—' : `${Math.round(g.cacheHit * 100)}%`;
       const hitMark = g.cacheHit != null && g.cacheHitExcluded ? hit + '*' : hit;
-      // 成本：Agent 没报就是 —；只报了部分就在数字后加 +，别让人当成全量
+      // 成本：自报优先（$），没有自报就用价目表估（~$）；只覆盖了一部分就加 +
       let cost = '—';
       if (g.cost != null) {
         const partial = g.costUnknown > 0 ? '+' : '';
         cost = (g.cost > 0 ? '$' + g.cost.toFixed(3) : '0') + partial;
+      } else if (g.costEst != null) {
+        cost = '~$' + g.costEst.toFixed(3);
       }
       console.log(
         '  ' +
@@ -2317,6 +2347,7 @@ async function cmdUsage(opts) {
   console.log('');
   console.log(c(C.dim, '  输入已统一成"不含缓存"：ZCode 的 input 含缓存读，读的时候减掉了。'));
   console.log(c(C.dim, '  * = 该组里混有口径未知的记录，命中率只按能判断的那部分算。'));
+  console.log(c(C.dim, '  $ = Agent 自报；~$ = 按价目表估算，不是账单；+ = 该组只覆盖了一部分记录。'));
 
   console.log('');
   console.log(c(C.bold, '  数据来源'));
@@ -2328,14 +2359,102 @@ async function cmdUsage(opts) {
   }
 
   const noCost = r.rows.filter((x) => x.cost == null).length;
+  const estRecords = rows.reduce((a, g) => a + (g.costEstRecords || 0), 0);
+  const untagged = rows.reduce((a, g) => a + (g.unpricedRecords || 0), 0);
+  const totalActual = rows.reduce((a, g) => a + (g.cost || 0), 0);
+  const totalEst = rows.reduce((a, g) => a + (g.costEst || 0), 0);
+
   console.log('');
+  console.log(c(C.bold, '  成本'));
   console.log(
-    c(
-      C.dim,
-      `  ${r.rows.length - noCost}/${r.rows.length} 条带成本（只有 Agent 自报的才算）。` +
-        (noCost ? `另外 ${noCost} 条没有价格——那是"算不出来"，不是 0 元。` : '')
-    )
+    c(C.dim, `  $ 自报       ${r.rows.length - noCost} 条 · $${totalActual.toFixed(3)}`)
   );
+  if (catalog.ready) {
+    console.log(c(C.dim, `  ~$ 估算      ${estRecords} 条 · ~$${totalEst.toFixed(3)}`));
+    console.log(
+      c(
+        C.dim,
+        `  价目表 models.dev · ${catalog.count} 个模型 · 抓取于 ${
+          catalog.fetchedAt ? fmtDate(new Date(catalog.fetchedAt)) : '未知'
+        }`
+      )
+    );
+  } else {
+    console.log(c(C.dim, `  没有价目表：${catalog.reason}`));
+    console.log(c(C.dim, '  同步一次：agent-archive pricing sync（会联网，只拉目录，不传任何使用数据）'));
+  }
+  if (untagged) {
+    console.log(c(C.dim, `  ${untagged} 条既没自报、价目表里也查不到——"算不出来"不等于 0 元。`));
+  }
+}
+
+/**
+ * 价目表：外部参考价，单独一层。
+ *
+ * 它和用量层的边界是"谁是事实"：token 是 Agent 记的账，价格是我们从
+ * models.dev 拉来的参考。所以即使价目表过期，也不要让它去改历史 token；
+ * 反过来，估算出来的钱永远带 ~ 前缀，不和自报的费用混在一起。
+ *
+ * 同步只下载目录，不上传任何东西。
+ */
+async function cmdPricing(opts) {
+  const { loadCatalog, syncCatalog } = await import('./pricing.js');
+  const sub = (opts.positionals[0] || '').toLowerCase();
+
+  if (sub === 'sync') {
+    console.log(c(C.dim, '从 models.dev 拉价目表…'));
+    try {
+      const r = await syncCatalog();
+      console.log(c(C.ok, `✓ ${r.count.toLocaleString('en-US')} 个模型`));
+      console.log(c(C.dim, `  写入 ${r.file}`));
+      console.log(c(C.dim, `  抓取时间 ${fmtDate(new Date(r.fetchedAt))}`));
+    } catch (e) {
+      console.log(c(C.warn, `✗ 同步失败：${e.message}`));
+      console.log(c(C.dim, '  价目表是可选的：没有它用量层照常报 token，只是没有钱。'));
+    }
+    return;
+  }
+
+  const cat = loadCatalog();
+
+  if (opts.json) {
+    console.log(
+      JSON.stringify(
+        cat.ready
+          ? {
+              ready: true,
+              source: cat.source,
+              fetchedAt: cat.fetchedAt,
+              models: cat.count,
+              file: cat.file,
+            }
+          : { ready: false, reason: cat.reason, file: cat.file },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  if (!cat.ready) {
+    console.log(c(C.when, '没有价目表'));
+    console.log(c(C.dim, `  ${cat.reason}`));
+    console.log('');
+    console.log(c(C.dim, '  同步一次：agent-archive pricing sync'));
+    console.log(c(C.dim, '  只有这一步会联网，读报告时不会。'));
+    return;
+  }
+
+  console.log(c(C.bold, '价目表') + c(C.dim, `   ${cat.count.toLocaleString('en-US')} 个模型`));
+  console.log(c(C.dim, `  来源 ${cat.source} · 抓取于 ${fmtDate(new Date(cat.fetchedAt))}`));
+  console.log(c(C.dim, `  文件 ${cat.file}`));
+  console.log('');
+  console.log(c(C.dim, '  单位是美元 / 百万 token。这是外部参考价，和 Agent 自报的费用是两回事：'));
+  console.log(c(C.dim, '  自报的是"它认为花了多少"，估算的是"按今天的公开价应该花多少"。'));
+  console.log(c(C.dim, '  同一个模型在不同供应商下价不同，这里优先用厂商自己的目录，'));
+  console.log(c(C.dim, '  中转站的报价只作为兜底。'));
+  console.log('');
+  console.log(c(C.dim, '  刷新：agent-archive pricing sync'));
 }
 
 /**
