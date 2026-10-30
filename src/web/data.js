@@ -56,9 +56,13 @@ export const usageSnapshot = memo(async () => {
  * `/env` 和 `/usage`。
  *
  * 所以这一份额外落盘：新进程启动后先读 JSON（几十毫秒），TTL 内不再扫。
- * 过期后照常重算并覆盖，行为和原来的 5 分钟内存缓存一致。
+ * 内存 5 分钟、磁盘 30 分钟：内存过期后先读盘，避免"刚过 5 分钟"又把
+ * 下一页的侧栏重扫一遍；磁盘也过期才真正重算。
  */
 const RECENT_VERSION = 1;
+// 磁盘缓存比内存多留一会儿：内存过期后先读盘（几十毫秒），
+// 不会因为"刚过 5 分钟"就把下一页的侧栏重新扫一遍。
+const RECENT_DISK_TTL_MS = 30 * 60_000;
 let recentValue = null;
 let recentAt = 0;
 
@@ -69,7 +73,7 @@ function recentCacheFile() {
 function readRecentDisk() {
   try {
     const o = JSON.parse(fs.readFileSync(recentCacheFile(), 'utf8'));
-    if (o && Array.isArray(o.value) && Date.now() - Number(o.at) < TTL_MS) {
+    if (o && Array.isArray(o.value) && Date.now() - Number(o.at) < RECENT_DISK_TTL_MS) {
       return { at: Number(o.at), value: o.value };
     }
   } catch {

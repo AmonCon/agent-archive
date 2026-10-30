@@ -112,11 +112,14 @@ let cachedAt = 0;
  * 汇总结果也落盘一份。
  *
  * 这是"从项目点进能力面要等两秒"的主要修复：技能目录 295 个、CLI 产品表、
- * MCP 配置加起来约 2.4 秒，而这份数据 5 分钟内不会变。内存缓存只对同一个
+ * MCP 配置加起来约 2.4 秒，而这份数据短时间内不会变。内存缓存只对同一个
  * 进程有效；serve 每次重启后第一次点能力面又会重算。落盘后新进程读 JSON
- * 约几十毫秒，TTL、失效语义与内存缓存完全一致。
+ * 约几十毫秒。内存 5 分钟、磁盘 30 分钟：内存过期后先读盘，不会重新扫目录。
  */
 const INVENTORY_CACHE_VERSION = 1;
+// 磁盘缓存比内存（5 分钟）留得久：内存过期后先读盘，不重新扫 295 个目录。
+// 环境层的数据是"装了哪些技能/MCP"，半小时内变化很小。
+const INVENTORY_DISK_TTL_MS = 30 * 60_000;
 
 function inventoryCacheFile() {
   return statePath('cache', `inventory-v${INVENTORY_CACHE_VERSION}.json`);
@@ -125,7 +128,7 @@ function inventoryCacheFile() {
 function readInventoryDisk() {
   try {
     const o = JSON.parse(fs.readFileSync(inventoryCacheFile(), 'utf8'));
-    if (o && o.value && Date.now() - Number(o.at) < INVENTORY_TTL_MS) {
+    if (o && o.value && Date.now() - Number(o.at) < INVENTORY_DISK_TTL_MS) {
       return { at: Number(o.at), value: o.value };
     }
   } catch {
