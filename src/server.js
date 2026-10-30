@@ -385,6 +385,7 @@ async function handle(req, res) {
 
       const inv = fullInventory();
       if (tab === 'mcp') return sendJson(res, inv.mcp);
+      if (tab === 'cli') return sendJson(res, inv.cli);
       if (tab === 'skills') return sendJson(res, inv.skills);
       if (tab === 'memory') return sendJson(res, inv.memory);
       return sendJson(res, inv);

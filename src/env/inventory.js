@@ -15,6 +15,7 @@ import path from 'node:path';
 import { mcpSummary } from './mcp.js';
 import { skillSummary } from './skills.js';
 import { memorySummary } from './memory.js';
+import { cliSummary } from './cli.js';
 
 /**
  * 这台机器上"装了什么"的判断。
@@ -100,7 +101,9 @@ export function detectPresence() {
  * 而 TTL 的代价只是"最多晚 N 秒看到变化"，比每次全量扫便宜得多。
  * CLI 每次是独立进程，所以这个缓存只对 MCP 常驻进程有意义。
  */
-const INVENTORY_TTL_MS = 30_000;
+// 环境层扫的是配置/技能目录，变化远没有会话频繁；5 分钟足够，
+// 也避免"刚看完项目、点进能力面"时正好 TTL 过期，卡 4 秒。
+const INVENTORY_TTL_MS = 300_000;
 let cached = null;
 let cachedAt = 0;
 
@@ -135,8 +138,12 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
   // 以真实存在的 Agent 为准（不是三家全集的并集）
   const present = presence.filter((p) => p.level !== 'none');
 
+  // CLI 的可见范围需要知道"本机有哪几家"，所以放在 presence 之后算
+  const cli = cliSummary({ fresh, presentAgents: present.map((p) => p.agent) });
+
   const agents = present.map((p) => {
     const a = p.agent;
+    const cliFor = cli.byAgent[a] || { visible: [], used: [] };
     return {
       agent: a,
       display: p.display,
@@ -147,6 +154,13 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
       // 这里如实分开算——Kiro 的 28 个是符号链接到共享目录的，
       // 算在 Kiro 名下但也算在共享名下，这是事实，不该去重掉
       skills: skills.byAgent[a] || 0,
+      // CLI 可见数按安装位置推断；used 是会话里真的跑过的
+      cli: {
+        visible: cliFor.visible.length,
+        used: cliFor.used.length,
+        calls: cliFor.used.reduce((n, u) => n + u.calls, 0),
+        products: cliFor.visible,
+      },
       memory: memory.byAgent[a] ? memory.byAgent[a].entries || memory.byAgent[a].files : 0,
       memoryLocations: memory.byAgent[a] ? memory.byAgent[a].files : 0,
     };
@@ -164,10 +178,16 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
       skillInstalls: skills.installs,
       memoryLocations: memory.locations,
       memoryEntries: memory.entries,
+      cliProducts: cli.summary.products,
+      cliDetected: cli.summary.detected,
+      cliUsed: cli.summary.used,
+      cliCalls: cli.summary.calls,
+      cliPrivateOnly: cli.summary.privateOnly,
     },
     mcp,
     skills,
     memory,
+    cli,
   };
 
   // 只缓存不含逐条位置信息的版本：includeDetails 是少数派，
@@ -264,6 +284,30 @@ export function auditEnvironment() {
       title: `${orphanSkills.length} 个技能只在共享目录里，没有链接到任何 Agent`,
       detail: `例如：${orphanSkills.slice(0, 5).map((s) => s.name).join('、')}。` +
         `共享目录本身不生效，要有 Agent 目录里的链接或副本才读得到。`,
+    });
+  }
+
+  // 7. CLI 只装在某个 Agent 的私有目录：换一家就"看不见"了。
+  for (const p of inv.cli.privateOnly.slice(0, 8)) {
+    const owners = p.privateOwners.map((a) => DISPLAY[a] || a).join('、');
+    findings.push({
+      level: 'info',
+      area: 'cli',
+      title: `CLI「${p.display}」只装在 ${owners} 的私有目录`,
+      detail: `路径：${p.installs[0] ? p.installs[0].displayPath : '—'}。` +
+        `其他 Agent 默认看不到它；换 Agent 继续干之前，要么把它装到共享位置，要么在那边重新安装。`,
+    });
+  }
+
+  // 8. 会话里跑过，但 PATH 和已知目录里都没找到。
+  //    常见原因是项目本地依赖、WSL、或已经卸载；不猜，只报事实。
+  for (const p of inv.cli.usedOnly.slice(0, 5)) {
+    const users = p.usedBy.map((u) => u.agent).join('、');
+    findings.push({
+      level: 'info',
+      area: 'cli',
+      title: `CLI「${p.display}」有用过记录，但没找到可执行文件`,
+      detail: `调用来自 ${users}。可能是项目本地依赖、WSL 里的安装，或者已经卸载。`,
     });
   }
 

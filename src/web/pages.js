@@ -1471,6 +1471,7 @@ async function pageHandoffIndex() {
 const ENV_TABS = [
   ['overview', '总览'],
   ['mcp', 'MCP'],
+  ['cli', 'CLI'],
   ['skills', '技能'],
   ['usage', '使用率'],
   ['memory', '记忆'],
@@ -1485,6 +1486,7 @@ export async function pageEnv(tab) {
   let body = '';
   if (active === 'overview') body = envOverview(inv);
   else if (active === 'mcp') body = envMcp(inv.mcp);
+  else if (active === 'cli') body = envCli(inv.cli);
   else if (active === 'skills') body = envSkills(inv.skills);
   else if (active === 'usage') body = envUsage(await skillUsageSummary({}));
   else if (active === 'memory') body = envMemory(inv.memory);
@@ -1496,7 +1498,7 @@ export async function pageEnv(tab) {
     eyebrow: '环境层',
     eyebrowIcon: 'layers',
     title: '能力面',
-    lead: `${s.agentsWithData} 家 Agent 有数据 · ${s.mcpServices} 个 MCP 服务 · ${s.skills} 个技能 · ${s.memoryEntries} 条记忆。只报出处，不替你决定。`,  })}
+    lead: `${s.agentsWithData} 家 Agent 有数据 · ${s.mcpServices} 个 MCP 服务 · ${s.cliProducts} 个 CLI 产品 · ${s.skills} 个技能 · ${s.memoryEntries} 条记忆。只报出处，不替你决定。`,  })}
   ${nav}
   ${body}
   ${apiBlock([
@@ -1525,6 +1527,7 @@ function envOverview(inv) {
       <td><span class="strong">${esc(a.display)}</span><span class="sub mono">${esc(a.agent)}</span></td>
       <td class="num">${a.mcp.length}</td>
       <td class="num">${a.skills}</td>
+      <td class="num">${a.cli.visible}<span class="sub">用过 ${a.cli.used}</span></td>
       <td class="num">${a.memory}</td>
       <td>${a.mcp.length ? a.mcp.slice(0, 5).map((m) => badge(m, 'outline')).join('') : '<span class="subtle">—</span>'}${
         a.mcp.length > 5 ? ` <span class="subtle small">+${a.mcp.length - 5}</span>` : ''
@@ -1543,19 +1546,50 @@ function envOverview(inv) {
     </tr>`
   );
 
+  const cliTop = inv.cli.products.slice(0, 8).map(
+    (p) => `<tr>
+      <td><span class="strong">${esc(p.display)}</span><span class="sub mono">${esc(p.id)}</span></td>
+      <td class="num">${p.scope === 'unknown' ? '—' : p.agents.length}</td>
+      <td>${cliScopeCell(p)}</td>
+      <td class="num">${p.calls || '—'}</td>
+      <td>${p.usedBy.length ? p.usedBy.map((u) => agentChip(u.agent, { count: u.calls })).join(' ') : '<span class="subtle">—</span>'}</td>
+    </tr>`
+  );
+
   return `${statGrid([
     { label: 'Agent 有数据', value: String(s.agentsWithData), sub: `识别到 ${s.agentsPresent} 家`, icon: 'users' },
     { label: 'MCP 服务', value: String(s.mcpServices), sub: `${s.mcpRegistrations} 条注册`, icon: 'cpu' },
+    { label: 'CLI 产品', value: String(s.cliProducts), sub: `${s.cliDetected} 个找到安装位置`, icon: 'terminal' },
     { label: '技能', value: String(s.skills), sub: `${s.skillInstalls} 处安装`, icon: 'sparkles' },
     { label: '记忆条目', value: String(s.memoryEntries), sub: `${s.memoryLocations} 处记忆`, icon: 'book' },
   ])}
   <section class="section" style="margin-top:0">
-    ${sectionHead({ title: '各 Agent 的能力面', desc: 'MCP 按服务身份归并，技能按内容哈希归并。' })}
+    ${sectionHead({ title: '各 Agent 的能力面', desc: 'MCP 按服务身份归并，技能按内容哈希归并；CLI 的可见数按安装位置推断。' })}
     <div class="table-wrap">${table({
       wrap: false,
-      head: ['Agent', { label: 'MCP', num: true }, { label: '技能', num: true }, { label: '记忆', num: true }, '配了哪些 MCP'],
+      head: ['Agent', { label: 'MCP', num: true }, { label: '技能', num: true }, { label: 'CLI', num: true }, { label: '记忆', num: true }, '配了哪些 MCP'],
       rows: agentRows,
     })}</div>
+  </section>
+  <section class="section">
+    ${sectionHead({
+      title: 'CLI 产品覆盖',
+      desc: '只列有安装或调用记录的产品；可见范围按可执行文件位置推断。',
+      actions: `<a class="btn outline sm" href="/env?tab=cli">看全部 CLI ${icon('chevronRight', 13)}</a>`,
+    })}
+    ${
+      cliTop.length
+        ? `<div class="table-wrap">${table({
+            wrap: false,
+            head: ['产品', { label: '可见', num: true }, '可见范围', { label: '调用', num: true }, '用过'],
+            rows: cliTop,
+          })}</div>`
+        : emptyState({
+            icon: 'terminal',
+            title: '没有识别到 CLI',
+            desc: 'PATH 和已知的 Agent 私有目录里都没找到可识别的命令行产品。',
+          })
+    }
   </section>
   <section class="section">
     ${sectionHead({ title: 'MCP 服务覆盖', desc: '一家以上配置的服务排前面；分布本身就是信息。' })}
@@ -1598,6 +1632,118 @@ function envMcp(mcp) {
     rows,
   })}</div>
   ${mixed ? `<div class="section">${mixed}</div>` : ''}`;
+}
+
+/** CLI 的可见范围：系统/共享 → 全部 Agent；私有目录 → 那一家。 */
+function cliScopeCell(p) {
+  if (p.scope === 'system') {
+    return `${badge('全部 Agent', 'success')} <span class="subtle small">${p.agents.length} 家</span>`;
+  }
+  if (p.scope === 'agent') {
+    return p.privateOwners.map((a) => agentChip(a)).join(' ');
+  }
+  return badge('未知', 'outline');
+}
+
+function envCli(cli) {
+  if (!cli) return '';
+  const s = cli.summary;
+
+  const rows = cli.products.map(
+    (p) => `<tr>
+      <td>
+        <span class="strong">${esc(p.display)}</span>
+        ${p.category ? badge(cli.categories[p.category] || p.category, 'outline') : ''}
+        <span class="sub mono">${esc(p.id)}${p.detected ? '' : ' · 仅使用记录'}</span>
+      </td>
+      <td><code>${esc(p.binaries.join(' / '))}</code></td>
+      <td>${
+        p.installs.length
+          ? `<span class="mono small">${esc(p.installs[0].displayPath)}</span>${
+              p.installs.length > 1 ? `<span class="sub">另有 ${p.installs.length - 1} 处安装</span>` : ''
+            }`
+          : '<span class="subtle">未找到可执行文件</span>'
+      }</td>
+      <td>${cliScopeCell(p)}</td>
+      <td>${
+        p.usedBy.length
+          ? p.usedBy.map((u) => agentChip(u.agent, { count: u.calls })).join(' ')
+          : '<span class="subtle">—</span>'
+      }</td>
+    </tr>`
+  );
+
+  const privateRows = cli.privateOnly.map(
+    (p) => `<tr>
+      <td><span class="strong">${esc(p.display)}</span><span class="sub mono">${esc(p.id)}</span></td>
+      <td>${p.privateOwners.map((a) => agentChip(a)).join(' ')}</td>
+      <td><span class="mono small">${esc(p.installs[0] ? p.installs[0].displayPath : '—')}</span></td>
+    </tr>`
+  );
+
+  const usedOnlyRows = cli.usedOnly.map(
+    (p) => `<tr>
+      <td><span class="strong">${esc(p.display)}</span><span class="sub mono">${esc(p.id)}</span></td>
+      <td class="num">${p.calls}</td>
+      <td>${p.usedBy.map((u) => agentChip(u.agent, { count: u.calls })).join(' ')}</td>
+      <td class="dim">${esc(p.usedBy[0] && p.usedBy[0].examples[0] ? oneLine(p.usedBy[0].examples[0], 90) : '—')}</td>
+    </tr>`
+  );
+
+  return `${statGrid([
+    { label: '已识别 CLI', value: String(s.detected), sub: `${s.products} 个产品有安装或调用记录`, icon: 'terminal' },
+    { label: '系统可见', value: String(s.systemVisible), sub: '所有 Agent 都能解析到', icon: 'users' },
+    { label: '仅私有目录', value: String(s.privateOnly), sub: '换 Agent 就看不到', icon: 'alert', tone: 'warn' },
+    { label: '有调用记录', value: String(s.used), sub: `${s.calls} 条命令摘要`, icon: 'activity', tone: 'accent' },
+  ])}
+  ${
+    cli.usageReady
+      ? ''
+      : callout(esc(cli.usageMessage || '索引还没建，调用次数暂时算不出来。'), { tone: 'warn', icon: 'alert' })
+  }
+  ${callout(esc(cli.note), { tone: 'info', icon: 'info' })}
+  <section class="section" style="margin-top:18px">
+    ${sectionHead({
+      title: `CLI 产品 · ${s.products}`,
+      desc: '安装位置是事实；可见范围按可执行文件所在目录推断；调用次数来自会话里的 shell 工具调用。',
+    })}
+    <div class="table-wrap">${table({
+      wrap: false,
+      className: 'cli',
+      head: ['产品', '可执行文件', '安装位置', '可见范围', '用过'],
+      rows,
+    })}</div>
+  </section>
+  ${
+    privateRows.length
+      ? `<section class="section">
+          ${sectionHead({
+            title: `只装在单个 Agent 私有目录 · ${privateRows.length}`,
+            desc: '其他 Agent 默认看不到这些可执行文件；换 Agent 继续干之前先补装。',
+          })}
+          <div class="table-wrap">${table({
+            wrap: false,
+            head: ['产品', '只在', '路径'],
+            rows: privateRows,
+          })}</div>
+        </section>`
+      : ''
+  }
+  ${
+    usedOnlyRows.length
+      ? `<section class="section">
+          ${sectionHead({
+            title: `有调用记录但没找到可执行文件 · ${usedOnlyRows.length}`,
+            desc: '可能是项目本地依赖、WSL 里的安装，或者已经卸载。',
+          })}
+          <div class="table-wrap">${table({
+            wrap: false,
+            head: ['产品', { label: '调用', num: true }, '用过的 Agent', '示例命令'],
+            rows: usedOnlyRows,
+          })}</div>
+        </section>`
+      : ''
+  }`;
 }
 
 function envSkills(sk) {

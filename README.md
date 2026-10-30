@@ -1004,7 +1004,7 @@ JSON-RPC」，手写足够，不需要引入任何 npm 包。
 | `read_session` | 读正文，**分段**，默认 8000 字 |
 | `session_stats` | 采集质量、索引规模、已有摘要数量 |
 | `export_timeline` | 导出 Markdown |
-| `inventory` | **环境层**：各 Agent 的 MCP / 技能 / 使用率 / 记忆（`type` 切换） |
+| `inventory` | **环境层**：各 Agent 的 MCP / CLI / 技能 / 使用率 / 记忆（`type` 切换） |
 | `model_calls` | **调用层**：经过网关的请求——token、缓存命中、费用 |
 | `token_usage` | **用量层**：各家 Agent 自己账本里的 token（不需要网关） |
 
@@ -1330,9 +1330,9 @@ node src/cli.js refresh --project E:\my-app
 | `/api/handoff?path=` | 换手数据 |
 | `/api/session?agent=&id=&message=` | 会话正文，`message` 取单条 |
 | `/api/usage?by=` | 用量数据 |
-| `/api/env?tab=` | 能力面数据，`tab` 取 `mcp`/`skills`/`usage`/`memory`/`audit` |
+| `/api/env?tab=` | 能力面数据，`tab` 取 `mcp`/`cli`/`skills`/`usage`/`memory`/`audit` |
 
-`/env` 用六个 tab 而不是一个长页：技能清单有 290 行、记忆有 21 处，
+`/env` 用七个 tab 而不是一个长页：技能清单有几百行、记忆有几十处，
 全堆一页会让人找不到重点。默认落在总览——那才是第一眼该看的。
 
 `tab` 参数只认白名单里的值，别的一律回落到总览，不把用户输入拼进页面。
@@ -1341,7 +1341,7 @@ node src/cli.js refresh --project E:\my-app
 
 `/usage` 的合计**不含口径未知的来源**（目前是 Codex 的会话总量）：
 它们单独一张表，页头只算能按请求拆开的那部分，否则一个 200 亿的累计值
-会把"未缓存输入"整体拉歪。用量快照缓存 60 秒——库里还在写，
+会把"未缓存输入"整体拉歪。用量快照缓存 5 分钟——库里还在写，
 缓存太久会让人以为统计不更新。项目页顶部也有一张同口径的用量卡。
 
 项目页会展示已生成的摘要（可展开的卡片），会话页顶部展示会话摘要。
@@ -1405,13 +1405,14 @@ Codex 的 `{command:["powershell.exe","-NoProfile",...]}`、ZCode 的
 ```
 node src/cli.js env              # 每个 Agent 一行
 node src/cli.js env mcp          # MCP 服务清单，跨 Agent 归并
+node src/cli.js env cli          # CLI 产品、安装位置与各 Agent 的调用
 node src/cli.js env skills       # 技能清单，按内容去重
 node src/cli.js env usage        # 技能使用率：哪些真用过
 node src/cli.js env memory       # 记忆与指令文件
 node src/cli.js env audit        # 体检
 ```
 
-对应的 MCP 工具是 `inventory`（`type` 取 `overview` / `mcp` / `skills` / `usage` / `memory` / `audit`）。
+对应的 MCP 工具是 `inventory`（`type` 取 `overview` / `mcp` / `cli` / `skills` / `usage` / `memory` / `audit`）。
 **这是给新 Agent 用的入口**：它自己调一次 `inventory`，就知道这台机器上别的
 Agent 配了什么、装了什么、记得什么，再自己决定要不要跟进——本工具不替它搬。
 
@@ -1492,6 +1493,33 @@ TOML 和 YAML 都是手写的最小解析器，只取 `mcp_servers` 那一段—
 为一个字段引依赖不值得，而 Codex 的多行数组用单行正则会被吃掉半行
 （第一版就是这么失败的）。
 
+### CLI：装在哪，谁能看见
+
+MCP 和技能之外还有一层常被忽略的能力：命令行产品。同一台机器上，
+`aliyun` 可能装在系统 PATH 里，所有 Agent 都能解析到；`uv` 可能只在
+Hermes 的 `~/.hermes/bin` 里，换一家就"看不见了"。
+
+所以这一层分两半，事实和推断分开报：
+
+- **安装位置是事实**：扫 PATH 和已知的 Agent 私有 bin 目录，找到哪个可执行文件。
+- **可见范围是推断**：系统/共享目录默认对全部 Agent 可见，Agent 私有目录只对那一家可见。
+- **调用记录来自索引**：从 shell 工具调用摘要里统计，用来判断"哪家真的跑过"，不当作精确调用数。
+
+本机实测（`env cli`）：
+
+```
+阿里云 CLI   云服务    全部(12)   39     zcode:23, codex:14, qoder:2
+    ~/AppData/Local/Programs/aliyun-cli/aliyun.exe
+
+uv          运行时    hermes      0      —
+    ~/.hermes/bin/uv.exe
+```
+
+两行合起来才是完整答案：阿里云 CLI 装在系统目录、12 家都能看见，
+但高频调用的是 ZCode（23 次），Codex/Qoder 只是偶尔用；
+`uv` 只装在 Hermes 私有目录，别家看不到。
+`env audit` 会单独提示"只装在单个 Agent 私有目录"的 CLI。
+
 ### 凭证：只给键名，值永不出这个模块
 
 本机实测 **3 份配置里有明文阿里云 AccessKey**（Claude 全局、ZCode、Qoder）。
@@ -1546,7 +1574,7 @@ ZCode 的插件缓存按 `<插件>/<版本>/skills/<技能>` 组织，升级后�
 | 一次读文件，正文和哈希共用同一个 buffer | ~0.15 s | 原先是 `readSkill` 和 `hashSkill` 各读一遍 |
 | 以 `(mtime, size)` 为键做解析缓存 | ~1.0 s | 与会话层 `registry.js` 的 FileParseCache 同一策略 |
 
-汇总层还有 30 秒 TTL 的缓存，因为一个会话里 `inventory` 可能被连调几次
+汇总层还有 5 分钟 TTL 的缓存，因为一个会话里 `inventory` 可能被连调几次
 （先看 overview，再按类型细看）。缓存返回 `structuredClone`，**不是同一引用**——
 MCP 工具会拿列表去 filter/map，一旦改到缓存对象，后面所有调用都读到污染数据，
 症状是"技能数莫名多一个"，极难查。
@@ -1852,7 +1880,7 @@ Hermes 库路径。修完 `mtime is null` 的记录从 193 条降到 0。
 
 **长驻进程用 `scanCached()`，别直接调 `scanAll()`。** serve 和 MCP 都是常驻的，
 一个页面会打出好几个请求（项目列表、时间线、摘要徽标），以前每个请求都完整
-重扫一遍。加了 30 秒 TTL 后实测：首请求 2.35 秒，后续 12 毫秒。返回的是
+重扫一遍。加了 5 分钟 TTL 后实测：首请求 2.35 秒，后续 12 毫秒。返回的是
 `structuredClone`，不是缓存对象本身——下游会拿 sessions 去 filter/sort，
 一处误改会污染后面所有调用（`inventory` 层踩过：技能数莫名多一个）。
 

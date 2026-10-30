@@ -470,19 +470,21 @@ const TOOLS = [
     name: 'inventory',
     title: '本机 Agent 能力面',
     description:
-      '这台机器上各 Agent 具备什么能力：配了哪些 MCP 服务、装了哪些技能、有哪些记忆与指令文件。' +
+      '这台机器上各 Agent 具备什么能力：配了哪些 MCP 服务、装了哪些 CLI、装了哪些技能、有哪些记忆与指令文件。' +
       '用于"我刚装了一个新 Agent，想看看别的 Agent 里已有什么"这种场景。' +
-      '会按启动指纹把同一个 MCP 服务在多家的注册归并成一条，按内容哈希把同一份技能归并成一条。' +
+      '会按启动指纹把同一个 MCP 服务在多家的注册归并成一条，按内容哈希把同一份技能归并成一条，' +
+      'CLI 则区分"系统可见"和"只装在某个 Agent 私有目录"。' +
       '只读，不回传凭证值（只给环境变量的键名），也不合并不同 Agent 的记忆内容。',
     inputSchema: {
       type: 'object',
       properties: {
         type: {
           type: 'string',
-          enum: ['overview', 'mcp', 'skills', 'usage', 'memory', 'audit'],
+          enum: ['overview', 'mcp', 'cli', 'skills', 'usage', 'memory', 'audit'],
           description:
             'overview=每个 Agent 一行的总览（默认）；mcp=MCP 服务清单，含跨 Agent 归并；' +
-            'skills=技能清单；usage=技能使用率（哪些真被调用过）；memory=记忆与指令文件；audit=体检与建议',
+            'cli=命令行产品、安装位置与各 Agent 的调用；skills=技能清单；' +
+            'usage=技能使用率（哪些真被调用过）；memory=记忆与指令文件；audit=体检与建议',
         },
         agent: {
           type: 'string',
@@ -513,6 +515,23 @@ const TOOLS = [
           note: '同一服务在多家的注册已按启动指纹归并。环境变量只给键名，值不读取。',
           mixedForms: inv.mcp.mixedForms,
           list: list.slice(0, cap),
+          truncated: list.length > cap,
+        };
+      }
+
+      if (type === 'cli') {
+        const list = agent
+          ? inv.cli.products.filter(
+              (p) => p.agents.includes(agent) || p.usedBy.some((u) => u.agent === agent)
+            )
+          : inv.cli.products;
+        return {
+          ...inv.cli.summary,
+          note: inv.cli.note,
+          agents: inv.cli.byAgent,
+          privateOnly: inv.cli.privateOnly,
+          usedOnly: inv.cli.usedOnly,
+          products: list.slice(0, cap),
           truncated: list.length > cap,
         };
       }

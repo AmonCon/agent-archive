@@ -474,8 +474,14 @@ export function clearScanCache() {
   scanMemo = null;
 }
 
-/** 同 TTL 的进程内缓存：serve 页面首屏几个请求共用一次扫描。 */
-const SCAN_TTL_MS = 30_000;
+/**
+ * 同 TTL 的进程内缓存：serve 页面首屏几个请求共用一次扫描。
+ *
+ * 30 秒太短了：用户读完一页再点下一页，往往正好跨过 TTL，于是每次换页
+ * 都要重新扫一遍几千个文件，体感就是"网页很慢"。档案馆不是实时仪表盘，
+ * 5 分钟的数据延迟可以接受；CLI 每次是独立进程，不受这个 TTL 影响。
+ */
+const SCAN_TTL_MS = 300_000;
 let scanMemo = null;
 
 /**

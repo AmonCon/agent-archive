@@ -56,6 +56,7 @@ function usage() {
   agent-archive doctor                         采集体检（覆盖率与缺口）
   agent-archive env                            本机各 Agent 具备什么能力
   agent-archive env mcp                        MCP 服务清单（跨 Agent 归并）
+  agent-archive env cli                        CLI 产品、安装位置与各 Agent 的调用
   agent-archive env skills                     技能清单（按内容去重）
   agent-archive env usage                      技能使用率（哪些真用过）
   agent-archive env memory                     记忆与指令文件
@@ -1528,6 +1529,7 @@ function reasonLabel(status) {
  * 子命令按层分开，因为三类数据的消费方式完全不同：
  *   env            总览（每个 Agent 一行）
  *   env mcp        服务清单，按启动指纹归并
+ *   env cli        CLI 产品、安装位置与各 Agent 的调用
  *   env skills     技能清单，按内容哈希归并
  *   env memory     记忆与指令文件
  *   env audit      体检
@@ -1555,6 +1557,15 @@ async function cmdEnv(sub, opts) {
       return;
     }
     printMcpDetail(inv.mcp);
+    return;
+  }
+
+  if (which === 'cli') {
+    if (opts.json) {
+      console.log(JSON.stringify(inv.cli, null, 2));
+      return;
+    }
+    printCli(inv.cli, opts);
     return;
   }
 
@@ -1602,17 +1613,18 @@ function printEnvOverview(inv) {
     c(
       C.dim,
       `  ${s.agentsWithData} 个 Agent 有数据 · MCP ${s.mcpServices} 个服务（${s.mcpRegistrations} 条注册） · ` +
+        `CLI ${s.cliProducts} 个（${s.cliDetected} 个有安装） · ` +
         `技能 ${s.skills} 个（${s.skillInstalls} 处安装） · 记忆 ${s.memoryLocations} 处`
     )
   );
   console.log('');
 
-  const head = ['Agent', 'MCP', '技能', '记忆'];
-  const widths = [18, 6, 6, 8];
+  const head = ['Agent', 'MCP', '技能', 'CLI', '记忆'];
+  const widths = [18, 6, 6, 6, 8];
   console.log(c(C.dim, '  ' + head.map((h, i) => h.padEnd(widths[i])).join('')));
 
   for (const a of inv.agents) {
-    const cells = [a.display, String(a.mcp.length), String(a.skills), String(a.memory)];
+    const cells = [a.display, String(a.mcp.length), String(a.skills), String(a.cli.visible), String(a.memory)];
     const colored = cells.map((v, i) => {
       if (i === 0) return c(C.agent, v.padEnd(widths[i]));
       // 0 不刺眼地留白，有值才高亮
@@ -1635,7 +1647,65 @@ function printEnvOverview(inv) {
   console.log(c(C.dim, '  ● 多家共用   ○ 只在一家'));
   console.log('');
 
-  console.log(c(C.dim, '细看：env mcp / env skills / env memory / env audit'));
+  console.log(c(C.dim, '细看：env mcp / env cli / env skills / env memory / env audit'));
+}
+
+function printCli(cli, opts) {
+  const s = cli.summary;
+  console.log(c(C.bold, 'CLI 产品'));
+  console.log(
+    c(
+      C.dim,
+      `  ${s.detected} 个已识别 / ${s.products} 个有记录 · 系统可见 ${s.systemVisible} · ` +
+        `仅私有 ${s.privateOnly} · 调用记录 ${s.calls}`
+    )
+  );
+  console.log('');
+
+  const all = cli.products;
+  const shown = opts.showAll ? all : all.slice(0, 30);
+  for (const p of shown) {
+    const scope =
+      p.scope === 'system'
+        ? `全部(${p.agents.length})`
+        : p.scope === 'agent'
+          ? p.privateOwners.join('/')
+          : '未知';
+    const used = p.usedBy.map((u) => `${u.agent}:${u.calls}`).join(', ') || '—';
+    const cat = cli.categories[p.category] || p.category;
+    console.log(
+      `  ${p.display.padEnd(24)} ${c(C.dim, cat.padEnd(10))} ${scope.padEnd(12)} ${String(p.calls).padEnd(6)} ${c(
+        C.dim,
+        used
+      )}`
+    );
+    if (p.installs[0]) console.log(c(C.dim, `      ${p.installs[0].displayPath}`));
+  }
+  if (!opts.showAll && all.length > shown.length) {
+    console.log(c(C.dim, `  …共 ${all.length} 个，加 --all 看全部`));
+  }
+  console.log('');
+
+  if (cli.privateOnly.length) {
+    console.log(c(C.when, '只装在单个 Agent 私有目录'));
+    for (const p of cli.privateOnly) {
+      console.log(`  ${p.display}  ${c(C.dim, p.privateOwners.join('、'))}`);
+      if (p.installs[0]) console.log(c(C.dim, `    ${p.installs[0].displayPath}`));
+    }
+    console.log('');
+  }
+
+  if (cli.usedOnly.length) {
+    console.log(c(C.when, '有调用记录但没找到可执行文件'));
+    for (const p of cli.usedOnly) {
+      console.log(
+        `  ${p.display.padEnd(24)} ${String(p.calls).padStart(6)}  ${c(C.dim, p.usedBy.map((u) => u.agent).join(','))}`
+      );
+    }
+    console.log('');
+  }
+
+  console.log(c(C.dim, cli.note));
 }
 
 function printMcpDetail(mcp) {
@@ -1767,7 +1837,8 @@ function printEnvAudit(r) {
   console.log(
     c(
       C.dim,
-      `  ${s.agentsPresent} 个 Agent · MCP ${s.mcpServices} 个服务 · 技能 ${s.skills} 个 · 记忆 ${s.memoryEntries} 条`
+      `  ${s.agentsPresent} 个 Agent · MCP ${s.mcpServices} 个服务 · CLI ${s.cliProducts} 个 · ` +
+        `技能 ${s.skills} 个 · 记忆 ${s.memoryEntries} 条`
     )
   );
   console.log('');

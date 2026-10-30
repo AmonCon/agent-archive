@@ -10,7 +10,9 @@ import { listProjects } from '../query.js';
 import { memorySummary } from '../env/memory.js';
 import { sameProject } from '../model.js';
 
-const TTL_MS = 60_000;
+// 页面数据快照。与扫描缓存同量级：5 分钟内翻页不再重扫，
+// 用户点刷新/重新打开页面仍然会读到最近一次快照。
+const TTL_MS = 300_000;
 
 function memo(fn, ttl = TTL_MS) {
   let at = 0;
