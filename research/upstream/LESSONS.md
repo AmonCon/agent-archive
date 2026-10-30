@@ -140,6 +140,7 @@ HOME 下"的直觉去改，Windows 上反而会读不到。
 | 索引正文压缩 | **已采用（2026-10-30）** | 实测 doc 表 183 MB（body 66.8M 字符），正文 deflate 压缩率约 23% | `doc.body_z` + `readBody()`；老库首开自动迁移并 VACUUM。真实索引 **240 → 169 MB（-26%）**，搜索摘录/凭证结果逐条一致 |
 | 会话页分块加载 | **已采用（2026-10-30）** | cc-switch 的 TurnIndex + 流式下发；我们整页 1.59 MB | 首屏 200 条 + `/api/session/html` 片段 + 「加载更多」；1914 条会话 **1.6 MB → 203 KB**，`&all=1` 兜底 |
 | 扫描器代码进缓存指纹 | **已采用（2026-10-30）** | 缓存原来只认源文件 (mtime, ctime, size)，改扫描器必须手工加 `CACHE_VERSION` | 缓存加 `__fingerprint`（内置 + 用户扫描器内容哈希）；改代码自动全量重扫一次 |
+| 网页首访慢（切换项目/能力面/用量要等 2–3 秒） | **已采用（2026-10-30）** | cc-switch / magpie 快在"常驻进程 + 结果持久化 + 前端先出壳"；我们是同步 SSR + 纯内存缓存，每个进程首访各算一遍 | 最近项目/能力面落盘；`serve` 启动预热能力面、用量、技能使用率；`/env?tab=usage` 不再算完整清单；HTML/JSON/资源 gzip。实测 `/env` 2.4s→12ms、`/usage` 1.7s→33ms、项目页 1.8s→153ms |
 | 活跃时长口径（5 分钟空闲切分、按小时直方图） | 暂缓 | magpie `sessions.go:302-362` | 我们的 `handoff` 已把会话重叠单列；加"活跃时长"会改变现有统计口径，等有需求再做 |
 | Codex 逐请求 delta 计价 | 维持不做 | cc-switch `services/session_usage_codex.rs:299-445`（事件顺序跨版本、`SAME_FLUSH_SLACK_MS`、`total_token_usage` 不能按模型切基线） | 我们的 `usage` 只报各家账本原值，不猜；这套 delta 逻辑工程量与口径风险都大 |
 | 删除会话 / 终端恢复 / 写配置 | 不适用 | cc-switch `mod.rs:176-214`；magpie `library` | 我们是只读档案馆 |

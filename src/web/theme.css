@@ -963,6 +963,13 @@ svg {
   height: 100%;
 }
 
+/* 浅色主题下白底头像会糊进页面，换一道深色描边把边界立起来 */
+[data-theme="light"] .agent-stack .avatar:not(.full),
+[data-theme="light"] .agent-tile:not(.full),
+[data-theme="light"] .srow-tile:not(.full) {
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+}
+
 /* 没有专属标记的 Agent 回落到首字母。 */
 .agent-stack .avatar-letter {
   font-size: 9px;

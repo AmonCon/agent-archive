@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionContent } from './query.js';
@@ -66,7 +67,7 @@ const USAGE_TABS = [
   ['day', '日期'],
 ];
 
-export function startServer({ port = DEFAULT_PORT, host = '127.0.0.1' } = {}) {
+export function startServer({ port = DEFAULT_PORT, host = '127.0.0.1', warm = true } = {}) {
   const server = http.createServer((req, res) => {
     handle(req, res).catch((e) => {
       send(res, 500, { 'content-type': 'text/plain; charset=utf-8' }, `内部错误: ${e && e.message ? e.message : e}`);
@@ -75,11 +76,57 @@ export function startServer({ port = DEFAULT_PORT, host = '127.0.0.1' } = {}) {
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, host, () => {
+    // 先 bind，端口占用能立刻报错；再预热，最后才 resolve 给 CLI 打印地址。
+    // 预热期间用户还不知道地址，不会主动点；已有标签页若自动重连，请求会
+    // 排队等预热结束，但那是少数情况。
+    server.listen(port, host, async () => {
+      if (warm) await warmCaches();
       const addr = server.address();
       resolve({ server, url: `http://${host}:${addr.port}` });
     });
   });
+}
+
+/**
+ * 启动期预热（bind 之后、startServer resolve 之前）。
+ *
+ * 用户抱怨的"第一次点能力面很卡"，本质是每个进程第一次访问都要现扫
+ * 295 个技能目录（约 2.4 秒）。这份数据本来就有 5 分钟缓存，只是缓存是冷的。
+ * 在 CLI 打印地址之前算一次，命中磁盘缓存时只要几毫秒；没命中也就这一次，
+ * 发生在用户开始点页面之前，比点开转圈好得多。
+ *
+ * 会话扫描不在这里预热：它要占住事件循环一到两秒（扫描器升级后甚至更久），
+ * 收益不如代价。用量快照和技能使用率各约 0.5–0.9 秒，预热点一次能换掉
+ * 每次点「用量」的首访等待，值得。
+ */
+async function warmCaches() {
+  // 全部在 startServer 返回之前完成：CLI 打印地址时，这些数据已经就绪。
+  // 会话扫描例外——它太重，留给第一次真正需要会话的请求。
+  const data = await import('./web/data.js').catch(() => null);
+  if (data) {
+    try {
+      await data.recentProjects({ diskOnly: true });
+    } catch {
+      /* 预热失败不影响正常请求 */
+    }
+    try {
+      await data.usageSnapshot();
+    } catch {
+      /* 同上 */
+    }
+  }
+  try {
+    const { skillUsageSummary } = await import('./env/usage.js');
+    skillUsageSummary({});
+  } catch {
+    /* 同上 */
+  }
+  try {
+    const { fullInventory } = await import('./env/inventory.js');
+    fullInventory();
+  } catch {
+    /* 同上 */
+  }
 }
 
 async function handle(req, res) {
@@ -506,12 +553,26 @@ function sendHtml(res, html, code = 200) {
 }
 
 function send(res, code, headers, body) {
+  let payload = Buffer.isBuffer(body) ? body : Buffer.from(body == null ? '' : String(body), 'utf8');
+
+  // 页面和 JSON 常常几百 KB，外部访问时传输时间比计算还长。
+  // 只在客户端声明支持 gzip 且内容值得压时压；动态响应仍然 no-store。
+  const accepted = String(res.req?.headers['accept-encoding'] || '');
+  if (payload.length >= 1024 && /\bgzip\b/i.test(accepted) && !headers['content-encoding']) {
+    try {
+      payload = zlib.gzipSync(payload);
+      headers = { ...headers, 'content-encoding': 'gzip', vary: 'accept-encoding' };
+    } catch {
+      /* 压缩失败就发原文 */
+    }
+  }
+
   res.writeHead(code, {
     'cache-control': 'no-store',
     ...SECURITY_HEADERS,
     ...headers,
   });
-  res.end(body);
+  res.end(res.req?.method === 'HEAD' ? undefined : payload);
 }
 
 /**
@@ -537,13 +598,25 @@ function sendAsset(req, res, asset) {
     return res.end();
   }
 
-  res.writeHead(200, {
+  const headers = {
     'content-type': asset.type,
     'cache-control': 'no-cache',
     etag,
     ...SECURITY_HEADERS,
-  });
-  res.end(req.method === 'HEAD' ? undefined : buf);
+  };
+  let payload = buf;
+  if (buf.length >= 1024 && /\bgzip\b/i.test(String(req.headers['accept-encoding'] || ''))) {
+    try {
+      payload = zlib.gzipSync(buf);
+      headers['content-encoding'] = 'gzip';
+      headers.vary = 'accept-encoding';
+    } catch {
+      /* 压缩失败就发原文 */
+    }
+  }
+
+  res.writeHead(200, headers);
+  res.end(req.method === 'HEAD' ? undefined : payload);
 }
 
 export { projectKey };

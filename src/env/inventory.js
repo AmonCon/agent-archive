@@ -16,6 +16,7 @@ import { mcpSummary } from './mcp.js';
 import { skillSummary } from './skills.js';
 import { memorySummary } from './memory.js';
 import { cliSummary } from './cli.js';
+import { statePath } from '../paths.js';
 
 /**
  * 这台机器上"装了什么"的判断。
@@ -107,6 +108,44 @@ const INVENTORY_TTL_MS = 300_000;
 let cached = null;
 let cachedAt = 0;
 
+/**
+ * 汇总结果也落盘一份。
+ *
+ * 这是"从项目点进能力面要等两秒"的主要修复：技能目录 295 个、CLI 产品表、
+ * MCP 配置加起来约 2.4 秒，而这份数据 5 分钟内不会变。内存缓存只对同一个
+ * 进程有效；serve 每次重启后第一次点能力面又会重算。落盘后新进程读 JSON
+ * 约几十毫秒，TTL、失效语义与内存缓存完全一致。
+ */
+const INVENTORY_CACHE_VERSION = 1;
+
+function inventoryCacheFile() {
+  return statePath('cache', `inventory-v${INVENTORY_CACHE_VERSION}.json`);
+}
+
+function readInventoryDisk() {
+  try {
+    const o = JSON.parse(fs.readFileSync(inventoryCacheFile(), 'utf8'));
+    if (o && o.value && Date.now() - Number(o.at) < INVENTORY_TTL_MS) {
+      return { at: Number(o.at), value: o.value };
+    }
+  } catch {
+    /* 没有或坏了，重算 */
+  }
+  return null;
+}
+
+function writeInventoryDisk(value) {
+  const file = inventoryCacheFile();
+  const tmp = `${file}.tmp-${process.pid}`;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify({ at: Date.now(), value }), 'utf8');
+    fs.renameSync(tmp, file);
+  } catch {
+    /* 写不进去只是下次启动慢一点 */
+  }
+}
+
 /** 测试用：丢掉汇总缓存。 */
 export function clearInventoryCache() {
   cached = null;
@@ -128,6 +167,16 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
     // 被污染的数据——而症状是"技能数莫名多了一个"，极难查。
     // 结构是纯 JSON，深拷贝一份约 1ms，比 debug 便宜得多。
     return structuredClone(cached);
+  }
+
+  // 内存没有就试磁盘：新进程第一次点能力面走这里，避免重扫 295 个技能目录。
+  if (!fresh && !includeDetails) {
+    const disk = readInventoryDisk();
+    if (disk) {
+      cached = disk.value;
+      cachedAt = disk.at;
+      return structuredClone(cached);
+    }
   }
 
   const presence = detectPresence();
@@ -196,6 +245,7 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
   if (!includeDetails) {
     cached = structuredClone(result);
     cachedAt = Date.now();
+    writeInventoryDisk(cached);
   }
 
   return result;

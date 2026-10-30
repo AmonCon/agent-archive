@@ -13,7 +13,7 @@ import {
   agentMark,
   agentGlyph,
   agentLogoSprite,
-  agentIsRaster,
+  agentIsFull,
 } from './format.js';
 import { tildify, projectKey } from '../model.js';
 import { recentProjects } from './data.js';
@@ -309,7 +309,7 @@ export function agentTile(agent, className = 'agent-tile') {
   const b = agentBrand(agent);
   const glyph = agentGlyph(agent);
   if (!glyph) return '';
-  const full = agentIsRaster(agent) ? ' full' : '';
+  const full = agentIsFull(agent) ? ' full' : '';
   return `<span class="${className}${full}" style="--agent-bg:${b.bg};--agent-fg:${b.fg}">${glyph}</span>`;
 }
 
@@ -330,7 +330,7 @@ export function agentStack(agents, max = 4) {
   return `<span class="agent-stack">${shown
     .map((a) => {
       const b = agentBrand(a);
-      const full = agentIsRaster(a) ? ' full' : '';
+      const full = agentIsFull(a) ? ' full' : '';
       return `<span class="avatar${full}" style="--agent-bg:${b.bg};--agent-fg:${b.fg}" title="${esc(
         a
       )}">${agentMark(a)}</span>`;

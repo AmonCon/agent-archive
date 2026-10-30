@@ -590,6 +590,10 @@ async function cmdServe(opts) {
     process.exit(2);
   }
 
+  // 首次启动会把能力面/用量缓存算一遍（见 server.js 的 warmCaches），
+  // 大约几秒。先说一声，别让人以为命令卡住了。
+  if (!opts.json) console.log(c(C.dim, '  正在读取缓存…'));
+
   let started;
   try {
     started = await startServer({ port });

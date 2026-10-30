@@ -1565,8 +1565,12 @@ const ENV_TABS = [
 
 export async function pageEnv(tab) {
   const active = ENV_TABS.some(([k]) => k === tab) ? tab : 'overview';
-  const inv = fullInventory();
-  const s = inv.summary;
+
+  // 只有总览、MCP、CLI、技能、记忆这几个 tab 真的需要完整清单。
+  // 「使用率」只查索引里的技能调用；「体检」内部自己算清单。以前这里
+  // 无条件 fullInventory()，导致点开使用率也要先扫 2.4 秒的技能目录。
+  const needsInventory = ['overview', 'mcp', 'cli', 'skills', 'memory'].includes(active);
+  const inv = needsInventory ? fullInventory() : null;
 
   let body = '';
   if (active === 'overview') body = envOverview(inv);
@@ -1578,12 +1582,18 @@ export async function pageEnv(tab) {
   else body = envAudit(auditEnvironment());
 
   const nav = tabsNav(ENV_TABS, active, (k) => `/env?tab=${k}`);
+  const lead = inv
+    ? `${inv.summary.agentsWithData} 家 Agent 有数据 · ${inv.summary.mcpServices} 个 MCP 服务 · ${inv.summary.cliProducts} 个 CLI 产品 · ${inv.summary.skills} 个技能 · ${inv.summary.memoryEntries} 条记忆。只报出处，不替你决定。`
+    : active === 'usage'
+      ? '技能使用率：装了哪些、用过哪些、哪些一直没用过。只报出处，不替你决定。'
+      : '环境体检：配置不一致、明文凭证、记忆分散等值得注意的事实。只报出处，不替你决定。';
 
   const page = `${pageHead({
     eyebrow: '环境层',
     eyebrowIcon: 'layers',
     title: '能力面',
-    lead: `${s.agentsWithData} 家 Agent 有数据 · ${s.mcpServices} 个 MCP 服务 · ${s.cliProducts} 个 CLI 产品 · ${s.skills} 个技能 · ${s.memoryEntries} 条记忆。只报出处，不替你决定。`,  })}
+    lead,
+  })}
   ${nav}
   ${body}
   ${apiBlock([

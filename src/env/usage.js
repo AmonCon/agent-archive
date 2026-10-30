@@ -261,8 +261,26 @@ export function joinUsage(skills, usage) {
 
 /**
  * 使用率摘要，给 CLI / MCP / 网页用。
+ *
+ * 结果在进程内再压一层：scanSkillUsage 有磁盘缓存，但 scanSkills() 每次
+ * 仍要遍历 295 个技能目录（约 0.5 秒）。网页每打开一次「使用率」都付一遍
+ * 没有必要——技能清单不会在两秒内变。TTL 与其它页面快照一致，5 分钟。
  */
+const SUMMARY_TTL_MS = 300_000;
+let summaryCache = null;
+let summaryAt = 0;
+
+/** 测试用：丢掉进程内摘要缓存。 */
+export function clearSkillUsageSummaryCache() {
+  summaryCache = null;
+  summaryAt = 0;
+}
+
 export function skillUsageSummary({ fresh = false } = {}) {
+  if (!fresh && summaryCache && Date.now() - summaryAt < SUMMARY_TTL_MS) {
+    return Promise.resolve(structuredClone(summaryCache));
+  }
+
   // 延迟 import：skills.js 会扫磁盘，CLI 的其它命令不需要付这个成本
   return import('./skills.js').then(({ scanSkills, groupByHash }) => {
     const usage = scanSkillUsage({ fresh });
@@ -276,7 +294,7 @@ export function skillUsageSummary({ fresh = false } = {}) {
 
     const totalCalls = used.reduce((n, s) => n + s.calls, 0);
 
-    return {
+    const result = {
       ready: true,
       // 会话侧的数字
       calls: totalCalls,
@@ -306,5 +324,9 @@ export function skillUsageSummary({ fresh = false } = {}) {
       unknown: unknown.slice(0, 20),
       cached: usage.cached,
     };
+
+    summaryCache = structuredClone(result);
+    summaryAt = Date.now();
+    return result;
   });
 }

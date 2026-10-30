@@ -6,9 +6,12 @@
  * 用户点刷新时应该看到变化，而不是一份五分钟前的账。
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { listProjects } from '../query.js';
 import { memorySummary } from '../env/memory.js';
 import { sameProject } from '../model.js';
+import { statePath } from '../paths.js';
 
 // 页面数据快照。与扫描缓存同量级：5 分钟内翻页不再重扫，
 // 用户点刷新/重新打开页面仍然会读到最近一次快照。
@@ -45,17 +48,80 @@ export const usageSnapshot = memo(async () => {
   return { r, catalog: catalogInfo.ready ? catalogInfo : null, catalogInfo };
 });
 
-/** 侧栏的"最近项目"。和页面共用同一个扫描缓存，冷启动只多花一次。 */
-export const recentProjects = memo(async () => {
+/**
+ * 侧栏的"最近项目"。
+ *
+ * 每个页面都要它，而 listProjects() 会触发一次全量 stat（本机 2585 个文件
+ * 约 1 秒）。这是所有页面首访的共同固定成本——包括根本不需要会话正文的
+ * `/env` 和 `/usage`。
+ *
+ * 所以这一份额外落盘：新进程启动后先读 JSON（几十毫秒），TTL 内不再扫。
+ * 过期后照常重算并覆盖，行为和原来的 5 分钟内存缓存一致。
+ */
+const RECENT_VERSION = 1;
+let recentValue = null;
+let recentAt = 0;
+
+function recentCacheFile() {
+  return statePath('cache', `recent-projects-v${RECENT_VERSION}.json`);
+}
+
+function readRecentDisk() {
+  try {
+    const o = JSON.parse(fs.readFileSync(recentCacheFile(), 'utf8'));
+    if (o && Array.isArray(o.value) && Date.now() - Number(o.at) < TTL_MS) {
+      return { at: Number(o.at), value: o.value };
+    }
+  } catch {
+    /* 没有或坏了，重算 */
+  }
+  return null;
+}
+
+function writeRecentDisk(value) {
+  const file = recentCacheFile();
+  const tmp = `${file}.tmp-${process.pid}`;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify({ at: Date.now(), value }), 'utf8');
+    fs.renameSync(tmp, file);
+  } catch {
+    /* 写不进去只影响下次启动速度，不影响正确性 */
+  }
+}
+
+export async function recentProjects({ diskOnly = false } = {}) {
+  if (recentValue && Date.now() - recentAt < TTL_MS) return recentValue;
+
+  const disk = readRecentDisk();
+  if (disk) {
+    recentValue = disk.value;
+    recentAt = disk.at;
+    return recentValue;
+  }
+
+  // 启动预热只读磁盘：缓存不在就先空着，别为了侧栏在 listen 之前扫一遍。
+  if (diskOnly) return [];
+
   const { projects } = listProjects({});
-  return projects.slice(0, 10).map((p) => ({
+  const value = projects.slice(0, 10).map((p) => ({
     display: p.display,
     key: p.key,
     count: p.count,
     agents: p.agents,
     end: p.end,
   }));
-});
+  recentValue = value;
+  recentAt = Date.now();
+  writeRecentDisk(value);
+  return value;
+}
+
+/** 测试用：丢掉进程内缓存（磁盘缓存保留，正好用来测跨进程命中）。 */
+export function clearRecentProjectsCache() {
+  recentValue = null;
+  recentAt = 0;
+}
 
 /**
  * 这个项目有没有项目级记忆。
