@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { statePath } from '../paths.js';
 import { tildify } from '../model.js';
-import { openIndex, indexPath } from '../search.js';
+import { openIndex, indexPath, readBody, hasBodyZ } from '../search.js';
 
 /** 产品目录。只用于识别，不代表本机一定装了。 */
 const CLI_CATALOG = [
@@ -579,15 +579,19 @@ export function scanCliUsage({ fresh = false } = {}) {
 
   const calls = [];
   try {
+    // 正文可能是压缩的 body_z，body 为 null；先用 fts_text 里的工具名 token
+    // 粗筛（超集），再用 extractShellCommands 精确匹配 "[Name " 前缀。
     const like = [...SHELL_TOOL_NAMES]
-      .map((n) => `body like '%[${n} %'`)
+      .map((n) => `fts_text like '%${n}%'`)
       .join(' or ');
     const rows = db
-      .prepare(`select agent, id, project, title, start, body from doc where ${like}`)
+      .prepare(
+        `select agent, id, project, title, start, body${hasBodyZ(db) ? ', body_z' : ''} from doc where ${like}`
+      )
       .all();
 
     for (const r of rows) {
-      for (const command of extractShellCommands(r.body)) {
+      for (const command of extractShellCommands(readBody(r))) {
         const product = commandProduct(command);
         if (!product) continue;
         calls.push({

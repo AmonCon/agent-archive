@@ -286,6 +286,133 @@
       true
     );
 
+    /* ------------------------------ 分块追加 ------------------------------ */
+
+    // 首屏只渲染前 200 条，其余由 /api/session/html 按 offset 追加。
+    // 服务端返回的是渲染好的片段（正文已转义），这里只负责搬进 DOM。
+    function chunkUrl(offset) {
+      return (
+        '/api/session/html?agent=' +
+        encodeURIComponent(msgList.dataset.agent || '') +
+        '&id=' +
+        encodeURIComponent(msgList.dataset.session || '') +
+        '&offset=' +
+        encodeURIComponent(String(offset)) +
+        '&limit=200'
+      );
+    }
+
+    function moreButton() {
+      return msgList.querySelector('[data-next]');
+    }
+
+    // 同一时刻只允许一个分块在飞，连点不会把同一段插两次
+    var chunkPending = null;
+
+    function setNote(bar, text, isError) {
+      if (!bar) return;
+      var note = bar.querySelector('.msg-more-note');
+      if (!note) {
+        note = document.createElement('span');
+        note.className = 'msg-more-note';
+        bar.appendChild(note);
+      }
+      note.hidden = !text;
+      note.textContent = text || '';
+      note.classList.toggle('error', Boolean(isError));
+    }
+
+    function loadChunk() {
+      if (chunkPending) return chunkPending;
+      var btn = moreButton();
+      if (!btn) return Promise.resolve(null);
+
+      var bar = btn.closest('.msg-more');
+      var offset = Number(btn.getAttribute('data-next')) || 0;
+      var label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '加载中…';
+      setNote(bar, '', false);
+
+      chunkPending = fetch(chunkUrl(offset), { headers: { accept: 'application/json' } })
+        .then(function (r) {
+          return r.json().then(function (j) {
+            if (!r.ok || j.error) throw new Error(j.error || 'HTTP ' + r.status);
+            return j;
+          });
+        })
+        .then(function (j) {
+          var holder = document.createElement('div');
+          holder.innerHTML = j.html || '';
+          while (holder.firstChild) msgList.insertBefore(holder.firstChild, bar);
+
+          if (j.hasMore) {
+            btn.disabled = false;
+            btn.textContent = '加载更多（还有 ' + Math.max(0, j.total - j.nextOffset) + ' 条）';
+            btn.setAttribute('data-next', String(j.nextOffset));
+          } else {
+            btn.remove();
+            setNote(bar, '已全部加载', false);
+          }
+          return j;
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.textContent = label || '加载更多';
+          setNote(bar, '加载失败：' + (err && err.message ? err.message : err) + '（再点一次重试）', true);
+          return null;
+        })
+        .then(function (j) {
+          chunkPending = null;
+          return j;
+        });
+
+      return chunkPending;
+    }
+
+    function ensureMessage(id) {
+      if (document.getElementById(id)) return Promise.resolve(true);
+      if (!moreButton()) return Promise.resolve(false);
+      return loadChunk().then(function (j) {
+        if (!j) return false;
+        if (document.getElementById(id)) return true;
+        if (!j.hasMore) return false;
+        return ensureMessage(id);
+      });
+    }
+
+    if (msgList) {
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-next]');
+        if (!btn || !msgList.contains(btn)) return;
+        loadChunk();
+      });
+
+      // 对话目录跳转：目标消息还没渲染时先补块，直到出现或没有更多
+      document.addEventListener('click', function (e) {
+        var row = e.target.closest('.turn-row');
+        if (!row) return;
+        var href = row.getAttribute('href') || '';
+        if (href.charAt(0) !== '#') return;
+        var id = href.slice(1);
+        if (document.getElementById(id)) return;
+
+        e.preventDefault();
+        ensureMessage(id).then(function (ok) {
+          if (!ok) {
+            toast('这条消息没有加载出来');
+            return;
+          }
+          var el = document.getElementById(id);
+          if (!el) return;
+          var reduce =
+            window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+          if (history.replaceState) history.replaceState(null, '', href);
+        });
+      });
+    }
+
     /* ------------------------------ 表格筛选 ------------------------------ */
 
     document.querySelectorAll('input[data-filter]').forEach(function (input) {

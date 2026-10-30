@@ -9,6 +9,7 @@ import { timelineMarkdown } from './export.js';
 import { latestProjectDigest, latestSessionSummary } from './digest.js';
 import { deriveStats } from './derive.js';
 import { durationMs, tildify } from './model.js';
+import { summarizeInput } from './messages.js';
 import { discoverUnknownStores } from './doctor.js';
 
 /**
@@ -797,7 +798,7 @@ function renderMessages(messages, includeTools) {
     for (const p of m.parts) {
       if (p.kind === 'text') parts.push(p.text);
       else if (p.kind === 'tool' && includeTools) {
-        const detail = inputSummary(p.input);
+        const detail = summarizeInput(p.input, { limit: 90, jsonLimit: 60 });
         parts.push(`[${p.name}${detail ? ' ' + detail : ''}]`);
       }
     }
@@ -807,19 +808,6 @@ function renderMessages(messages, includeTools) {
     out.push(`## ${who}${when}\n${parts.join('\n')}`);
   }
   return out.join('\n\n');
-}
-
-function inputSummary(input) {
-  if (input == null) return '';
-  if (typeof input === 'string') return clip(input, 80);
-  if (typeof input === 'object') {
-    if (Array.isArray(input.command)) return clip(input.command.join(' '), 90);
-    for (const k of ['command', 'description', 'file_path', 'path', 'query', 'pattern', 'prompt']) {
-      if (typeof input[k] === 'string' && input[k]) return clip(input[k], 90);
-    }
-    return clip(JSON.stringify(input), 60);
-  }
-  return String(input);
 }
 
 /* ------------------------------ 协议 ------------------------------ */
@@ -986,10 +974,6 @@ function iso(d) {
 const pad = (n) => String(n).padStart(2, '0');
 function hhmm(d) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-function clip(s, n) {
-  const t = String(s).replace(/\s+/g, ' ').trim();
-  return t.length > n ? t.slice(0, n) + '…' : t;
 }
 
 // 直接运行就起服务；被 import 则导出 TOOLS 供测试用

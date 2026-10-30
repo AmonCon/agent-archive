@@ -86,7 +86,7 @@ codex       → claude-code     +17.6h 接续
 
 | Agent | 存储位置 | 备注 |
 |---|---|---|
-| Claude Code | `~/.claude/projects/<项目>/<uuid>.jsonl` | 斜杠命令需过滤 |
+| Claude Code | `~/.claude/projects/<项目>/<uuid>.jsonl` | 斜杠命令需过滤；分叉/复制会话会标记，复制品不重复计数 |
 | Codex | `~/.codex/sessions/`、`~/.codex/archived_sessions/` | zstd；续接会话需合并 |
 | ZCode | `~/.zcode/cli/db/db.sqlite` | `semantics.origin` 区分注入 |
 | OpenCode | `~/.local/share/opencode/opencode.db` | 与 ZCode 同源结构 |
@@ -608,6 +608,17 @@ README 里写的那些反直觉事实，比如 **OpenCode 在 macOS 上也用 `~
 第一次（全量）  90 s
 第二次（无变化） 2.8 s   复用 3102 / 重建 0
 ```
+
+**倒排本身也改成了增量。** 以前只要有一场会话变化，就执行 FTS5 的
+`rebuild` 把 226 MB 倒排整体重建（改一场约 6.5 秒）。现在 doc 表的
+增删改由三条触发器同步到 `doc_fts`，日常更新只动变化的那几行；只有首次
+建库、`--force` 和 `reindex` 才走 `rebuild`。本机实测全量重建 7.3 秒，
+增量改一场 2–3 秒（其中约 2 秒是冷扫描，与索引无关）。
+
+**正文压缩。** `doc.body` 存的是整段可读正文（摘录和凭证扫描都要用），
+占索引体积的大头。现在正文以 `zlib.deflateRaw` 压进 `body_z`，老库首次
+打开时自动迁移并 `VACUUM`。本机真实索引 **240 MB → 169 MB（-26%）**，
+迁移 + 回收一次性约 26 秒；搜索摘录和 `secrets` 结果与迁移前逐条一致。
 
 也就是说 90 秒只在首次建索引或 `--force` 时出现。字节游标能把"大量会话各追加
 几行"那次从 22 秒压到更低，但**它救不了首次全量**，而首次全量恰恰是最痛的一次。
@@ -1328,7 +1339,8 @@ node src/cli.js refresh --project E:\my-app
 | `/api/search?q=&agent=&project=&limit=` | 搜索结果 |
 | `/api/digest?path=` | 项目摘要（如果有） |
 | `/api/handoff?path=` | 换手数据 |
-| `/api/session?agent=&id=&message=` | 会话正文，`message` 取单条 |
+| `/api/session?agent=&id=&limit=&offset=&message=` | 会话正文，默认前 200 条，`message` 取单条；响应带 `turns` 目录 |
+| `/api/session/html?agent=&id=&offset=&limit=` | 会话正文的 HTML 片段，供「加载更多」按块追加 |
 | `/api/usage?by=` | 用量数据 |
 | `/api/env?tab=` | 能力面数据，`tab` 取 `mcp`/`cli`/`skills`/`usage`/`memory`/`audit` |
 
@@ -1373,6 +1385,16 @@ node src/cli.js refresh --project E:\my-app
 页面里的折叠块（工具调用、推理）**默认只传摘要**，展开时才去
 `/api/session?...&message=N` 取那一条。一场会话的推理加工具输出常有
 几十万字，全量内联会把页面撑到几百 KB；按需加载后同一页面通常只有一百多 KB。
+
+会话页顶部还有一份**对话目录**：按用户发问切轮，每行给出时间、提问摘要
+（80 字）、工具步数和"有没有最终回复"，点一行跳到对应消息。超过 30 轮默认
+收起——目录本身不该又变成一屏。这一点学自 cc-switch 的 TurnIndex：目录由
+后端算，前端只渲染。
+
+正文也不是一次性全塞进 HTML：首屏只服务端渲染最近 200 条，其余由
+「加载更多」按块取 `/api/session/html` 追加；目录点到的消息还没加载时，
+前端会先补块再滚动。一场 1914 条消息的会话，首屏从 **1.6 MB 降到 203 KB**。
+禁用 JS 时用 `/s?...&all=1` 仍能拿到完整页面。
 
 前端不引任何**第三方**脚本或样式，也不发任何第三方请求。页面自己的
 CSS 和 JS 由本地进程从 `src/web/` 同源提供（带 ETag，改完重启即可）。
@@ -1835,23 +1857,30 @@ Antigravity 是中间态：21 场里 3 场有明文 `transcript_full.jsonl`，
 `src/query.js` 的 `absProject()` 负责归一成绝对路径。
 项目身份属于查询层，不属于展示层。
 
-**缓存**（`src/registry.js`）：以文件路径为键，`(mtime, size)` 都没变就复用
+**缓存**（`src/registry.js`）：以文件路径为键，`(mtime, ctime, size)` 都没变就复用
 上次的解析结果。这与 CC Switch 的 `FileParseCache` 是同一策略——绝大多数
 会话在两次扫描之间没有变化，而重新解析一个 1.8 MB 的 JSONL 要几十毫秒。
 实测 2042 个文件第二次扫描命中 2041 个。
 
-**但只信 `(mtime, size)` 会漏数。** 恢复备份、云盘回写、`git checkout` 都会
+**解析代码本身也进指纹。** 缓存里带一个 `__fingerprint`，由内置扫描器
+（`src/scanners/*.js`）和用户扫描器（`~/.agent-archive/scanners/**`）的内容哈希
+算出。改了扫描器而源会话没变时，缓存会自动作废并重扫一次——以前只能手工
+把 `CACHE_VERSION` 加一，忘了就会一直读旧解析结果。
+
+**只信 `(mtime, size)` 会漏数。** 恢复备份、云盘回写、`git checkout` 都会
 保留 mtime；某些文件系统的 mtime 精度只有 1-2 秒，同一 tick 内两次写入看不出
 差别；等长原地改写 size 完全不变。这三种情况都会让"没变化"这个判断成立，
-而内容其实变了。所以命中前还要比一次**文件头 256 字节的哈希**——这是 MAGPIE
-的判据，代价是每个命中文件多一次小读。
+而内容其实变了。
 
-分两层跑，顺序不能反：先 stat（0.5 秒/2400 文件），只有 stat 说"没变"的才去
-算头哈希。反过来每次先算头哈希会把扫描时间翻倍，收益完全一样。
+原来的做法是每个命中文件再算一次**文件头 256 字节的哈希**（MAGPIE 的判据），
+代价是 2500 个文件约 0.7 秒。现在改成比 **ctime**：它是 inode 状态变更时间，
+内容被改写、哪怕 mtime 被回填成原值，ctime 也会变（Windows / Linux / macOS
+都实测过），而 stat 本身就能拿到，零额外 IO。头部哈希只在 ctime 不可用的
+文件系统上兜底。本机热扫因此从 **2.17 秒降到 1.02 秒**。
 
-**已知盲区**：只改文件中间、头不变、mtime 又被保留的改写，这一层检测不到。
-堵它要对全文做采样哈希，实测 1.6 秒（2400 文件、129 MB），比整个扫描还慢。
-真需要准确结果时用 `--no-cache`。
+**已知盲区**：只改文件中间、头不变，且连 ctime 都能被伪造成原值的改写，
+这一层检测不到。堵它要对全文做采样哈希，实测 1.6 秒（2400 文件、129 MB），
+比整个扫描还慢。真需要准确结果时用 `--no-cache`。
 
 **SQLite 源必须把 `-wal` 一起算进缓存指纹。** Hermes、ZCode、OpenCode 都是
 WAL 模式，新消息先写 `-wal`，主库文件的 mtime/size 可以长时间不动。只按
@@ -1948,6 +1977,9 @@ export function extraFiles(file) { return [`${file}-wal`]; }
 
 ## 下一步（还没做）
 
+- 漂移样本抽成共享 fixture（`test/fixtures/`），供扫描器与 Web/MCP 共用。
+- 会话正文做成 `Header → Messages → Done` 流式下发（现在是分块轮询，
+  首屏已经降到 200 KB 级）。
 - 在 Mac / Linux 上跑一次 `research/probes/verify-mac.mjs`，按输出修正平台差异
 - 批量刷新多项目：现在 `refresh` 一次处理全部，但缺一个"只刷最近活跃项目"的过滤
 

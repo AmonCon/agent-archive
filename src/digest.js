@@ -2,7 +2,8 @@ import path from 'node:path';
 import { projectTimeline, findSessions, readSessionContent } from './query.js';
 import { chat, loadConfig, estimateTokens, estimateCost } from './llm.js';
 import { getArtifact, putArtifact, hashText, latestArtifact } from './derive.js';
-import { tildify, durationMs, projectKey } from './model.js';
+import { tildify, durationMs, projectKey, dayKey } from './model.js';
+import { summarizeInput } from './messages.js';
 
 /**
  * 摘要流水线。
@@ -53,7 +54,7 @@ function sessionToText(session, messages) {
     for (const p of m.parts) {
       if (p.kind === 'text') parts.push(p.text);
       else if (p.kind === 'tool') {
-        const d = summarizeInput(p.input);
+        const d = summarizeInput(p.input, { limit: 70, fallback: 'none' });
         parts.push(`[${p.name}${d ? ' ' + d : ''}]`);
       }
     }
@@ -62,24 +63,6 @@ function sessionToText(session, messages) {
     out.push(`${who}：${parts.join('\n')}`);
   }
   return out.join('\n\n');
-}
-
-function summarizeInput(input) {
-  if (input == null) return '';
-  if (typeof input === 'string') return clip(input, 60);
-  if (typeof input === 'object') {
-    if (Array.isArray(input.command)) return clip(input.command.join(' '), 70);
-    for (const k of ['command', 'description', 'file_path', 'path', 'query', 'pattern', 'prompt']) {
-      if (typeof input[k] === 'string' && input[k]) return clip(input[k], 70);
-    }
-    return '';
-  }
-  return '';
-}
-
-function clip(s, n) {
-  const t = String(s).replace(/\s+/g, ' ').trim();
-  return t.length > n ? t.slice(0, n) + '…' : t;
 }
 
 /** 按段落边界切块，尽量不把一句话切开。 */
@@ -218,7 +201,7 @@ export async function summarizeSession(session, { force = false } = {}) {
 
 function projectPrompt(name, items, meta) {
   const lines = items.map(
-    (x, i) => `${i + 1}. [${x.agent} ${x.start ? x.start.toISOString().slice(0, 10) : ''}] ${x.title}\n${indent(x.summary, '   ')}`
+    (x, i) => `${i + 1}. [${x.agent} ${x.start ? dayKey(x.start) : ''}] ${x.title}\n${indent(x.summary, '   ')}`
   );
   return `项目：${name}
 共 ${meta.total} 场会话（按时间取最近 ${items.length} 场），涉及 ${meta.agents.join(' / ')}，

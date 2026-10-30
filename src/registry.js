@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { statePath } from './paths.js';
 import { disabledAgents } from './config.js';
 import { makeSession } from './model.js';
@@ -47,9 +48,21 @@ export const scanners = [
 /**
  * 扫描结果缓存。
  *
- * 缓存的键是文件路径，命中条件是 (mtime, size) 都没变。这与 CC Switch 的
+ * 缓存的键是文件路径，命中条件是 (mtime, ctime, size) 都没变。这与 CC Switch 的
  * FileParseCache 是同一个策略：绝大多数会话在两次扫描之间没有变化，
  * 而重新解析一个 1.8 MB 的 JSONL 要几十毫秒。
+ *
+ * ## 除了源文件指纹，还锁「解析代码版本」
+ *
+ * 只按源文件判命中会漏掉另一类变化：用户改了自己的扫描器、或应用升级了
+ * 内置扫描器，而源会话文件一字未变。这时旧解析结果会被无限期复用，必须
+ * 手工把 CACHE_VERSION 加一才生效——用户完全看不出原因。
+ *
+ * 所以缓存里多存一个 `__fingerprint`（见 `scannerFingerprint()`）：它是
+ * 内置 src/scanners/*.js 与用户扫描器目录里全部 .js/.mjs 的内容哈希。
+ * 每次扫描先比它，不一致就把整份缓存当作空的、全量重解析一次；一致才
+ * 逐文件比源文件指纹。它不参与文件条目的遍历，是缓存里的元数据而不是
+ * 一个"文件路径"。
  *
  * ## SQLite 源必须把 -wal 一起算进判据
  *
@@ -63,7 +76,7 @@ export const scanners = [
  * 文件"交给 scanner 自己声明（`extraFiles(file)`），因为只有它知道
  * 自家存储有几个附属文件（Cursor 还有 meta.json 之类）。
  *
- * ## 为什么还要算头部哈希
+ * ## 为什么用 ctime，而不是每次都算头部哈希
  *
  * (mtime, size) 会骗人，而且骗得很安静：
  *
@@ -71,20 +84,27 @@ export const scanners = [
  *   - 某些文件系统的 mtime 精度只有 1-2 秒，同一 tick 内两次写入看不出差别
  *   - 等长原地改写（比如把会话里的一个 id 换成另一个）size 完全不变
  *
- * 所以缓存命中不能只信 stat。MAGPIE 的做法是记下文件头 256 字节的哈希，
- * 每次先比头；头变了就整读。这里采用同一判据，代价是每个命中文件多一次
- * 小读——实测 2400 个文件从 0.5 秒涨到 1.2 秒，换掉"mtime 被保留就永久漏数"
- * 这一类静默错误，值得。
+ * 所以缓存命中不能只信 (mtime, size)。cc-switch / MAGPIE 的做法是再比文件头
+ * 256B 的哈希；我们照做过，代价是每个未变文件一次 open+read，本机 2500 个
+ * 文件约 0.7 秒（整个热扫才 1.4 秒）。
  *
- * **已知盲区**（写出来，不假装没有）：只改文件中间、头不变、且 mtime 被
- * 保留的改写，这一层检测不到。要堵住它得对全文做采样哈希，实测要 1.6 秒
- * （2400 个文件、129 MB），比整个扫描还慢，不适合放在每次扫描里。
- * 真需要时用 `--no-cache` 全量重扫。
+ * 现在加了 **ctime**：它是 inode 状态变更时间，内容被改写、哪怕 mtime 被
+ * 回填成原值，ctime 也会变。stat 本身就能拿到，零额外 IO。所以判据变成
+ * 「size + mtime + ctime 都相同才算没变」，头部哈希只在 ctime 不可用的
+ * 文件系统上作为兜底。
+ *
+ * **已知盲区**（写出来，不假装没有）：只改文件中间、头不变，且连 ctime
+ * 都能被伪造成原值的改写，这一层检测不到。要堵住它得对全文做采样哈希，
+ * 实测要 1.6 秒（2400 个文件、129 MB），比整个扫描还慢，不适合放在每次
+ * 扫描里。真需要时用 `--no-cache` 全量重扫。
  *
  * 缓存目录放在用户目录而不是项目里：这是工具自己的运行态数据，
  * 不该污染被归档的项目。
  */
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 5;
+
+/** 缓存里存解析代码指纹的键。它不是文件路径，遍历缓存时必须跳过。 */
+const FINGERPRINT_KEY = '__fingerprint';
 
 /** 头部哈希取多少字节。与 MAGPIE 的 headLen 一致。 */
 const HEAD_BYTES = 256;
@@ -95,6 +115,79 @@ function cacheDir() {
 
 function cacheFile() {
   return path.join(cacheDir(), `scan-v${CACHE_VERSION}.json`);
+}
+
+/**
+ * 解析代码指纹（前 12 位十六进制），进程内只算一次。
+ *
+ * 参与计算的：
+ *   - 内置扫描器 src/scanners/*.js（用 import.meta.url 定位，不写死路径）
+ *   - 用户扫描器 `statePath('scanners')` 下所有 .js/.mjs，含子目录；目录不存在就跳过
+ *
+ * 算法：每个文件取 SHA-256（内容 + 相对路径，后者用来区分不同目录里的
+ * 同名文件），按相对路径排序后依次拼进一个总 SHA-256。内置与用户两组用
+ * `builtin:` / `user:` 前缀分开，避免"内置删一个、用户加一个"这种改动
+ * 互相抵消。
+ *
+ * 只读文件内容：11 个内置扫描器约 150 KB，启动一次的开销可以忽略，
+ * 所以不做 mtime 之类的短路——那会让"改回原内容"这种操作漏过指纹。
+ * 用户扫描器多了以后代价会线性增长，但那是用户自己的选择。
+ */
+let fingerprintMemo = null;
+
+export function scannerFingerprint() {
+  if (fingerprintMemo === null) fingerprintMemo = computeScannerFingerprint();
+  return fingerprintMemo;
+}
+
+function computeScannerFingerprint() {
+  const hash = crypto.createHash('sha256');
+  const builtinDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'scanners');
+  for (const [rel, full] of listScannerSources(builtinDir, false)) {
+    hash.update(`builtin:${rel}\n${fileHash(full)}\n`);
+  }
+  for (const [rel, full] of listScannerSources(statePath('scanners'), true)) {
+    hash.update(`user:${rel}\n${fileHash(full)}\n`);
+  }
+  return hash.digest('hex').slice(0, 12);
+}
+
+/**
+ * 列出目录下的 .js/.mjs，返回 [相对路径, 绝对路径]，按相对路径排序。
+ * 目录不存在或读不了就返回空数组——用户没写扫描器是常态，不是错误。
+ */
+function listScannerSources(dir, recursive) {
+  const out = [];
+  const walk = (abs, rel) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const childAbs = path.join(abs, e.name);
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (recursive) walk(childAbs, childRel);
+      } else if (e.isFile() && /\.m?js$/i.test(e.name)) {
+        out.push([childRel, childAbs]);
+      }
+    }
+  };
+  walk(dir, '');
+  // 排序用字符串比较，不依赖 readdir 的顺序（各平台不一致）
+  out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return out;
+}
+
+/** 单个文件内容的 SHA-256；读不到记一个固定占位，文件消失同样会改变总指纹。 */
+function fileHash(p) {
+  try {
+    return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+  } catch {
+    return 'unreadable';
+  }
 }
 
 export function loadCache() {
@@ -196,9 +289,9 @@ function stampOf(scanner, file, depth = 'head') {
 function statOrNull(p) {
   try {
     const st = fs.statSync(p);
-    return { mtimeMs: st.mtimeMs, size: st.size };
+    return { mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, size: st.size };
   } catch {
-    return { mtimeMs: null, size: null };
+    return { mtimeMs: null, ctimeMs: null, size: null };
   }
 }
 
@@ -266,6 +359,9 @@ function sameStatOnly(a, b) {
     if (x.size !== y.size) return false;
     if (x.sizeOnly) continue;
     if (x.mtimeMs !== y.mtimeMs) return false;
+    // ctime 是 inode 状态变更时间：内容被改写、哪怕 mtime 被回填成原值，
+    // ctime 也会变。Windows / Linux / macOS 上实测都成立。
+    if (x.ctimeMs != null && y.ctimeMs != null && x.ctimeMs !== y.ctimeMs) return false;
   }
   return true;
 }
@@ -288,13 +384,19 @@ function sameStatOnly(a, b) {
  * @returns {{sessions: Array, stats: object}}
  */
 export function scanAll({ noCache = false, only = null } = {}) {
-  const cache = noCache ? {} : loadCache();
+  const fingerprint = scannerFingerprint();
+  const loaded = noCache ? {} : loadCache();
+  // 解析代码指纹不一致（用户改了扫描器 / 应用升级了扫描器）→ 整份缓存作废。
+  // 旧缓存没有这个键，也会走到这里，于是自然全量重扫一次。
+  const cache = loaded && loaded[FINGERPRINT_KEY] === fingerprint ? loaded : {};
   const wanted = only && only.length ? new Set(only) : null;
   // 用户可以在配置文件里禁用某几家（不用、坏了、或者扫描太慢）
   const disabled = disabledAgents();
   // 只扫一部分时，必须**保留**其余 Agent 的缓存条目。
   // 否则保存时会把整份缓存覆盖成子集，下一次全量扫描等于全部重解析
   // （本机实测 50 秒），而且用户完全看不出发生了什么。
+  // 这里复制的是**已通过指纹校验**的那份；`__fingerprint` 只是元数据，
+  // 复制过来无妨，保存时会用当前值覆盖。
   const nextCache = wanted ? { ...cache } : {};
   const sessions = [];
   const stats = { files: 0, parsed: 0, cached: 0, failures: 0, byAgent: {}, headChecked: 0 };
@@ -323,10 +425,19 @@ export function scanAll({ noCache = false, only = null } = {}) {
       let hit = false;
 
       if (prev && sameStatOnly(prev.stamp, statStamp)) {
-        // 第二层：stat 说没变，再用头部哈希确认它不是"同 mtime 的原地改写"
-        stats.headChecked++;
-        stamp = stampOf(scanner, file, 'head');
-        hit = sameStamp(prev.stamp, stamp);
+        // 第二层只在 ctime 不可用时才做头部哈希。
+        //
+        // 以前这里是"stat 相同就再算头哈希"，代价是每个未变文件一次
+        // open+read，本机 2500 个文件约 0.7 秒。而 ctime 已经能识别
+        // "等长改写 + 回填 mtime"这一类伪装（实测三平台都会更新），
+        // 只有极少数文件系统不提供 ctime 时才需要退回头哈希。
+        if (statStamp.files[0].ctimeMs == null) {
+          stats.headChecked++;
+          stamp = stampOf(scanner, file, 'head');
+          hit = sameStamp(prev.stamp, stamp);
+        } else {
+          hit = true;
+        }
       }
 
       let got = null;
@@ -378,6 +489,8 @@ export function scanAll({ noCache = false, only = null } = {}) {
     if (typeof s.closeStore === 'function') s.closeStore();
   }
 
+  // 元数据跟条目一起存：下次扫描先比它，再比每个文件的源指纹
+  nextCache[FINGERPRINT_KEY] = fingerprint;
   saveCache(nextCache);
 
 // 同一场会话可能散在多个文件里（Codex 续接会话就是如此：
@@ -385,9 +498,39 @@ export function scanAll({ noCache = false, only = null } = {}) {
   // 合并成一个条目，时间取包络，source 记成用「|」连接的多段路径，
   // 正文读取时再逐个展开。不合并会让时间线把这场对话显示好几次。
   const merged = mergeByKey(sessions);
-  const enriched = applyEnrichers(merged, stats, wanted);
+  const grouped = applyPostProcessors(merged, stats, wanted);
+  const enriched = applyEnrichers(grouped, stats, wanted);
   enriched.sort((a, b) => (b.end || b.start || 0) - (a.end || a.start || 0));
   return { sessions: enriched, stats };
+}
+
+/**
+ * 让扫描器在**全部文件解析完之后**做一次跨文件后处理。
+ *
+ * 有些事实只有把同一 Agent 的所有会话放在一起才能判断——Claude Code 的
+ * 复制/分叉就是典型：两个 .jsonl 共享首条消息 uuid，单看一个文件不可能知道。
+ *
+ * 与 enrich 的区别是**数据来源**：enrich 读旁路库，postProcess 用的是 parse()
+ * 留在会话上的临时字段 `tmp`。`tmp` 跟着扫描缓存一起存盘，所以缓存命中时
+ * 也能重新聚组；postProcess 处理完必须删掉它，最终模型里不出现这个字段。
+ *
+ * 约定：只在扫描器导出 postProcess 时调用；返回非空数组才替换结果，
+ * 抛错不影响采集（记进 stats.postProcessErrors）。
+ */
+function applyPostProcessors(sessions, stats, wanted) {
+  let out = sessions;
+  for (const scanner of scanners) {
+    if (typeof scanner.postProcess !== 'function') continue;
+    if (wanted && !wanted.has(scanner.name)) continue;
+    try {
+      const next = scanner.postProcess(out);
+      if (Array.isArray(next) && next.length) out = next;
+    } catch (e) {
+      stats.postProcessErrors = stats.postProcessErrors || {};
+      stats.postProcessErrors[scanner.name] = e && e.message ? e.message : String(e);
+    }
+  }
+  return out;
 }
 
 /**
@@ -586,6 +729,10 @@ function normalizeAll(scanner, list) {
     // 当项目列出来会污染项目清单——而错的路径比缺数据难发现得多。
     // 放在这里而不是每个扫描器各写一遍：任何一家都可能犯这个错。
     if (s.project && isUnder(s.project, roots)) s.project = null;
+
+    // 扫描器留给 postProcess 的跨文件聚组数据。它不属于会话模型，
+    // 但必须跟着缓存走，所以在这里原样带过去；postProcess 用完负责删除。
+    if (raw.tmp !== undefined) s.tmp = raw.tmp;
 
     out.push(s);
   }

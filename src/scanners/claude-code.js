@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { makeSession } from '../model.js';
+import { makeSession, projectKey } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '../messages.js';
 import { withOverrides } from '../platform.js';
 import { isDirEntry } from '../fsentry.js';
@@ -118,6 +118,12 @@ export function parse(file) {
   let aiTitle = null;
   let start = null;
   let end = null;
+  // 以下只用于扫描器内部判断"谁是原、谁是复制/分叉"，postProcess 用完即弃，
+  // 不进最终会话模型的约定字段（见 tmp 的说明）。
+  let firstUuid = null;
+  let leafUuid = null;
+  let msgCount = 0;
+  const summaryUuids = [];
 
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
@@ -131,6 +137,14 @@ export function parse(file) {
     if (o.sessionId) sessionId = o.sessionId;
     // ai-title 是 Claude 自己生成的标题，优先用它
     if (o.type === 'ai-title' && o.title) aiTitle = o.title;
+
+    // compaction summary：不参与时间/标题，但复制过的会话会共享它的 uuid，
+    // 分叉点在压缩之后时，首条消息 uuid 可能不同，靠它才能认出来
+    if (o.type === 'summary') {
+      if (o.uuid) summaryUuids.push(o.uuid);
+      if (o.leafUuid) summaryUuids.push(o.leafUuid);
+      continue;
+    }
 
     const ts = o.timestamp;
     if (ts) {
@@ -147,6 +161,14 @@ export function parse(file) {
     // 这些是 Claude Code 的内部事件，出现在消息流里但不是真对话
     if (o.isSidechain) continue;
 
+    // 主线程的消息 uuid：首条是所有复制/分叉共享的根，末条用于区分
+    // "内容完全一样（复制）"和"之后还有新内容（分叉）"
+    if (o.uuid) {
+      if (!firstUuid) firstUuid = o.uuid;
+      leafUuid = o.uuid;
+      msgCount++;
+    }
+
     if (o.cwd && !cwd) cwd = o.cwd;
 
     if (role === 'user' && !firstUserText) {
@@ -157,7 +179,7 @@ export function parse(file) {
 
   if (!start && !end) return null;
 
-  return makeSession({
+  const session = makeSession({
     agent: name,
     id: sessionId,
     project: cwd,
@@ -167,6 +189,98 @@ export function parse(file) {
     source: file,
     resume: `claude --resume ${sessionId}`,
   });
+  // 临时字段：跟着扫描缓存走（parse 结果会被序列化存盘），供 postProcess
+  // 在跨文件聚组时使用。postProcess 负责删掉，不进入最终模型。
+  session.tmp = { firstUuid, leafUuid, summaryUuids, msgCount };
+  return session;
+}
+
+/**
+ * 识别同一 Claude 项目下的复制 / 分叉会话。
+ *
+ * `--fork-session` 与 `/branch` 会把整段历史复制进一个新的 session 文件，
+ * 于是同一段对话在磁盘上有多个 .jsonl。按文件逐个 parse 时它们看起来是
+ * 几场独立会话，列表会虚高。
+ *
+ * 判定（与 magpie 的 cc_copies.go 同一思路，规则从简）：
+ *   - 先按「首条消息 uuid」+「compaction summary uuid」聚组，同一组是共享
+ *     历史的文件；
+ *   - 组内 start 最早的是原会话；start 相同按文件路径字典序（不猜 mtime）；
+ *   - 与原会话 leafUuid 相同 → 完全复制，记 copyOf；
+ *     不同 → 之后还有新内容，是分叉，记 branchOf。
+ *
+ * 复制品由 mainOnly 过滤掉；分叉保留在时间线里，只是带上来源标记。
+ * 没有任何证据（老缓存没有 tmp）的会话一律不动，避免把历史会话误判成复制品。
+ */
+export function postProcess(sessions) {
+  const entries = [];
+  for (const s of sessions) {
+    if (s.agent !== name) continue;
+    const t = s.tmp;
+    delete s.tmp;
+    if (!t || !t.firstUuid) continue;
+    entries.push({ s, t });
+  }
+  if (entries.length < 2) return sessions;
+
+  // 并查集：共享任一历史 uuid 的文件归为同一条历史
+  const parentOf = new Map();
+  for (const e of entries) parentOf.set(e.s, e.s);
+  const find = (x) => {
+    let r = x;
+    while (parentOf.get(r) !== r) r = parentOf.get(r);
+    return r;
+  };
+  const union = (a, b) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parentOf.set(ra, rb);
+  };
+
+  const firstOwner = new Map();
+  for (const e of entries) {
+    const pk = projectKey(e.s.project) || '';
+    for (const u of [e.t.firstUuid, ...(e.t.summaryUuids || [])]) {
+      if (!u) continue;
+      const k = `${pk}|${u}`;
+      const prev = firstOwner.get(k);
+      if (prev) union(prev, e.s);
+      else firstOwner.set(k, e.s);
+    }
+  }
+
+  const groups = new Map();
+  for (const e of entries) {
+    const root = find(e.s);
+    const list = groups.get(root);
+    if (list) list.push(e);
+    else groups.set(root, [e]);
+  }
+
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    list.sort(compareOriginal);
+    const orig = list[0];
+    for (const e of list.slice(1)) {
+      const sameLeaf = !!e.t.leafUuid && e.t.leafUuid === orig.t.leafUuid;
+      if (sameLeaf) e.s.copyOf = orig.s.id;
+      else e.s.branchOf = orig.s.id;
+    }
+  }
+  return sessions;
+}
+
+/** 原会话排序：start 早的在前；start 相同按文件路径字典序。 */
+function compareOriginal(a, b) {
+  const ta = a.s.start ? new Date(a.s.start).getTime() : Infinity;
+  const tb = b.s.start ? new Date(b.s.start).getTime() : Infinity;
+  if (ta !== tb) return ta - tb;
+  const sa = String(a.s.source || '');
+  const sb = String(b.s.source || '');
+  if (sa !== sb) return sa < sb ? -1 : 1;
+  const ia = String(a.s.id);
+  const ib = String(b.s.id);
+  return ia < ib ? -1 : ia > ib ? 1 : 0;
 }
 
 function extractText(content) {

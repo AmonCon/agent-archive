@@ -18,6 +18,7 @@ import { latestProjectDigest, latestSessionSummary } from '../digest.js';
 import { projectHandoffs, pickHandoffs } from '../handoff.js';
 import { quickFreshness } from '../refresh.js';
 import { durationMs, tildify } from '../model.js';
+import { buildTurns } from '../turns.js';
 import { summarizeUsage } from '../usage.js';
 import { fullInventory, auditEnvironment } from '../env/inventory.js';
 import { skillUsageSummary } from '../env/usage.js';
@@ -33,6 +34,7 @@ import {
   badge,
   agentChip,
   agentStack,
+  agentTile,
   sparkline,
   sparkSvg,
   stackBar,
@@ -278,10 +280,12 @@ export async function pageTimeline(target, openAll) {
       const kind = s.kind === 'subagent' ? ` ${badge('子代理', 'outline')}` : '';
       timeline += `<a class="srow" href="${esc(href)}">
         <time>${esc(s.start ? fmtTime(s.start) : '—')}</time>
-        <span style="--agent:${agentColor(s.agent)}"><span class="agent-dot"></span></span>
+        <span style="--agent:${agentColor(s.agent)}">${
+          agentTile(s.agent, 'srow-tile') || '<span class="agent-dot"></span>'
+        }</span>
         <span class="title" title="${esc(s.title)}">${esc(s.title)}${kind}</span>
         <span class="dur">${esc(fmtDur(durationMs(s)) || '—')}</span>
-        ${agentChip(s.agent)}
+        <span class="agent-name">${esc(s.agent)}</span>
         <span class="go">${icon('chevronRight', 14)}</span>
       </a>`;
     }
@@ -567,7 +571,32 @@ function digestMissing(target) {
 
 /* ------------------------------ 会话 ------------------------------ */
 
-export async function pageSession(agent, id) {
+/** 首屏渲染的消息条数，其余由页面脚本按需追加。 */
+export const SESSION_CHUNK = 200;
+
+/**
+ * 分块区间。
+ *
+ * offset 超出总数时收敛到末尾（返回空块），保证 nextOffset 不越界。
+ * 没有更多时 nextOffset 为 null，和 /api/session 的分页语义一致。
+ */
+export function sessionChunkRange(total, offset = 0, limit = SESSION_CHUNK) {
+  const start = Math.min(Math.max(0, offset), total);
+  const end = Math.min(start + limit, total);
+  return { total, offset: start, end, hasMore: end < total, nextOffset: end < total ? end : null };
+}
+
+/**
+ * 消息列表 HTML。
+ *
+ * 一场大会话有上千条消息，整页内联动辄 1.5 MB。分块渲染时 id 必须保持
+ * 在整场会话里的绝对序号，#m<index> 才能和对话目录对得上。
+ */
+export function renderMessagesHtml(messages, startIndex = 0) {
+  return messages.map((m, i) => renderMessageHtml(m, startIndex + i)).join('');
+}
+
+export async function pageSession(agent, id, showAll = false) {
   if (!id) return pageNotFound('缺少会话 id');
 
   const { matches } = findSessions({ query: id, agent });
@@ -644,12 +673,21 @@ export async function pageSession(agent, id) {
   })();
 
   const digest = ss ? digestCard({ dg: ss, sessions: [], kind: 'session' }) : '';
+  const turns = buildTurns(messages);
 
   // 有些 Agent 的标题是「会话 id + 第一句」，id 已经在下面的元信息里，
   // 标题只留人话，免得一屏都是 uuid。
   const rawTitle = String(session.title || session.id);
   const displayTitle = rawTitle.startsWith(session.id) ? rawTitle.slice(session.id.length).trim() : rawTitle;
   const title = displayTitle || session.id;
+
+  // 首屏只渲染前 SESSION_CHUNK 条，其余由 /api/session/html 追加。
+  // showAll 是给禁用 JS 的读者的兜底（/s?...&all=1）。
+  const shown = showAll ? messages : messages.slice(0, SESSION_CHUNK);
+  const hasMore = !showAll && messages.length > SESSION_CHUNK;
+  const allHref = `/s?agent=${encodeURIComponent(session.agent)}&id=${encodeURIComponent(
+    session.id
+  )}&all=1`;
 
   const body = `${pageHead({
     eyebrow: '会话',
@@ -674,19 +712,41 @@ export async function pageSession(agent, id) {
       : ''
   }
   ${digest}
-  <section class="section" style="margin-top:${digest ? '18px' : '4px'}">
+  ${
+    turns.length
+      ? `<section class="section" style="margin-top:${digest ? '18px' : '4px'}">
+    ${sectionHead({
+      title: '对话目录',
+      desc: '按提问切分；点一行跳到对应消息。',
+    })}
+    ${turnListHtml(turns)}
+  </section>`
+      : ''
+  }
+  <section class="section" style="margin-top:${turns.length || digest ? '18px' : '4px'}">
     ${sectionHead({
       title: '对话',
       desc: '工具入参与输出默认折叠，展开时才取全文；文字内容不改写。',
       actions: `<a class="btn ghost sm" href="#main">${icon('arrowUp', 13)} 顶部</a>`,
     })}
     <div class="msg-list" id="messages" data-agent="${esc(session.agent)}" data-session="${esc(session.id)}">
-      ${messages.map((m, i) => renderMessageHtml(m, i)).join('') ||
-        `<div class="empty"><h3>这场会话没有可显示的消息</h3></div>`}
+      ${renderMessagesHtml(shown, 0) || `<div class="empty"><h3>这场会话没有可显示的消息</h3></div>`}
+      ${
+        hasMore
+          ? `<div class="msg-more">
+        <button class="btn outline" type="button" data-next="${SESSION_CHUNK}">加载更多（还有 ${
+            messages.length - SESSION_CHUNK
+          } 条）</button>
+        <span class="msg-more-note" hidden>已全部加载</span>
+        <noscript><a class="btn ghost sm" href="${esc(allHref)}">加载全部</a></noscript>
+      </div>`
+          : ''
+      }
     </div>
   </section>
   ${apiBlock([
-    `GET /api/session?agent=${encodeURIComponent(session.agent)}&id=${encodeURIComponent(session.id)}`,
+    `GET /api/session?agent=${encodeURIComponent(session.agent)}&id=${encodeURIComponent(session.id)}&limit=200`,
+    `GET /api/session/html?agent=&id=&offset=200&limit=200`,
     `GET /api/session?...&message=N`,
     `GET /export?kind=session&agent=&id=`,
   ])}`;
@@ -698,6 +758,31 @@ export async function pageSession(agent, id) {
     currentProject: session.project || '',
     body,
   });
+}
+
+/**
+ * 对话目录。
+ *
+ * 轮次少的时候平铺；超过 30 轮默认收起，免得目录本身又变成一屏。
+ */
+function turnListHtml(turns) {
+  const rows = turns
+    .map(
+      (t) => `<a class="turn-row" href="#m${t.index}">
+      <span class="turn-time">${esc(t.start ? fmtDate(t.start) : '—')}</span>
+      <span class="turn-q">${esc(t.question)}</span>
+      <span class="turn-meta">${t.steps} 步 · ${t.hasFinalReply ? '有最终回复' : '无最终回复'}${
+        t.errors ? ` · ${t.errors} 个错误` : ''
+      }</span>
+    </a>`
+    )
+    .join('');
+
+  if (turns.length <= 30) return `<div class="turn-list">${rows}</div>`;
+  return `<details class="turn-details">
+      <summary>共 ${turns.length} 轮，展开目录</summary>
+      <div class="turn-list">${rows}</div>
+    </details>`;
 }
 
 /**

@@ -24,8 +24,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { statePath } from '../paths.js';
+import { readBody, hasBodyZ, openIndex } from '../search.js';
 
 const CACHE_VERSION = 1;
 
@@ -94,10 +94,9 @@ export function scanSkillUsage({ fresh = false } = {}) {
     }
   }
 
-  let db;
-  try {
-    db = new DatabaseSync(idx, { readOnly: true });
-  } catch {
+  // 与 secrets 同理：只读打开交给 openIndex，别绕过它的边车处理与兜底。
+  const db = openIndex({ create: false });
+  if (!db) {
     return { ready: false, message: '索引打不开', calls: [], bySkill: new Map() };
   }
 
@@ -106,15 +105,19 @@ export function scanSkillUsage({ fresh = false } = {}) {
   const sessionSet = new Set();
 
   try {
-    // 只取含 Skill 的行，避免把 980 场正文全读进内存
+    // 只取含 Skill 的行，避免把 980 场正文全读进内存。
+    //
+    // 正文可能已经压进 body_z，body 为 null，所以按 fts_text 里的 Skill token
+    // 粗筛（它始终由同一份正文生成、不受压缩影响），再用 extractSkillCalls
+    // 对解压后的正文精确匹配。粗筛是超集，不影响最终结果。
     const rows = db
       .prepare(
-        "select agent, id, project, title, start, body from doc where body like '%[Skill %' or body like '%[skill %'"
+        `select agent, id, project, title, start, body${hasBodyZ(db) ? ', body_z' : ''} from doc where fts_text like '%skill%'`
       )
       .all();
 
     for (const r of rows) {
-      const found = extractSkillCalls(r.body || '');
+      const found = extractSkillCalls(readBody(r));
       for (const c of found) {
         const key = normalizeSkillName(c.skill);
         calls.push({

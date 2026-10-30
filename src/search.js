@@ -2,9 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
+import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { scanCached } from './registry.js';
 import { readSessionContent } from './query.js';
 import { statePath } from './paths.js';
+import { summarizeInput } from './messages.js';
 
 /**
  * 全文索引。
@@ -46,13 +48,16 @@ const SCHEMA_STATEMENTS = [
      size integer,
      kind text not null default 'main',
      body text,
+     body_z blob,
      fts_text text
    )`,
   'create index if not exists doc_agent on doc(agent)',
   'create index if not exists doc_start on doc(start)',
-  // FTS 表挂在 doc 上（content=），自己不存正文，用 FTS5 原生的 rebuild
-  // 一次性建倒排——逐条 insert 的代价随索引规模增长，几百条之后就慢得
-  // 不可接受。
+  // FTS 表挂在 doc 上（content=），自己不存正文。
+  //
+  // 首次建库用 FTS5 原生的 rebuild 一次性建倒排——逐条 insert 的代价随
+  // 索引规模增长，几百条之后就慢得不可接受。建好之后由触发器增量维护
+  // （见 TRIGGER_STATEMENTS）：改一场只动一场，不再全量重建 226 MB。
   //
   // 索引的是 doc.fts_text（正文 + 中文二元组），原始正文另存在 doc.body，
   // 供摘录使用。两列都在 doc 里，FTS 只引用它需要的那个。
@@ -63,6 +68,94 @@ const SCHEMA_STATEMENTS = [
 
 /** 每批写入多少场。批越小占内存越少；批越大事务开销摊得越薄。 */
 const BATCH = 50;
+
+/**
+ * 从 doc 的一行取回原始正文。
+ *
+ * 正文按 zlib deflate 存在 body_z（实测压缩率约 23%），老数据仍是明文 body。
+ * 读取一律走这里，调用方不用关心是哪一种。两种情况都没有就是空串。
+ *
+ * 解压失败（例如库被截断）返回空串而不是抛：读路径是搜索、摘录、凭证扫描，
+ * 一行坏数据不该让整个功能报错。
+ */
+export function readBody(row) {
+  if (!row) return '';
+  if (row.body !== null && row.body !== undefined) return String(row.body);
+  if (row.body_z) {
+    try {
+      return inflateRawSync(row.body_z).toString('utf8');
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+/** 写库时的压缩入口，和 readBody 保持同一对。 */
+function compressBody(body) {
+  return deflateRawSync(Buffer.from(String(body), 'utf8'));
+}
+
+/**
+ * 库里有没有 body_z 列。
+ *
+ * 只读打开（search / secrets）不会跑迁移，升级后第一次查询可能仍然是老库。
+ * 直接 `select body_z` 会报 no such column，整个查询变成空结果——所以读路径
+ * 先探一下列，没有就只读明文 body。
+ */
+export function hasBodyZ(db) {
+  try {
+    return db.prepare('pragma table_info(doc)').all().some((c) => c.name === 'body_z');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * FTS5 外部内容表的同步触发器。
+ *
+ * doc_fts 是 external content 表（content='doc'），它自己不存正文，
+ * 所以 doc 每次变更都要有人告诉它：新增了什么、删掉的是哪一行的旧值。
+ * 这三条触发器就是那个"人"。
+ *
+ * 为什么用触发器而不是在 JS 里手动 insert：
+ *   - doc 的写入分散在多处（增量写入、清理已消失的会话、--force 全量重写），
+ *     手写维护迟早漏一处，而漏掉的表现是**搜索静默缺结果**；
+ *   - FTS5 的 'delete' 命令要求给出**入索引时的那份原文**，
+ *     触发器里的 old.fts_text 天然就是它。
+ *
+ * `if not exists` 让老索引库（只有 doc、没有触发器）在下次打开时自动补上，
+ * 不需要重建。
+ */
+const TRIGGER_STATEMENTS = [
+  `create trigger if not exists doc_fts_ai after insert on doc begin
+     insert into doc_fts(rowid, fts_text) values (new.rowid, new.fts_text);
+   end`,
+  `create trigger if not exists doc_fts_ad after delete on doc begin
+     insert into doc_fts(doc_fts, rowid, fts_text) values('delete', old.rowid, old.fts_text);
+   end`,
+  `create trigger if not exists doc_fts_au after update on doc begin
+     insert into doc_fts(doc_fts, rowid, fts_text) values('delete', old.rowid, old.fts_text);
+     insert into doc_fts(rowid, fts_text) values (new.rowid, new.fts_text);
+   end`,
+];
+
+const TRIGGER_NAMES = ['doc_fts_ai', 'doc_fts_ad', 'doc_fts_au'];
+
+/** 补上同步触发器（幂等）。每次可写打开都跑，老库因此自动升级。 */
+function ensureTriggers(db) {
+  for (const stmt of TRIGGER_STATEMENTS) db.prepare(stmt).run();
+}
+
+/**
+ * 摘掉同步触发器。
+ *
+ * 只用于全量构建：几千场逐行触发会把首次建库拖慢一个量级，
+ * 而整库写完用一次 rebuild 就能建好倒排。
+ */
+function dropTriggers(db) {
+  for (const name of TRIGGER_NAMES) db.prepare(`drop trigger if exists ${name}`).run();
+}
 
 function indexDir() {
   return statePath('index');
@@ -173,6 +266,30 @@ function queryFor(q) {
 }
 
 /**
+ * 清掉 0 字节 WAL 与配套 SHM。
+ *
+ * Node 24 + Windows 上实测：写连接正常关闭后会留下 0 字节的 `-wal` 和
+ * `-shm`，下一次打开同一个库直接报 `disk I/O error`，直到手工删掉这两个
+ * 文件才恢复。0 字节 WAL 表示没有任何未 checkpoint 的帧，删掉不影响数据；
+ * 非空 WAL 一律不动。被其他进程占用时删不掉，交给后面的 immutable 兜底。
+ */
+function clearEmptySidecars(file) {
+  const wal = `${file}-wal`;
+  try {
+    if (fs.statSync(wal).size !== 0) return;
+  } catch {
+    return;
+  }
+  for (const p of [wal, `${file}-shm`]) {
+    try {
+      fs.rmSync(p, { force: true });
+    } catch {
+      /* 被占用就保持原样 */
+    }
+  }
+}
+
+/**
  * 打开索引库。
  *
  * WAL + busy timeout 是必须的：建索引时会长时间持有写事务，
@@ -187,17 +304,24 @@ function openIndex({ create = true } = {}) {
   // 读路径一律只读打开：查看器本身是只读的，不需要为了查一次
   // 去写 schema 或切 WAL。
   if (!create) {
-    const db = new DatabaseSync(file, { readOnly: true });
-    try {
-      db.prepare('pragma busy_timeout = 5000').run();
-      // 真的读一次库，确认 WAL/SHM 没被别的进程锁死
-      db.prepare('select count(*) c from sqlite_master').get();
-      return db;
-    } catch {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let db;
       try {
-        db.close();
+        db = new DatabaseSync(file, { readOnly: true });
+        db.prepare('pragma busy_timeout = 5000').run();
+        // 真的读一次库，确认 WAL/SHM 没被别的进程锁死
+        db.prepare('select count(*) c from sqlite_master').get();
+        return db;
       } catch {
-        /* 关不掉也不影响后面的兜底 */
+        try {
+          if (db) db.close();
+        } catch {
+          /* 关不掉也不影响后面的兜底 */
+        }
+        // 第一次失败先清掉 0 字节边车再试一次；还可能只是被写锁占住，
+        // 那就别再动文件，交给下面的 immutable 兜底。
+        if (attempt === 0) clearEmptySidecars(file);
+        else break;
       }
     }
     // 索引文件被写锁占住时，普通只读连接可能连 -shm 都建不出来。
@@ -208,6 +332,9 @@ function openIndex({ create = true } = {}) {
     });
   }
 
+  // 写打开前先清一次：上一个写进程异常退出时留下的空 WAL 会让本次 open
+  // 直接 disk I/O error。只在确认 WAL 为 0 字节时动手，见函数注释。
+  clearEmptySidecars(file);
   fs.mkdirSync(indexDir(), { recursive: true });
 
   const db = new DatabaseSync(file);
@@ -225,6 +352,8 @@ function openIndex({ create = true } = {}) {
 
   for (const stmt of SCHEMA_STATEMENTS) db.prepare(stmt).run();
   migrate(db);
+  // 老库在这里补齐触发器；新库也在这里建。之后 doc 的增删改自动同步到 FTS。
+  ensureTriggers(db);
   return db;
 }
 
@@ -251,6 +380,72 @@ function migrate(db) {
     } catch {
       /* 并发建索引时可能已被别人加上 */
     }
+  }
+  if (!has.has('body_z')) {
+    try {
+      db.prepare('alter table doc add column body_z blob').run();
+    } catch {
+      /* 并发建索引时可能已被别人加上 */
+    }
+  }
+  migrateBodyZ(db);
+}
+
+/**
+ * 把老库里的明文正文压进 body_z，一次性迁移。
+ *
+ * 进度用 meta.body_z_done 标记：每批 50 行各自提交，处理过的行 body 已置空，
+ * 下次 select 不会再选中。所以中断后重跑天然从断点继续，标记只在全部完成后写。
+ *
+ * 迁移期间临时摘掉 FTS 触发器：这条 update 只动 body/body_z，fts_text 一个字符
+ * 都不变，触发器却会为每一行做一次等价的 delete+insert，在全量倒排上纯属白付
+ * 代价。崩溃的话触发器由 openIndex 在 migrate 之后补回，倒排内容本来就没变。
+ */
+function migrateBodyZ(db) {
+  let done;
+  try {
+    done = db.prepare("select v from meta where k = 'body_z_done'").get();
+  } catch {
+    return;
+  }
+  if (done) return;
+
+  const sel = db.prepare('select rowid as rid, body from doc where body is not null limit ?');
+  const hasRows = sel.get(BATCH);
+  if (!hasRows) {
+    db.prepare("insert or replace into meta (k, v) values ('body_z_done','1')").run();
+    return;
+  }
+
+  dropTriggers(db);
+
+  const upd = db.prepare('update doc set body_z = ?, body = null where rowid = ?');
+  const begin = db.prepare('begin');
+  const commit = db.prepare('commit');
+  const rollback = db.prepare('rollback');
+
+  for (;;) {
+    const rows = sel.all(BATCH);
+    if (!rows.length) break;
+    begin.run();
+    try {
+      for (const r of rows) upd.run(compressBody(r.body), r.rid);
+      commit.run();
+    } catch (e) {
+      rollback.run();
+      throw e;
+    }
+  }
+
+  db.prepare("insert or replace into meta (k, v) values ('body_z_done','1')").run();
+
+  // 迁移完成后回收空闲页。不 VACUUM 的话文件不会变小（只是停止增长），
+  // 压缩就白做了。这是一次性操作，失败不影响正确性：被并发读占用或磁盘
+  // 不够时保持原样即可。
+  try {
+    db.prepare('vacuum').run();
+  } catch {
+    /* 下次打开不会重试（body_z_done 已写），文件只是没缩小 */
   }
 }
 
@@ -339,37 +534,49 @@ function hermesDbPath() {
 /**
  * 建索引 / 增量更新。
  *
- * 只重建"源文件变了"的会话。判断依据是同一个源文件的 (mtime, size)，
+ * 只重读"源文件变了"的会话。判断依据是同一个源文件的 (mtime, size)，
  * 与 registry 的扫描缓存同源，两边不会打架。
  *
- * 分两阶段，这是性能上唯一可行的做法：
+ * 倒排的维护分两条路：
  *
- *   1. 收集：读正文、写进 doc 表。这一步是纯 IO，快。
- *   2. 建倒排：把 doc 里的正文批量塞进 FTS5。
+ *   - 增量（doc 表里已经有东西）：doc 的增删改由触发器同步进 doc_fts，
+ *     改一场就只动一场。**不再调用 rebuild**——那会把整个倒排重建一遍，
+ *     改一场也要付全量代价。
+ *   - 全量（首次建库 / force）：先摘掉触发器，把会话批量写进 doc，
+ *     最后用 FTS5 原生的 rebuild 一次建完倒排，再把触发器装回去。
  *
- * 如果边读边往 FTS 里插，每条插入都要在越来越大的倒排索引上做局部重排，
- * 实测处理到六十来场就几乎停住；分开做，倒排能一次 bulk 建完。
+ * 全量为什么不能逐行触发：每条插入都要在越来越大的倒排索引上做局部重排，
+ * 实测处理到六十来场就几乎停住；先写后 rebuild 才能一次 bulk 建完。
  *
  * 写入用事务批提交：SQLite 默认每条 insert 单独 fsync，几千条会拖成几分钟。
  */
 export async function buildIndex({ force = false, onProgress } = {}) {
   const db = openIndex();
+  // 复制品（Claude 的 --fork-session / 完全复制）与原会话内容一字不差，
+  // 索引它们只会让每个关键词多出一条重复命中。它们仍然可以被 read_session
+  // 按 id 读到；这里只是不进全文索引。现有索引里的复制品会在下面的
+  // 「已不在 live 集合」清理里被删掉。
   const { sessions } = scanCached({});
+  const indexable = sessions.filter((s) => !s.copyOf);
 
   const existing = new Map();
   for (const r of db.prepare('select key, mtime, size, title, start, end from doc').all()) {
     existing.set(r.key, { mtime: r.mtime, size: r.size, title: r.title, start: r.start, end: r.end });
   }
 
+  // doc 表里一场都没有 = 首次建库；force 是用户显式要求全部重读。
+  // 这两条路走全量 rebuild，所以先把触发器摘掉。
+  const full = force || existing.size === 0;
+  if (full) dropTriggers(db);
+
   let reused = 0;
   let rebuilt = 0;
   let failed = 0;
-  const changedKeys = [];
 
   const delDoc = db.prepare('delete from doc where key = ?');
   const insDoc = db.prepare(
-    `insert into doc (key, agent, id, project, title, start, end, chars, mtime, size, kind, body, fts_text)
-     values (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    `insert into doc (key, agent, id, project, title, start, end, chars, mtime, size, kind, body, body_z, fts_text)
+     values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   );
 
   const begin = db.prepare('begin');
@@ -379,8 +586,8 @@ export async function buildIndex({ force = false, onProgress } = {}) {
   let pending = 0;
 
   // ---- 阶段一：收集正文 ----
-  for (let i = 0; i < sessions.length; i++) {
-    const s = sessions[i];
+  for (let i = 0; i < indexable.length; i++) {
+    const s = indexable[i];
     const key = `${s.agent}|${s.id}`;
 
     let mtime = null;
@@ -406,7 +613,7 @@ export async function buildIndex({ force = false, onProgress } = {}) {
 
     if (prev && prev.mtime === mtime && prev.size === size && metaSame && !force) {
       reused++;
-      if (onProgress) onProgress({ phase: 'collect', i, total: sessions.length, reused, rebuilt, failed });
+      if (onProgress) onProgress({ phase: 'collect', i, total: indexable.length, reused, rebuilt, failed });
       continue;
     }
 
@@ -416,7 +623,7 @@ export async function buildIndex({ force = false, onProgress } = {}) {
       body = messagesToText(messages);
     } catch {
       failed++;
-      if (onProgress) onProgress({ phase: 'collect', i, total: sessions.length, reused, rebuilt, failed });
+      if (onProgress) onProgress({ phase: 'collect', i, total: indexable.length, reused, rebuilt, failed });
       continue;
     }
 
@@ -435,10 +642,10 @@ export async function buildIndex({ force = false, onProgress } = {}) {
         mtime,
         size,
         s.kind || 'main',
-        body,
+        null,
+        compressBody(body),
         toIndexTokens(body)
       );
-      changedKeys.push(key);
       pending++;
       rebuilt++;
     } catch {
@@ -450,11 +657,11 @@ export async function buildIndex({ force = false, onProgress } = {}) {
       pending = 0;
     }
 
-    if (onProgress) onProgress({ phase: 'collect', i, total: sessions.length, reused, rebuilt, failed });
+    if (onProgress) onProgress({ phase: 'collect', i, total: indexable.length, reused, rebuilt, failed });
   }
 
   // 会话已经不在任何 Agent 存储里的，索引也清掉
-  const live = new Set(sessions.map((x) => `${x.agent}|${x.id}`));
+  const live = new Set(indexable.map((x) => `${x.agent}|${x.id}`));
   let removed = 0;
   for (const key of existing.keys()) {
     if (live.has(key)) continue;
@@ -469,23 +676,40 @@ export async function buildIndex({ force = false, onProgress } = {}) {
       commit.run();
     } catch (e) {
       rollback.run();
+      // 全量路径下触发器是摘掉的，已经提交的批没进 FTS。这里补一次 rebuild
+      // 再抛，别让索引停在"doc 有、倒排没有"的半截状态。
+      if (full) {
+        try {
+          rebuildFts(db);
+          ensureTriggers(db);
+        } catch {
+          /* 尽力而为；下次打开还会补触发器 */
+        }
+      }
       db.close();
       throw new Error('写入索引时出错，已回滚最后一批: ' + (e && e.message ? e.message : e));
     }
   }
 
-  // ---- 阶段二：建倒排 ----
-  // FTS 挂着 doc 表，用原生 rebuild 整体重建。增量更新时也只有少量 doc 行变了，
-  // 全量重建一次不过几秒，比维护"只重建一部分"的逻辑划算。
-  if (changedKeys.length || removed) {
-    if (onProgress) onProgress({ phase: 'index', i: sessions.length, total: sessions.length, reused, rebuilt, failed });
+  // ---- 阶段二：同步倒排 ----
+  //
+  // 增量：这里已经无事可做——doc 的增删改在写入时就被触发器同步进了
+  // doc_fts，改一场只付一场的代价。
+  //
+  // 全量：写入期间触发器是摘掉的，所以必须用一次 rebuild 补建倒排，
+  // 再把触发器装回去。
+  let fts = 'incremental';
+  if (full) {
+    if (onProgress) onProgress({ phase: 'index', i: indexable.length, total: indexable.length, reused, rebuilt, failed });
     rebuildFts(db);
+    ensureTriggers(db);
+    fts = 'rebuild';
   }
 
   db.prepare('insert or replace into meta (k, v) values (?,?)').run('built_at', String(Date.now()));
   db.close();
 
-  return { total: sessions.length, reused, rebuilt, failed, removed };
+  return { total: indexable.length, reused, rebuilt, failed, removed, fts };
 }
 
 /**
@@ -495,8 +719,8 @@ export async function buildIndex({ force = false, onProgress } = {}) {
  * 内部做的正是一次排序合批，比逐条 insert 快一个数量级
  * （逐条插入实测几百条后就卡到不可接受）。
  *
- * keys 参数保留给将来做"只重建一部分"的场景；现在用原生 rebuild
- * 就是全量，增量更新时反正也只改了一小部分 doc 行，全量重建花不了多少。
+ * 只在首次建库、--force 和 `reindex` 三种场景用。日常增量更新由
+ * doc_fts_* 触发器维护，不会走到这里——改一场不必付全量的代价。
  */
 export function rebuildFts(db) {
   const t0 = Date.now();
@@ -517,7 +741,7 @@ function messagesToText(messages) {
     for (const p of m.parts) {
       if (p.kind === 'text') out.push(stripEmbeddedTranscript(p.text));
       else if (p.kind === 'tool') {
-        const detail = p.input ? summarize(p.input) : '';
+        const detail = p.input ? summarizeInput(p.input, { limit: 300, jsonLimit: 300 }) : '';
         out.push(`[${p.name}${detail ? ' ' + detail : ''}]`);
       }
     }
@@ -611,23 +835,6 @@ export function stripEmbeddedTranscript(text) {
   return trimmed || '（这场子代理的 prompt 全部是嵌入的父会话副本，已从索引中剥离）';
 }
 
-function summarize(input) {
-  if (input == null) return '';
-  if (typeof input === 'string') return input.slice(0, 300);
-  if (typeof input === 'object') {
-    if (Array.isArray(input.command)) return input.command.join(' ').slice(0, 300);
-    for (const k of ['command', 'description', 'file_path', 'path', 'pattern', 'query', 'prompt']) {
-      if (typeof input[k] === 'string' && input[k]) return input[k].slice(0, 300);
-    }
-    try {
-      return JSON.stringify(input).slice(0, 300);
-    } catch {
-      return '';
-    }
-  }
-  return String(input).slice(0, 300);
-}
-
 /**
  * 搜索。
  *
@@ -654,6 +861,7 @@ export function search(query, { limit = 20, agent, project, includeSubagents = t
   let sql = `select d.key, d.agent, d.id, d.project, d.title, d.start, d.end, d.chars,
                     coalesce(d.kind,'main') as kind,
                     d.body as hit_body,
+                    ${hasBodyZ(db) ? 'd.body_z as hit_body_z,' : ''}
                     bm25(doc_fts) as score
              from doc_fts
              join doc d on d.rowid = doc_fts.rowid
@@ -692,7 +900,7 @@ export function search(query, { limit = 20, agent, project, includeSubagents = t
     end: r.end ? new Date(r.end) : null,
     chars: r.chars,
     kind: r.kind || 'main',
-    snippet: excerpt(r.hit_body, query),
+    snippet: excerpt(readBody({ body: r.hit_body, body_z: r.hit_body_z }), query),
     score: r.score,
   }));
 

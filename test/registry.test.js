@@ -65,6 +65,34 @@ test('registry: 解析失败时保留上一次的好结果，并沿用旧指纹�
   }
 });
 
+test('registry: 等长改写并回填 mtime 时，靠 ctime 判定失效', async () => {
+  const box = sandbox();
+  try {
+    const { file } = writeDshSession(box, { content: 'AAAA' });
+    const find = (r) => r.sessions.find((s) => s.agent === 'dsh' && s.id === 's1');
+    const titleOf = (r) => (find(r) ? find(r).title : null);
+
+    await box.run(() => {
+      const first = registry.scanAll({ noCache: true });
+      assert.equal(titleOf(first), 'AAAA', '基线');
+
+      const before = fs.statSync(file);
+      // 等长改写，然后把 mtime 改回去——这是 (mtime, size) 判据的盲区
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('AAAA', 'BBBB'));
+      fs.utimesSync(file, before.atime, before.mtime);
+      const after = fs.statSync(file);
+
+      assert.equal(after.size, before.size, '长度必须相同');
+      assert.notEqual(after.ctimeMs, before.ctimeMs, 'ctime 应该变了');
+
+      const second = registry.scanAll({});
+      assert.equal(titleOf(second), 'BBBB', '内容变了就必须重解析');
+    });
+  } finally {
+    box.cleanup();
+  }
+});
+
 test('registry: 缓存是原子写的，不留下临时文件', async () => {
   const box = sandbox();
   try {
@@ -117,6 +145,39 @@ test('registry: 空结果不算解析失败（Copilot 的空会话不发假警�
       const r = registry.scanAll({ noCache: true });
       assert.equal(r.stats.failures, 0, '没有对话的文件不是"解析失败"');
       assert.equal(r.sessions.filter((s) => s.agent === 'codex').length, 0);
+    });
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('registry: 解析代码指纹变了就全量重扫，没变才命中缓存', async () => {
+  const box = sandbox();
+  try {
+    writeDshSession(box);
+    const find = (r) => r.sessions.find((s) => s.agent === 'dsh' && s.id === 's1');
+
+    await box.run(() => {
+      // 先造一份"旧版本扫描器"留下的缓存，源文件指纹本身是好的
+      registry.scanAll({ noCache: true });
+      const file = registry.cacheLocation();
+      const cache = JSON.parse(fs.readFileSync(file, 'utf8'));
+      cache.__fingerprint = 'deadbeef0000';
+      fs.writeFileSync(file, JSON.stringify(cache), 'utf8');
+
+      // 指纹不一致：即使每个文件的 (mtime, ctime, size) 都没变，也必须重解析
+      const r1 = registry.scanAll({});
+      assert.ok(r1.stats.parsed > 0, '解析代码变了就不再信任旧结果');
+      const s1 = find(r1);
+      assert.ok(s1, '重扫后仍应有这场会话');
+      assert.equal(s1.title, '第一版');
+      assert.equal(registry.loadCache().__fingerprint, registry.scannerFingerprint(), '保存时要写入当前指纹');
+
+      // 指纹一致：回到缓存命中
+      const r2 = registry.scanAll({});
+      assert.ok(r2.stats.cached > 0, '指纹一致时应命中缓存');
+      assert.equal(r2.stats.parsed, 0, '命中缓存就不该再解析');
+      assert.equal((find(r2) || {}).title, '第一版');
     });
   } finally {
     box.cleanup();

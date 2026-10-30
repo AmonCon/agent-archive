@@ -7,7 +7,8 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionContent } from './query.js';
 import { cacheLocation } from './registry.js';
-import { tildify, durationMs } from './model.js';
+import { tildify, durationMs, dayKey } from './model.js';
+import { summarizeInput } from './messages.js';
 import { buildIndex, search, indexStats, indexPath } from './search.js';
 import { timelineMarkdown, sessionMarkdown, bundleMarkdown } from './export.js';
 import { auditCollection, detectGaps } from './doctor.js';
@@ -228,7 +229,7 @@ async function cmdTimeline(target, opts) {
 
   let currentDay = null;
   for (const s of shown) {
-    const day = s.start ? s.start.toISOString().slice(0, 10) : '(未知日期)';
+    const day = s.start ? dayKey(s.start) : '(未知日期)';
     if (day !== currentDay) {
       currentDay = day;
       console.log('\n' + c(C.when, day));
@@ -538,32 +539,9 @@ function renderMessage(m, { showTools, showReasoning, showSystem }) {
 
 function oneLineTool(p) {
   const name = p.name || 'tool';
-  const detail = summarizeInput(p.input);
+  const detail = summarizeInput(p.input, { limit: 100 });
   const mark = p.status === 'error' ? ' ✗' : '';
   return `[${name}${detail ? ' ' + detail : ''}]${mark}`;
-}
-
-/** 把工具入参压成一行摘要，认几种常见形状，其余退化成 JSON 前 80 字。 */
-function summarizeInput(input) {
-  if (input == null) return '';
-  if (typeof input === 'string') return clip(input, 80);
-  if (typeof input === 'object') {
-    // Codex 的 shell 调用是 {command:["powershell.exe","-NoProfile",...]}，
-    // 整串数组没信息量，最后一项才是真正的命令
-    if (Array.isArray(input.command)) {
-      const cmd = input.command;
-      const takesArg = (s) => typeof s === 'string' && /^-(NoProfile|Command|c|EncodedCommand)$/i.test(s);
-      for (let i = cmd.length - 1; i >= 0; i--) {
-        if (typeof cmd[i] === 'string' && cmd[i].length > 3 && !takesArg(cmd[i])) return clip(cmd[i], 100);
-      }
-      return clip(cmd.join(' '), 100);
-    }
-    for (const k of ['command', 'description', 'file_path', 'path', 'pattern', 'query', 'prompt']) {
-      if (typeof input[k] === 'string' && input[k]) return clip(input[k], 100);
-    }
-    return clip(pretty(input), 80);
-  }
-  return String(input);
 }
 
 function indent(s, pad = '   ') {
@@ -697,11 +675,13 @@ async function cmdIndex(opts) {
  */
 async function cmdReindex(opts) {
   const { rebuildFts, openIndex } = await import('./search.js');
-  const db = openIndex({ create: false });
-  if (!db) {
+  // 这里要写库（重建倒排），不能走 openIndex 的只读分支：
+  // 只读连接上执行 rebuild 会直接报 readonly database。
+  if (!fs.existsSync(indexPath())) {
     console.error('还没有索引。先运行：agent-archive index');
     process.exit(2);
   }
+  const db = openIndex({ create: true });
   const t0 = Date.now();
   rebuildFts(db);
   const docs = indexStats().docs;
@@ -958,6 +938,15 @@ async function cmdDoctor(opts) {
     );
     console.log('');
   }
+
+  // 复制 / 分叉：没有也要报 0，不能省略——否则"没检测到"和"没检测"分不清
+  const cp = r.copies || { copy: 0, branch: 0 };
+  console.log(c(C.bold, 'Claude 复制 / 分叉'));
+  console.log(c(C.dim, `  复制 ${cp.copy} 场 · 分叉 ${cp.branch} 场`));
+  console.log(
+    c(C.dim, '  复制 = 历史完全相同，默认视图不显示；分叉 = 之后有新内容，仍留在时间线上。')
+  );
+  console.log('');
 
   // 采集缺口：有目录但没有 scanner。
   // 分成两类——"还没做"要行动，"已确认读不了"是结论，不该继续挂在待办里。

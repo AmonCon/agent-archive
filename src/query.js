@@ -12,6 +12,7 @@ import {
   isSubagent,
   mainOnly,
   indexChildren,
+  dayKey,
 } from './model.js';
 
 /**
@@ -176,7 +177,7 @@ export function projectTimeline(
     if (s.start && (!first || s.start < first)) first = s.start;
     if (s.end && (!last || s.end > last)) last = s.end;
     if (s.start) {
-      const day = s.start.toISOString().slice(0, 10);
+      const day = dayKey(s.start);
       days.set(day, (days.get(day) || 0) + 1);
     }
   }

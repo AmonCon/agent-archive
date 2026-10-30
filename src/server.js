@@ -10,6 +10,7 @@ import { latestProjectDigest } from './digest.js';
 import { projectHandoffs } from './handoff.js';
 import { quickFreshness } from './refresh.js';
 import { projectKey, durationMs, tildify } from './model.js';
+import { buildTurns } from './turns.js';
 import { usageSnapshot } from './web/data.js';
 import * as pages from './web/pages.js';
 
@@ -132,7 +133,12 @@ async function handle(req, res) {
     if (pathname === '/s') {
       return sendHtml(
         res,
-        await pages.pageSession(url.searchParams.get('agent') || '', url.searchParams.get('id') || '')
+        await pages.pageSession(
+          url.searchParams.get('agent') || '',
+          url.searchParams.get('id') || '',
+          // 禁用 JS 时的兜底：一次渲染完整会话
+          url.searchParams.get('all') === '1'
+        )
       );
     }
     if (pathname === '/env') {
@@ -342,6 +348,41 @@ async function handle(req, res) {
       });
     }
 
+    // 会话页的分块追加。返回服务端渲染好的消息 HTML，
+    // 页面脚本直接插到 #messages 末尾，不在浏览器里重排一遍。
+    if (pathname === '/api/session/html') {
+      const agent = url.searchParams.get('agent') || undefined;
+      const id = url.searchParams.get('id');
+      if (!id) return sendJson(res, { error: '缺少 id 参数' }, 400);
+
+      const rawOffset = url.searchParams.get('offset');
+      if (rawOffset !== null && !/^\d+$/.test(rawOffset)) {
+        return sendJson(res, { error: 'offset 必须是非负整数' }, 400);
+      }
+
+      const { matches } = findSessions({ query: id, agent });
+      if (!matches.length) return sendJson(res, { error: '没有匹配的会话' }, 404);
+
+      const rawLimit = Number(url.searchParams.get('limit'));
+      const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : pages.SESSION_CHUNK;
+
+      const session = matches[0];
+      const messages = await readSessionContent(session);
+      const range = pages.sessionChunkRange(messages.length, rawOffset === null ? 0 : Number(rawOffset), limit);
+
+      return sendJson(res, {
+        // 和 /api/session 一致：前缀命中多场时取最近一场，并在这里说明
+        ambiguous: matches.length > 1,
+        matchCount: matches.length,
+        session: publicSession(session),
+        html: pages.renderMessagesHtml(messages.slice(range.offset, range.end), range.offset),
+        offset: range.offset,
+        nextOffset: range.nextOffset,
+        total: range.total,
+        hasMore: range.hasMore,
+      });
+    }
+
     if (pathname === '/api/session') {
       const agent = url.searchParams.get('agent') || undefined;
       const id = url.searchParams.get('id');
@@ -365,11 +406,27 @@ async function handle(req, res) {
         return sendJson(res, { session: publicSession(session), index: i, message: messages[i] });
       }
 
+      // 默认只给前 200 条。一场大会话常有十几万字（约 5 万 token），
+      // 直出整场会让任何调这个接口的 Agent 一次烧掉大量上下文；网页的
+      // 折叠块走的是 `?message=N`，不受影响。需要更多就显式翻页。
+      const rawLimit = Number(url.searchParams.get('limit'));
+      const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 1000) : 200;
+      const rawOffset = Number(url.searchParams.get('offset'));
+      const offset = Number.isInteger(rawOffset) && rawOffset > 0 ? rawOffset : 0;
+      const page = messages.slice(offset, offset + limit);
+      const hasMore = offset + page.length < messages.length;
+
       return sendJson(res, {
         ambiguous: matches.length > 1,
         matchCount: matches.length,
         session: publicSession(session),
-        messages,
+        messages: page,
+        // 目录按完整会话算，不受分页影响：调用方按 offset 翻页时也能定位轮次
+        turns: buildTurns(messages),
+        total: messages.length,
+        offset,
+        hasMore,
+        nextOffset: hasMore ? offset + page.length : null,
       });
     }
 

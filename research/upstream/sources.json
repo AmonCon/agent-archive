@@ -10,18 +10,18 @@
       "repo": "https://github.com/yetone/magpie",
       "why": "个人版模型网关；会话读取、增量校验、零副作用只读打开、旁路表修正",
       "license": "MIT",
-      "commit": "ee6f8866f33165eebfd16a7e3f6948e04132096e",
-      "fetchedAt": "2026-10-28",
-      "notes": "更新极快，每次只看 diff 内涉及的内部包"
+      "commit": "ace8ee1e1cf9f5bea039b0d46edea108249ea596",
+      "fetchedAt": "2026-10-30",
+      "notes": "2026-10-30 完整源码深读：sessions/tail.go、discovery.go、cc_copies.go、redact；internal/handoff 是 socket 交接，不是跨 Agent 接力"
     },
     {
       "id": "cc-switch",
       "repo": "https://github.com/farion1231/cc-switch",
       "why": "供应商切换器；会话解析的逐家模块、两级缓存、契约式测试体系",
       "license": "MIT",
-      "commit": "6d6b7162f122ac0ce1356a14688c8c4f712db3c8",
-      "fetchedAt": "2026-10-28",
-      "notes": "测试体系是主要参照对象（fixture + 不变量 + 漂移样本）"
+      "commit": "9941a6455ef9405cf9d3620057fddd283223a607",
+      "fetchedAt": "2026-10-30",
+      "notes": "2026-10-30 完整源码深读：session_manager 的 ContentRef/两级缓存/TurnIndex、codex_state_db、providers_*、tests/fixtures"
     },
     {
       "id": "autoswarm",

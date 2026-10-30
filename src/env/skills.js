@@ -20,6 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { userDataCandidates } from '../platform.js';
+import { statePath } from '../paths.js';
 
 /**
  * 各 Agent 的技能目录。
@@ -270,7 +271,7 @@ function unquoteYaml(s) {
 const CACHE_VERSION = 1;
 
 function cacheFile() {
-  return path.join(os.homedir(), '.agent-archive', 'cache', `skills-v${CACHE_VERSION}.json`);
+  return statePath('cache', `skills-v${CACHE_VERSION}.json`);
 }
 
 let memCache = null;

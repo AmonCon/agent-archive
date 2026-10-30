@@ -134,3 +134,52 @@ function realpathLoose(p) {
 function realpath(p) {
   return fs.realpathSync.native ? fs.realpathSync.native(p) : fs.realpathSync(p);
 }
+
+/**
+ * 把工具入参压成一行摘要。
+ *
+ * CLI、MCP、摘要、导出、网页、索引都要展示"这个工具调用在干什么"，
+ * 各写一份迟早会漂移（已经漂移过）。这里收成唯一实现，调用方只决定
+ * 截断长度和"没有可读字段时"的退路。
+ *
+ * 认的形状：
+ *   - 字符串：压成一行后按 limit 截断
+ *   - Codex 的 shell 调用 {command:["powershell.exe","-NoProfile",...]}：
+ *     整串数组没信息量，从后往前找真正的命令
+ *   - 常见键：command/description/file_path/path/pattern/query/prompt/skill
+ *   - 其余对象：JSON 压成一行按 jsonLimit 截断；fallback:'none' 时返回空，
+ *     避免把结构噪音写进提示词或索引
+ */
+export function summarizeInput(input, { limit = 90, fallback = 'json', jsonLimit = 80 } = {}) {
+  if (input == null) return '';
+  if (typeof input === 'string') return clipOneLine(input, limit);
+  if (typeof input !== 'object') return String(input);
+
+  if (Array.isArray(input.command)) {
+    const cmd = input.command;
+    const takesArg = (s) => typeof s === 'string' && /^-(NoProfile|Command|c|EncodedCommand)$/i.test(s);
+    for (let i = cmd.length - 1; i >= 0; i--) {
+      if (typeof cmd[i] === 'string' && cmd[i].length > 3 && !takesArg(cmd[i])) {
+        return clipOneLine(cmd[i], limit);
+      }
+    }
+    return clipOneLine(cmd.join(' '), limit);
+  }
+
+  for (const k of ['command', 'description', 'file_path', 'path', 'pattern', 'query', 'prompt', 'skill']) {
+    if (typeof input[k] === 'string' && input[k]) return clipOneLine(input[k], limit);
+  }
+
+  if (fallback === 'none') return '';
+  try {
+    return clipOneLine(JSON.stringify(input), jsonLimit);
+  } catch {
+    // 循环引用等无法序列化的入参，宁可不展示也不抛错
+    return '';
+  }
+}
+
+function clipOneLine(s, n) {
+  const t = String(s).replace(/\s+/g, ' ').trim();
+  return t.length > n ? t.slice(0, n) + '…' : t;
+}

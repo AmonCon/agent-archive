@@ -6,7 +6,15 @@
  */
 
 import { icon } from './icons.js';
-import { esc, agentColor } from './format.js';
+import {
+  esc,
+  agentColor,
+  agentBrand,
+  agentMark,
+  agentGlyph,
+  agentLogoSprite,
+  agentIsRaster,
+} from './format.js';
 import { tildify, projectKey } from '../model.js';
 import { recentProjects } from './data.js';
 
@@ -114,6 +122,7 @@ export async function layout({ title, page, crumb = [], body, currentProject = '
 <script src="/assets/app.js"></script>
 </head>
 <body>
+${agentLogoSprite()}
 <a class="skip-link" href="#main">跳到内容</a>
 <div class="scrim" data-nav-close hidden></div>
 <div class="shell">
@@ -295,10 +304,21 @@ export function badge(text, variant = '', iconName = '') {
   return `<span class="badge ${variant}">${iconName ? icon(iconName, 11) : ''}${esc(text)}</span>`;
 }
 
+/** 小号 app 图标：品牌色底 + logo。没有 logo 的 Agent 由调用方退回色点。 */
+export function agentTile(agent, className = 'agent-tile') {
+  const b = agentBrand(agent);
+  const glyph = agentGlyph(agent);
+  if (!glyph) return '';
+  const full = agentIsRaster(agent) ? ' full' : '';
+  return `<span class="${className}${full}" style="--agent-bg:${b.bg};--agent-fg:${b.fg}">${glyph}</span>`;
+}
+
 export function agentChip(agent, { count = null } = {}) {
   const a = String(agent || '?');
   return `<span class="agent" style="--agent:${agentColor(a)}">
-    <span class="agent-dot"></span>${esc(a)}${count != null ? ` <span class="subtle">${count}</span>` : ''}
+    ${agentTile(a) || '<span class="agent-dot"></span>'}${esc(a)}${
+      count != null ? ` <span class="subtle">${count}</span>` : ''
+    }
   </span>`;
 }
 
@@ -308,12 +328,13 @@ export function agentStack(agents, max = 4) {
   const shown = list.slice(0, max);
   const rest = list.length - shown.length;
   return `<span class="agent-stack">${shown
-    .map(
-      (a) =>
-        `<span class="avatar" style="--agent:${agentColor(a)}" title="${esc(a)}">${esc(
-          String(a).slice(0, 1)
-        )}</span>`
-    )
+    .map((a) => {
+      const b = agentBrand(a);
+      const full = agentIsRaster(a) ? ' full' : '';
+      return `<span class="avatar${full}" style="--agent-bg:${b.bg};--agent-fg:${b.fg}" title="${esc(
+        a
+      )}">${agentMark(a)}</span>`;
+    })
     .join('')}${rest > 0 ? `<span class="more">+${rest}</span>` : ''}</span>`;
 }
 

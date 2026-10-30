@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openReadOnly, findVersionedDb } from './sqlite-read.js';
 import { priceFor, estimateCost } from './pricing.js';
+import { dayKey } from './model.js';
 
 /**
  * 用量层：各家 Agent 自己记下的 token 消耗。
@@ -617,10 +618,7 @@ export function summarizeUsage({ rows = [], groupBy = 'agent', sessionIndex = []
 function groupKey(r, groupBy, sessionProject) {
   if (groupBy === 'model') return r.model || '(未知模型)';
   if (groupBy === 'session') return `${r.agent}|${r.session || '(无会话)'}`;
-  if (groupBy === 'day') {
-    const d = new Date(r.at);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }
+  if (groupBy === 'day') return dayKey(r.at) || '(未知日期)';
   if (groupBy === 'project') {
     return (r.session && sessionProject.get(`${r.agent}|${r.session}`)) || '(未绑定项目)';
   }

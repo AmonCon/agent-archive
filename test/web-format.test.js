@@ -7,7 +7,9 @@ import {
   looksLikeMarkdown,
   highlight,
   fmtTok,
+  fmtDay,
 } from '../src/web/format.js';
+import { dayKey } from '../src/model.js';
 
 test('markdown: HTML 先转义再排版，脚本不会变成标签', () => {
   const html = renderMarkdownLite('<script>alert(1)</script>\n\n**hi**');
@@ -77,4 +79,11 @@ test('fmtTok: 万/亿单位可读且四舍五入', () => {
   assert.equal(fmtTok(9999), '9999');
   assert.equal(fmtTok(10000), '1.0万');
   assert.equal(fmtTok(123456789), '1.23亿');
+});
+
+test('日期按本地时区分组，不随 UTC 漂移到前一天', () => {
+  // 本地时间 00:30 的会话，UTC 还在前一天。按 toISOString 取日会分错组。
+  const lateNight = new Date(2026, 9, 30, 0, 30);
+  assert.equal(dayKey(lateNight), '2026-10-30');
+  assert.equal(fmtDay(lateNight), '2026-10-30');
 });

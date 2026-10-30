@@ -14,9 +14,7 @@
  *      这个功能就没人看了。
  */
 
-import path from 'node:path';
-import os from 'node:os';
-import { DatabaseSync } from 'node:sqlite';
+import { openIndex, readBody, hasBodyZ } from './search.js';
 
 /**
  * 凭证特征库。
@@ -87,13 +85,18 @@ const PATTERNS = [
   },
 ];
 
-function indexFile() {
-  return path.join(os.homedir(), '.agent-archive', 'index', 'fulltext-v1.sqlite');
+/**
+ * 固定的取数 SQL，不根据条件拼 where。
+ *
+ * body_z 只在库里有这一列时才 select：升级后还没跑过迁移的老库没有它，
+ * 硬查会 no such column，整次扫描变成"结构不认识"。
+ */
+function selectSql({ withZ, agent }) {
+  return (
+    `select key, agent, id, project, title, start, body${withZ ? ', body_z' : ''} from doc` +
+    (agent ? ' where agent = ?' : '')
+  );
 }
-
-/** 两条固定 SQL，不根据条件拼 where。 */
-const SQL_ALL = `select key, agent, id, project, title, start, body from doc`;
-const SQL_AGENT = `select key, agent, id, project, title, start, body from doc where agent = ?`;
 
 /**
  * 扫描归档里的凭证。
@@ -106,16 +109,17 @@ const SQL_AGENT = `select key, agent, id, project, title, start, body from doc w
  * @param {string} opts.severity  只报 >= 这个等级
  */
 export function scanSecrets({ agent, severity } = {}) {
-  let db;
-  try {
-    db = new DatabaseSync(indexFile(), { readOnly: true });
-  } catch {
+  // 走 openIndex 的只读分支：它会处理 WAL 边车、必要时退到 immutable，
+  // 直接 new DatabaseSync 在 Node 24 + Windows 上会被 0 字节 WAL 卡住。
+  const db = openIndex({ create: false });
+  if (!db) {
     return { ready: false, message: '索引还没建，先运行：agent-archive index', findings: [] };
   }
 
   let rows;
   try {
-    rows = agent ? db.prepare(SQL_AGENT).all(agent) : db.prepare(SQL_ALL).all();
+    const sql = selectSql({ withZ: hasBodyZ(db), agent: !!agent });
+    rows = agent ? db.prepare(sql).all(agent) : db.prepare(sql).all();
   } catch {
     db.close();
     return { ready: true, message: '索引结构不认识，可能版本不匹配', findings: [] };
@@ -126,7 +130,7 @@ export function scanSecrets({ agent, severity } = {}) {
   const rank = { low: 1, medium: 2, high: 3, critical: 4 };
 
   for (const row of rows) {
-    const body = String(row.body || '');
+    const body = readBody(row);
     if (!body) continue;
 
     for (const p of PATTERNS) {

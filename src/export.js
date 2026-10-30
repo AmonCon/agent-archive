@@ -1,5 +1,6 @@
 import { listProjects, projectTimeline, groupByAgent, readSessionContent } from './query.js';
-import { durationMs, tildify } from './model.js';
+import { durationMs, tildify, dayKey } from './model.js';
+import { summarizeInput } from './messages.js';
 
 /**
  * Markdown 导出。
@@ -66,7 +67,7 @@ export function timelineMarkdown(target, { includeTitles = false } = {}) {
   lines.push('');
   let day = null;
   for (const s of r.sessions) {
-    const d = s.start ? s.start.toISOString().slice(0, 10) : '未知日期';
+    const d = s.start ? dayKey(s.start) : '未知日期';
     if (d !== day) {
       day = d;
       lines.push(`### ${d}`);
@@ -317,22 +318,9 @@ function roleLabel(role) {
 }
 
 function toolLine(p) {
-  const detail = summarizeInput(p.input);
+  const detail = summarizeInput(p.input, { limit: 90, jsonLimit: 70 });
   const mark = p.status && p.status !== 'completed' ? ` ✗${p.status}` : '';
   return `[${p.name}${detail ? ' ' + detail : ''}]${mark}`;
-}
-
-function summarizeInput(input) {
-  if (input == null) return '';
-  if (typeof input === 'string') return oneLine(input, 90);
-  if (typeof input === 'object') {
-    if (Array.isArray(input.command)) return oneLine(input.command.join(' '), 90);
-    for (const k of ['command', 'description', 'file_path', 'path', 'pattern', 'query', 'prompt']) {
-      if (typeof input[k] === 'string' && input[k]) return oneLine(input[k], 90);
-    }
-    return oneLine(JSON.stringify(input), 70);
-  }
-  return String(input);
 }
 
 function oneLine(s, n) {

@@ -37,6 +37,8 @@ export function makeSession({
   resume,
   kind,
   parent,
+  copyOf,
+  branchOf,
 }) {
   return {
     agent,
@@ -51,6 +53,12 @@ export function makeSession({
     // 这样升级缓存版本之前的数据不会被误判成子代理
     kind: kind === 'subagent' ? 'subagent' : 'main',
     parent: parent ? String(parent) : null,
+    // Claude Code 的 --fork-session / /branch 会把历史整段复制进新文件。
+    // copyOf  指向被完全复制的原会话：内容一模一样，不冒充一场独立对话。
+    // branchOf 指向分叉来源：它复制了旧历史，但之后有自己的新内容，仍留在时间线上。
+    // 两者都是缺省 null——老缓存没有这两个字段，按"不是复制/分叉"对待。
+    copyOf: copyOf ? String(copyOf) : null,
+    branchOf: branchOf ? String(branchOf) : null,
   };
 }
 
@@ -177,6 +185,20 @@ function toDate(v) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * 会话所属的「日」。
+ *
+ * 必须按本地时区算，不能 `toISOString().slice(0,10)`——那是 UTC 日。
+ * 东八区 00:00–08:00 发生的会话会落到前一天，终端时间线与网页同一天的
+ * 分组会不一致。所有按天分组、导出的地方都走这一个函数。
+ */
+export function dayKey(v) {
+  const d = toDate(v);
+  if (!d) return null;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function cleanTitle(t) {
   if (!t) return '';
   return String(t).replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -193,9 +215,14 @@ export function isSubagent(s) {
   return !!s && s.kind === 'subagent';
 }
 
-/** 只看主会话。时间线、项目列表、搜索默认都走这个。 */
+/**
+ * 只看主会话。时间线、项目列表、搜索默认都走这个。
+ *
+ * 复制品（copyOf）也排除：它和原会话内容完全相同，列出来只会让会话数虚高。
+ * 分叉（branchOf）保留——它有自己的新内容，只是带个来源标记。
+ */
 export function mainOnly(sessions) {
-  return sessions.filter((s) => !isSubagent(s));
+  return sessions.filter((s) => !isSubagent(s) && !s.copyOf);
 }
 
 /**

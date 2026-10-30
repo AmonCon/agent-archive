@@ -54,6 +54,7 @@ export async function auditCollection({ samplePerAgent = 3, noCache = false } = 
   // "标题是占位符"或"项目覆盖率"的分母会凭空拉低这两个数
   const sessions = mainOnly(scanned.sessions);
   const subagentAudit = auditSubagents(scanned.sessions);
+  const copyAudit = auditCopies(scanned.sessions);
 
   const byAgent = new Map();
   for (const s of sessions) {
@@ -131,6 +132,9 @@ export async function auditCollection({ samplePerAgent = 3, noCache = false } = 
     total: sessions.length,
     // 子会话单列。它们被采集但不参与上面的质量指标。
     subagent: subagentAudit,
+    // 复制/分叉：复制品被 mainOnly 过滤，分叉留在时间线里。
+    // 这两个数字回答"列表里有没有虚高的会话"。
+    copies: copyAudit,
     files: stats.files,
     failures: stats.failures,
     duplicates,
@@ -224,6 +228,37 @@ function auditSubagents(allSessions) {
     attachRate: attached + orphan > 0 ? attached / (attached + orphan) : 1,
     byAgent: [...byAgent.values()].sort((a, b) => b.total - a.total),
   };
+}
+
+/**
+ * 复制 / 分叉会话统计。
+ *
+ * Claude Code 的 `--fork-session` / `/branch` 会把历史复制进新文件：
+ *   copyOf   完全复制品，内容与原会话相同，默认视图不显示
+ *   branchOf 分叉，之后有自己的新内容，仍显示在时间线上
+ *
+ * 没有就报 0，不省略这一项——"没检测到"和"检测功能没跑"必须能区分开。
+ */
+function auditCopies(allSessions) {
+  let copy = 0;
+  let branch = 0;
+  const byAgent = new Map();
+  for (const s of allSessions) {
+    if (!s.copyOf && !s.branchOf) continue;
+    let e = byAgent.get(s.agent);
+    if (!e) {
+      e = { agent: s.agent, copy: 0, branch: 0 };
+      byAgent.set(s.agent, e);
+    }
+    if (s.copyOf) {
+      copy++;
+      e.copy++;
+    } else {
+      branch++;
+      e.branch++;
+    }
+  }
+  return { total: copy + branch, copy, branch, byAgent: [...byAgent.values()] };
 }
 
 /**

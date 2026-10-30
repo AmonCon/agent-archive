@@ -907,10 +907,28 @@ svg {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--agent) 18%, transparent);
 }
 
+/* 有品牌 logo 的 Agent 用小号 app 图标代替色点，与项目列表里的头像同一套语言。 */
+.agent .agent-tile {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  border-radius: 4px;
+  background: var(--agent-bg);
+  color: var(--agent-fg);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%);
+}
+
+.agent .agent-tile svg {
+  width: 10px;
+  height: 10px;
+}
+
 .agent-stack {
   display: inline-flex;
   align-items: center;
-  padding-left: 6px;
+  gap: 2px;
 }
 
 .agent-stack .avatar {
@@ -918,15 +936,40 @@ svg {
   place-items: center;
   width: 20px;
   height: 20px;
-  margin-left: -6px;
-  border-radius: 50%;
-  border: 2px solid var(--surface);
-  background: var(--agent);
-  color: #0c0c0d;
+  border-radius: 5px;
+  background: var(--agent-bg);
+  color: var(--agent-fg);
+  /* 深色品牌（OpenAI、Cursor、ZCode…）在深色页面上要靠这道内描边才立得住 */
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%);
+}
+
+.agent-stack .avatar svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* 官方图标本身自带底色（PNG 图标），铺满整个头像框，不再叠品牌色。 */
+.agent-stack .avatar.full,
+.agent-tile.full,
+.srow-tile.full {
+  background: transparent;
+  box-shadow: none;
+}
+
+.agent-stack .avatar.full svg,
+.agent-tile.full svg,
+.srow-tile.full svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* 没有专属标记的 Agent 回落到首字母。 */
+.agent-stack .avatar-letter {
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  line-height: 1;
 }
 
 .agent-stack .more {
@@ -1385,6 +1428,28 @@ table.t {
   display: block;
 }
 
+.srow .srow-tile {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  background: var(--agent-bg);
+  color: var(--agent-fg);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%);
+}
+
+.srow .srow-tile svg {
+  width: 10px;
+  height: 10px;
+}
+
+.srow .agent-name {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
 .srow .title {
   min-width: 0;
   overflow: hidden;
@@ -1417,7 +1482,7 @@ table.t {
   color: var(--text-brand);
 }
 
-.srow .agent {
+.srow .agent-name {
   max-width: 136px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1429,7 +1494,7 @@ table.t {
     gap: 8px;
   }
 
-  .srow .agent,
+  .srow .agent-name,
   .srow .dur {
     display: none;
   }
@@ -2042,12 +2107,124 @@ pre code {
   margin-bottom: 0;
 }
 
+/* ------------------------------ 对话目录 ------------------------------ */
+
+.turn-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+}
+
+.turn-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 9px;
+  border-radius: var(--radius-6);
+  color: inherit;
+  text-decoration: none;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.turn-row:hover {
+  background: var(--ov-2);
+}
+
+.turn-time {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
+
+.turn-q {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-default);
+}
+
+.turn-meta {
+  color: var(--fg-subtle);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+details.turn-details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+details.turn-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  list-style: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+details.turn-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.turn-details > summary::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex: none;
+  margin-left: 2px;
+  border-right: 1.5px solid var(--fg-subtle);
+  border-bottom: 1.5px solid var(--fg-subtle);
+  transform: rotate(-45deg);
+  transition: transform 0.12s ease;
+}
+
+details[open].turn-details > summary::before {
+  transform: rotate(45deg);
+}
+
+details.turn-details > .turn-list {
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
 /* ------------------------------ 会话正文 ------------------------------ */
 
 .msg-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 分块加载：首屏之后的消息按需追加，这里是列表末尾的操作行 */
+.msg-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 2px;
+}
+
+.msg-more-note {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+}
+
+.msg-more-note.error {
+  color: var(--danger);
 }
 
 .msg {
