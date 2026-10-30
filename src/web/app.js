@@ -62,7 +62,34 @@
     else fn();
   }
 
+  /**
+   * 把 logo sprite 插回文档。
+   *
+   * 这份 SVG 有 50KB 左右，内联在每个页面里会让每次导航都重新解析一遍。
+   * 现在它作为一个可缓存的资源由这里取回并插到 body 开头，页面里的
+   * `<use href="#agent-logo-x">` 会在插入后解析出来。
+   */
+  function loadAgentSprite() {
+    if (document.querySelector('svg.agent-sprite')) return;
+    fetch('/assets/agent-sprite.svg', { headers: { accept: 'image/svg+xml' } })
+      .then(function (r) {
+        return r.ok ? r.text() : '';
+      })
+      .then(function (svg) {
+        if (!svg) return;
+        var host = document.createElement('div');
+        host.setAttribute('aria-hidden', 'true');
+        host.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
+        host.innerHTML = svg;
+        document.body.insertBefore(host, document.body.firstChild);
+      })
+      .catch(function () {
+        /* 图标加载失败不影响文字与功能 */
+      });
+  }
+
   ready(function () {
+    loadAgentSprite();
     syncTheme(document.documentElement.dataset.theme || initialTheme);
 
     /* ------------------------------ 主题 ------------------------------ */

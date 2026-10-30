@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionContent } from './query.js';
@@ -13,6 +14,7 @@ import { quickFreshness } from './refresh.js';
 import { projectKey, durationMs, tildify } from './model.js';
 import { buildTurns } from './turns.js';
 import { usageSnapshot } from './web/data.js';
+import { agentSpriteSvg } from './web/format.js';
 import * as pages from './web/pages.js';
 
 /**
@@ -40,6 +42,15 @@ const ASSETS = {
   '/assets/theme.css': { file: 'theme.css', type: 'text/css; charset=utf-8' },
   '/assets/app.js': { file: 'app.js', type: 'text/javascript; charset=utf-8' },
 };
+
+/**
+ * Logo sprite 单独成文件。
+ *
+ * 它有 50KB 左右；内联在页面里意味着每次导航都要解析一遍，`/env` 的 HTML
+ * 一半是它。外部化之后浏览器缓存一次，页面只留 `<use>` 引用。
+ */
+const SPRITE_SVG = Buffer.from(agentSpriteSvg(), 'utf8');
+const SPRITE_ETAG = `W/"${crypto.createHash('sha256').update(SPRITE_SVG).digest('hex').slice(0, 16)}"`;
 
 /**
  * 内容安全策略。
@@ -144,6 +155,7 @@ async function handle(req, res) {
 
   try {
     if (ASSETS[pathname]) return sendAsset(req, res, ASSETS[pathname]);
+    if (pathname === '/assets/agent-sprite.svg') return sendSprite(req, res);
 
     if (pathname === '/') return sendHtml(res, await pages.pageProjects());
     if (pathname === '/p') {
@@ -573,6 +585,30 @@ function send(res, code, headers, body) {
     ...headers,
   });
   res.end(res.req?.method === 'HEAD' ? undefined : payload);
+}
+
+/** Logo sprite：内容由代码生成，带 ETag，允许浏览器缓存一小时。 */
+function sendSprite(req, res) {
+  if (req.headers['if-none-match'] === SPRITE_ETAG) {
+    res.writeHead(304, { etag: SPRITE_ETAG, 'cache-control': 'public, max-age=3600', ...SECURITY_HEADERS });
+    return res.end();
+  }
+
+  const headers = {
+    'content-type': 'image/svg+xml',
+    'cache-control': 'public, max-age=3600',
+    etag: SPRITE_ETAG,
+    ...SECURITY_HEADERS,
+  };
+  let payload = SPRITE_SVG;
+  if (/\bgzip\b/i.test(String(req.headers['accept-encoding'] || ''))) {
+    payload = zlib.gzipSync(SPRITE_SVG);
+    headers['content-encoding'] = 'gzip';
+    headers.vary = 'accept-encoding';
+  }
+
+  res.writeHead(200, headers);
+  res.end(req.method === 'HEAD' ? undefined : payload);
 }
 
 /**

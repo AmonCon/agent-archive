@@ -12,7 +12,6 @@ import {
   agentBrand,
   agentMark,
   agentGlyph,
-  agentLogoSprite,
   agentIsFull,
 } from './format.js';
 import { tildify, projectKey } from '../model.js';
@@ -118,11 +117,11 @@ export async function layout({ title, page, crumb = [], body, currentProject = '
 <meta name="robots" content="noindex, nofollow">
 <title>${esc(title)} — agent-archive</title>
 <link rel="icon" href="${FAVICON}">
+<link rel="preload" href="/assets/agent-sprite.svg" as="image" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/theme.css">
 <script src="/assets/app.js"></script>
 </head>
 <body>
-${agentLogoSprite()}
 <a class="skip-link" href="#main">跳到内容</a>
 <div class="scrim" data-nav-close hidden></div>
 <div class="shell">

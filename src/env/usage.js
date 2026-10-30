@@ -264,9 +264,10 @@ export function joinUsage(skills, usage) {
  *
  * 结果在进程内再压一层：scanSkillUsage 有磁盘缓存，但 scanSkills() 每次
  * 仍要遍历 295 个技能目录（约 0.5 秒）。网页每打开一次「使用率」都付一遍
- * 没有必要——技能清单不会在两秒内变。TTL 与其它页面快照一致，5 分钟。
+ * 没有必要——技能清单不会在两秒内变。缓存 15 分钟；下面的磁盘缓存仍按
+ * 索引指纹失效，索引重建后会重新扫。
  */
-const SUMMARY_TTL_MS = 300_000;
+const SUMMARY_TTL_MS = 900_000;
 let summaryCache = null;
 let summaryAt = 0;
 

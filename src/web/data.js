@@ -37,16 +37,24 @@ function memo(fn, ttl = TTL_MS) {
   };
 }
 
-/** 用量快照：读 5 个库、上万行，缓存 60 秒。 */
-export const usageSnapshot = memo(async () => {
-  const [{ readUsage }, { loadCatalog }] = await Promise.all([
-    import('../usage.js'),
-    import('../pricing.js'),
-  ]);
-  const r = await readUsage();
-  const catalogInfo = loadCatalog();
-  return { r, catalog: catalogInfo.ready ? catalogInfo : null, catalogInfo };
-});
+/**
+ * 用量快照：读 5 个库、上万行，首次约 0.5–0.9 秒。
+ *
+ * 缓存 10 分钟而不是 1 分钟：Agent 还在写库，但"看用量"不是实时监控，
+ * 每次点开都重读一遍反而让页面卡。CLI 的 `usage` 不走这里，始终是即时值。
+ */
+export const usageSnapshot = memo(
+  async () => {
+    const [{ readUsage }, { loadCatalog }] = await Promise.all([
+      import('../usage.js'),
+      import('../pricing.js'),
+    ]);
+    const r = await readUsage();
+    const catalogInfo = loadCatalog();
+    return { r, catalog: catalogInfo.ready ? catalogInfo : null, catalogInfo };
+  },
+  600_000
+);
 
 /**
  * 侧栏的"最近项目"。

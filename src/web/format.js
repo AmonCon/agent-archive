@@ -528,6 +528,20 @@ export function agentLogoSprite() {
   return `<svg class="agent-sprite" aria-hidden="true" focusable="false" width="0" height="0"><defs>${AGENT_SPRITE_DEFS}</defs>${symbols}${raster}</svg>`;
 }
 
+/**
+ * 独立成文件的 sprite。
+ *
+ * 这份定义有 50KB 左右，内联进每个页面意味着每次导航都要重新解析一遍
+ * （`/env` 的 HTML 有一半是它）。改成外部资源后由浏览器缓存，页面只留
+ * 几十个 `<use>` 引用；app.js 在 DOM 就绪后把它插回 body 开头。
+ */
+export function agentSpriteSvg() {
+  return agentLogoSprite().replace(
+    '<svg class="agent-sprite"',
+    '<svg xmlns="http://www.w3.org/2000/svg" class="agent-sprite"'
+  );
+}
+
 /** 头像是整张官方图标（含自己的底色），要铺满整个头像框。 */
 export function agentIsFull(agent) {
   return AGENT_FULL_BLEED.has(String(agent || ''));
