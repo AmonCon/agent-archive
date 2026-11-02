@@ -31,6 +31,15 @@
       "commit": "72f7083e640aa7a7825d3d559327c9b53e96ca95",
       "fetchedAt": "2026-10-28",
       "notes": "测试方法论（fixtures/provider.py）是重点"
+    },
+    {
+      "id": "elysian",
+      "repo": "https://github.com/ELY-Open-Source/Elysian",
+      "why": "AI 本地记忆库，档案馆的反面：把「谁说的、何时为真、谁能看」做成检索约束；重点不是它的检索，而是它的自我审计纪律",
+      "license": "MIT（注意：其 PDF 依赖 PyMuPDF 为 AGPL-3.0，仅影响分发该组件的场景）",
+      "commit": "10950cfd614454bc783d78efb974b1a2af494010",
+      "fetchedAt": "2026-11-03",
+      "notes": "2026-11-03 五切片只读深读（检索/记忆语义/bench/Go MCP/摄入）：bench/audit.py 反自证审计、冻结+sha256+revision 三联、chance/Wilson 并排、proofs 的 deferred 一等状态、v_atoms_current「不存在也是一种状态」、MCP 注解即契约与方言表、setup 原子写+ours()。检索/dense/CLIP/cartridge/hook 注入不适用（我们不做检索不做注入）。已核出多处话术与实现不符，见 LESSONS.md 的「它自己的话术与实现不符」表"
     }
   ]
 }

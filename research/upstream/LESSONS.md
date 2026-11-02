@@ -164,6 +164,77 @@ HOME 下"的直觉去改，Windows 上反而会读不到。
 | 两级缓存（列表 + 正文 LRU） | 已采用 | `transcript-cache.js`：按源文件指纹失效，双限 LRU。实测同一场大会话第二次读 1082ms → 0.4ms |
 | 字节游标增量索引 | 已否决 | 先量过：索引成本 99% 在读文件+解析，不在索引文本（40 场抽样：读 11.9s / 拆文本 7ms / 分词 36ms）。而稳态索引只有 2.8s，90s 仅出现在首次全量——游标救不了首次全量 |
 
+## Elysian（往世乐土，AI 本地记忆库；`10950cf`，2026-11-03）
+
+> 与上面三个不同：**它不是档案馆，是档案馆的反面**——它做检索、做注入、把
+> "谁说的、什么时候为真、谁能看"做成检索约束。所以这里记的大多是**判断**：
+> 它的机制哪些在我们定位下值得抄、哪些抄了就违背我们的定位。
+> 深读方式：五个只读小组分切片（检索 / 记忆语义 / bench / Go MCP / 摄入），
+> 全部结论带 `file:line`，每条都回代码核过。
+
+### 它真正做对了什么
+
+| 事项 | 判断 | 去向 |
+|---|---|---|
+| **反自证审计**：AST 规则禁止"跑到分数达标为止"，强制"报告必须覆盖冻结的 n""每个分数旁必须有 chance 行""打分器不得 import 被测库"，并用**注入的作弊样例反向验证审计器本身有效** | 值得学（最硬的一条） | `bench/audit.py:29-34,48-76,202-231`。它解决的是"证明套件只证明自己存在"。我们的 `doctor`/回归验证可以照这个形状：把"我不许自己怎么骗自己"写成机器规则 + 自测 |
+| **冻结 + sha256 + revision 三联**：13 个第三方集按 HF revision 钉死，每文件记 sha256/snapshot/licence，套件再出带摘要的 manifest 并被校验 | 值得学 | `bench/corpus_sources.py:8`、`bench/build_sets.py:62-86`、`bench/validate_sets.py:98-115`。对应我们"三个月后不知道扫的是哪版会话库" |
+| **每个比率旁配 n + Wilson 下界 + "什么都不做"的基线** | 值得学 | `bench/metrics.py:66-89`。我们的"99% 归一化成功"这类数字目前没有 floor，读不出信号 |
+| **一次只动一个变量的配对前后测**（先把描述退回原文再重写） | 值得学 | `bench/redescribe_check.py:57-103`。迁移/改 scanner 前后应逐条 diff 并写明"唯一差别是 X" |
+| **冻结件不可覆盖，harness 只在副本上跑** | 值得学 | `video_audio_check.py:402-408`。回归跑绝不写进用户真归档 |
+| **采样偏差自曝**：300 探针偏高 0.16 这种事写进报告 | 值得学（纪律） | `leg_check.py:5-10`。藏起来比写出来贵 |
+| **`deferred` 是一等状态**：没跑过的检查既不算过也不算败，套件"绿不绿"取决于真跑过的检查 | 值得学 | `proofs/suite.py:74-79`、`evaluation_schemas.py:110-117`。我们 `doctor` 的"读不到正文"应有同等待遇 |
+| **"不存在也是一种状态"**：`v_atoms_current` 把失效/未生效的记忆从默认视图隐藏，而不是删除；`atom_count()` 仍计入 | 值得学 | `migrations.py:188-194`、`AGENTS.md:50-51`。对应我们"会话还在但正文不可读"——该隐藏不该删，且计数要分开报 |
+| **缓存 key 把语料版本与可见性编进去** | 值得学 | `cache_fabric.py:20-22`。我们的 `transcript-cache.js` 只用 `(mtime,size)`，应加 corpus revision |
+| **内容寻址对象库 + 确定性 ID**（sha256 命名、`object://`、resolve 防逃逸） | 部分值得学 | `storage.py:29-32,59-87`。**但它的 `source_id` 把文件名 stem 拼进 ID**，对我们是反例：我们的会话文件持续追加，内容一变 ID 就变，每扫一次生新 source。应反过来——session id 做 key，内容做版本 |
+| **注解即契约 + 手写期望表**：23 个 MCP 工具按 readOnly/additive/destructive 四档钉死，漏注解或标错即测试失败 | 值得学（成本极低） | `elysian-mcp/internal/mcpserver/server.go:62-71`、`annotations_test.go:34-64`。我们工具少，照抄便宜 |
+| **方言表 + 行为位**：把 7 个客户端差异压成数据位（读/写/审批/去重/只存不召回/无 session hook/让位），而不是 if-else | 值得学 | `elysian-mcp/internal/hook/dialect.go:29-43`。接多客户端 hook 的最佳骨架 |
+| **原子写 + `ours()` 标记 + 原位替换**：装进用户配置文件前先认自己写过的，替换保留同组他人 handler 且刻意不挪位置 | 值得学 | `elysian-mcp/internal/setup/edit.go:66,107-149`。安装器被信任的前提 |
+| **两段式读取**：search 返 1200 字摘要，fetch 给全文 | 值得学 | `elysian-mcp/internal/mcpserver/tools.go:185`。和我们的 `read_session` offset/maxChars 同源 |
+| **重复 SQL + 漂移测试**：可见性条款写了 5 份，但有一致性测试锁住 | 值得学 | `browse.py:14` + `backend/tests/test_visibility_rule.py:26-35`。我们多入口同样适用 |
+| **"遗忘报告即契约"**：`ForgetReport` 把级联清单变成对外承诺，并报"哪些 cartridge 含它"而不是静默重写 | 值得学（语义） | `schemas.py:291-303`、`memory.py:402-421` |
+| **holder schema**：`kind IN ('person','agent','service')` + `token_hash` + `knows_about` | 可借形状 | `migrations.py:92-103`。与我们"跨 Agent 事实"同构，`kind` 可直接用，把 Agent 当 holder |
+| **`as_of` 点查询**：一条谓词答"某时刻的事实视图" | 值得学 | `store_search.py:80-94`、`db.py:141-166`。这正是时间线的核心问法 |
+| **中文分词单点共享**：索引侧 CJK 逐字加空格 + camelCase 切分，查询侧整句 + 相邻二字短语 OR + 拉丁前缀 | 值得学 | `text_index.py:20,27-31,72-73,163-172`。和我们 FTS5 二元组方案同题，可交叉验 |
+| **截断 DF 代替停用词表** | 值得学（小） | `text_index.py:105-118` |
+
+### 抄了就违背我们定位的
+
+| 事项 | 判断 | 原因 |
+|---|---|---|
+| RRF 三路融合、dense/CLIP/VLM 描述管线 | **不适用** | `retrieval.py:157-168`。它们全部服务于"检索"，我们明确不做检索 |
+| hook 每轮自动注入上下文 | **已否决** | 我们 README:17-18 写明"不往 Agent 里注入任何东西"。注意 Elysian 自己也没做到：Grok/Kigi 只能退成"规则文件教模型调工具"（`wire_c.go:14,86-91`），说明**"靠模型记得调 MCP 工具"是最脆的一环**——我们默认就站在这个位置，这条要当风险记，不是当方案抄 |
+| cartridge 挂载 / working·consolidation·archive 三层 / rollup 固化 | **不适用** | 服务"注入与上下文预算"，与"只归档不注入"相反 |
+| 隔离区在 compiler 期放行、信任分打分 | **不适用（但有可借语义）** | `trust.py:69-121`。我们不做注入，但**导出/Markdown 可以标注"第三方文本、不可作事实引用"**，形状可借 |
+
+### 它自己的话术与实现不符（提醒：别照 README 抄设计）
+
+| 声明 | 实际 |
+|---|---|
+| "四动词一个 writer，规则不会漂移" | 四动词成立；但 atoms 另有 `ingestion.py:92`、`describe.py:165`、`memory.py:326` 三个写入口 |
+| "向量与记忆写在同一事务" | 不成立：atoms+FTS 一个事务，向量另开连接另事务（`memory.py:134-135`、`vector_index.py:142`） |
+| "token 决定身份，客户端不能自称别人" | 对读成立；对写退化为单身份——写只认 operator token，而 operator 的 `holder_id` 为 None，全部落 `default_holder`（`api_auth.py:55,104-116`、`api.py:235`）；`supersede` 不校验 owner |
+| "forget 级联到一切派生数据" | 漏 consolidation rollup：rollup 抄了原文却是独立 source，**被遗忘的文本仍活在 rollup 里可被检索**（`memory.py:293-298,402-421`） |
+| "holder 边界带来 +0.455" | 两行相减的派生数；holder 内 chance 本身从 0.0002 抬到 0.369，差值大半来自候选池缩小，测的是基准切分不是能力 |
+| "p50 0.072s / 165,973 atoms" | 那次 dense 关闭、无 filters（operator 全库）；开 dense 后 p50 721ms（`LEGS.md:18`） |
+| "没有索引要重建，存下即可检索" | 与 `_rebuild` / `build-dense-index` 并存（`vector_index.py:379-381`） |
+| "支持 15 个客户端、无需模型记得调用" | 实际 14 个且 4 个降级；setup/backend 五个测试全 `//go:build !windows`，`edit.go:175-201` 的 pwsh/cmd/plain 三分支从未被执行 |
+
+### 真 bug（对我们是警示，不是要抄）
+
+- **图片腿完全没有 holder 过滤**（`retrieval.py:152-155`、`visual_index.py:71`）：thin 触发图片腿时，别的 holder 的私图可进结果。这是"过滤只加在一条腿上"的经典事故。
+- **`forget` 之后原文仍活在 rollup 里**（上表）。
+- **`min_trust` 语义失效**：记忆信任分恒为 `(1.0,0,0)`，`min()` 恒 0，`min_trust>0` 会滤掉全部记忆；dense 通道又不传该参数。
+- **直读 SQLite 的三个 MCP 工具绕过 holder 可见性校验**（`fetch_atom`/`get_cartridge`/`elysian_status`），而 `/api/search` 会校验——权限边界在两个入口上不一致。
+- **每次检索都 `UPDATE recall`**（`retrieval.py:94`）：读也抢写锁，多进程并发最痛的一条。我们多 Agent 并发写要引以为戒。
+- **`setup` 在 Windows 上基本没测**：`plain` 分支遇含空格路径直接报错，会让多家客户端 setup 整体中断（`edit.go:196`、`setup.go:100-103`）。
+
+### 结论（一句话）
+
+Elysian 值得抄的是**纪律**，不是**架构**：反自证审计、冻结+复现三联、chance/Wilson 并排、
+deferred 一等状态、不存在也是一种状态、注解即契约、方言表、原子写+标记、遗忘报告即契约、
+`as_of` 谓词。它的检索/注入/cartridge/三层记忆**全部服务于我们明确不做的那件事**；
+而它最脆的一环（靠模型记得调 MCP 工具、以及权限边界在多入口上不一致）恰好是我们现在就站着的坑。
+
 ## 待办（按产品价值排序）
 
 ### 2026-10-30 第二轮深读后重排
