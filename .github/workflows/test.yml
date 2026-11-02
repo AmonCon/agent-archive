@@ -93,3 +93,22 @@ jobs:
         with:
           node-version: '24'
       - run: npm run privacy
+
+  claims:
+    name: 能力门禁
+    # README 会静默过期：改了代码没回头改 README，或者反过来。
+    # 这种漂移不会让任何测试失败，只会让陌生人低估这个项目、
+    # 让我们自己忘记已经补过什么。所以单独一道门，静态比对 README 与代码。
+    #
+    # 只跑一个平台：它只读仓库里的文件，不探测本机、不联网，
+    # 所以在任何系统上结论都一样。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # 先证明门禁自己抓得住注入的漂移，再查本仓库。
+      # 抓不住注入的门禁，只是一段会打印「通过」的代码。
+      - run: npm run claims -- --self-test
+      - run: npm run claims
