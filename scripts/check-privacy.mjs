@@ -151,13 +151,18 @@ for (const rel of files) {
   }
 }
 
-// 提交身份：只放行 GitHub 的 noreply 地址和公认占位符
+// 工具/IDE 自动填的提交者身份：不是作者本人，是那个编辑器按保存键时填的。
+// 按域名放行，个人邮箱（任何域名的具体某个人）不放行。
+const TOOL_IDENTITIES = ['@trae.ai'];
+
+// 提交身份：只放行 GitHub 的 noreply 地址、公认占位符，和上面那几个工具身份
 try {
   const out = git(['log', '--all', '--format=%ae%n%ce']);
   const seen = new Map();
   for (const e of out.split('\n').map((x) => x.trim()).filter(Boolean)) {
     if (/@users\.noreply\.github\.com$/.test(e)) continue;
     if (/@(?:example\.(?:com|org)|localhost|test\.)/.test(e)) continue;
+    if (TOOL_IDENTITIES.some((t) => e.endsWith(t))) continue;
     seen.set(e, (seen.get(e) || 0) + 1);
   }
   for (const [e, n] of seen) {
