@@ -527,13 +527,13 @@ npm test          # node --no-warnings --test
 
 上游改了格式，这些用例会先红——比用户机器上静默少数据好。
 
-**还缺的**：Antigravity、Copilot Chat、Kiro、OpenCode、ZCode 五家还没有契约测试
-（这五家的解析细节目前只写在各自扫描器的注释里）。按 `test/codex.test.js` 的形状加即可——
-其中 Antigravity 的「元数据能搜到、正文只有 3/21 能读」和 Kiro 的「assistant 正文是
-占位符、真回复在执行包里」最该先锁，它们是本机踩过的静默缺陷。
-其余六家（Claude Code、Codex、DeepSeek Harness、Hermes、Qoder、Cursor）已有契约测试。
+**还缺的**：Copilot Chat、OpenCode、ZCode 三家还没有契约测试
+（这三家的解析细节目前只写在各自扫描器的注释里）。按 `test/codex.test.js` 的形状加即可。
+其余八家（Claude Code、Codex、DeepSeek Harness、Hermes、Qoder、Cursor、Antigravity、Kiro）
+已有契约测试——其中 Antigravity 与 Kiro 锁的正是本机踩过的静默缺陷：
+「元数据能搜到、正文只有 3/21 能读」和「assistant 正文是占位符、真回复在执行包里」。
 
-这五行不是靠人记着的：它们写在 `.claims-skip` 里，`npm run claims` 要求这里点名的
+这三行不是靠人记着的：它们写在 `.claims-skip` 里，`npm run claims` 要求这里点名的
 每一家都在 `test/` 下真有契约测试——补上之后忘了删清单行，门禁会红。
 
 ### 跨平台路径也是被测的

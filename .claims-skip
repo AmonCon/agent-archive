@@ -8,8 +8,6 @@
 # 但门禁不该因此常年变红，红久了就没人看了。缺口要显式声明，不要静音。
 #
 # 一行一个 scanner slug。# 开头与行尾注释忽略——与 .privacy-skip 同一套语法。
-antigravity
 copilot
-kiro
 opencode
 zcode
