@@ -15,7 +15,7 @@ import os from 'node:os';
  * 不是把它们扔了**。
  *
  * 主会话只记"我让子代理去查一下 X"，具体查了什么、看到了什么全在子代理
- * 会话里。扔掉等于档案馆只存了一半事实。本机实测仅 Hermes / ZCode /
+ * 会话里。扔掉等于档案馆只存了一半事实。实测仅 Hermes / ZCode /
  * OpenCode 三家就有 202 场被丢。
  *
  * 所以现在的约定：
@@ -124,7 +124,7 @@ export function isProjectPath(p) {
   const n = normalizeProject(p);
   if (!n) return false;
 
-  // WSL 网络路径、UNC 路径：不是本机项目
+  // WSL 网络路径、UNC 路径：不是实测项目
   if (n.startsWith('//')) return false;
 
   const home = os.homedir().replace(/\\/g, '/').toLowerCase();
@@ -229,7 +229,7 @@ export function mainOnly(sessions) {
  * 把子代理会话按**根会话**分组，返回 Map<根会话 id, 子会话数组>。
  *
  * 注意是"根"不是"直接父"：Codex 支持多级委派（子代理还能再派子代理），
- * 本机实测 1543 场子代理里有 181 场的直接父是另一个子代理。只按直接父
+ * 实测 1543 场子代理里有 181 场的直接父是另一个子代理。只按直接父
  * 分组，这些孙子会话会挂在一个时间线上根本不显示的节点下面，等于看不见。
  * 所以沿 parent 链上溯到根，全部归到根名下，并保留 `depth` 说明层级。
  *

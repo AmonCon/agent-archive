@@ -72,7 +72,7 @@ function exists(rel) {
 }
 
 /**
- * 探测本机有哪些 Agent。
+ * 探测实测有哪些 Agent。
  *
  * 存在的每个都给 `level`：config / data / none。
  */
@@ -190,7 +190,7 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
   // 以真实存在的 Agent 为准（不是三家全集的并集）
   const present = presence.filter((p) => p.level !== 'none');
 
-  // CLI 的可见范围需要知道"本机有哪几家"，所以放在 presence 之后算
+  // CLI 的可见范围需要知道"实测有哪几家"，所以放在 presence 之后算
   const cli = cliSummary({ fresh, presentAgents: present.map((p) => p.agent) });
 
   const agents = present.map((p) => {

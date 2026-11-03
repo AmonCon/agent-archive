@@ -8,7 +8,7 @@
  * 所以这里的产出只有三样：**在哪、是什么格式、有多大**。
  * 正文一律按需读，而且默认只给开头。
  *
- * 另一条：记忆里同样会有明文凭证（本机的 ZCode 项目记忆里就有一条
+ * 另一条：记忆里同样会有明文凭证（实测的 ZCode 项目记忆里就有一条
  * `security-plaintext-aliyun-key-in-zcode-config.md`）。这里不主动
  * 搜凭证——那是 `secrets` 命令的活——但**绝不回传全文**，
  * 免得把记忆里的密钥顺带送进某个模型的上下文。
@@ -41,7 +41,7 @@ const TARGETS = [
     kind: 'memory',
     path: () => path.join(os.homedir(), '.codex', 'memories', 'MEMORY.md'),
     scope: 'global',
-    // 实测本机 450 KB / 4312 行——绝不整份读
+    // 实测 450 KB / 4312 行——绝不整份读
     large: true,
   },
   {
@@ -161,7 +161,7 @@ function readHead(p, bytes = HEAD_BYTES) {
  * 从 markdown 里抽"这条记忆叫什么"。
  *
  * 两种写法并存：frontmatter 的 `name:` 和一级标题 `# xxx`。
- * 本机的 Qoder / ZCode 分片用 frontmatter，Hermes 用 `# 标题`。
+ * 实测的 Qoder / ZCode 分片用 frontmatter，Hermes 用 `# 标题`。
  */
 function titleOf(text) {
   const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -198,7 +198,7 @@ function describeFile(t) {
 /**
  * 目录型记忆：识别索引 + 分片。
  *
- * 只统计条数和每条的标题，不读正文——本机 ZCode 最大的项目记忆有
+ * 只统计条数和每条的标题，不读正文——实测 ZCode 最大的项目记忆有
  * 36 个分片，全读进来没有意义。
  */
 function describeDir(t) {
@@ -486,7 +486,7 @@ function rmTempDir(dir) {
 }
 
 /**
- * 扫描本机所有记忆与指令文件。
+ * 扫描实测所有记忆与指令文件。
  *
  * @returns {{items: Array, byAgent: object, totals: object}}
  */
@@ -567,7 +567,7 @@ export function memorySummary() {
       bytes: i.bytes,
       entries: i.entries ?? undefined,
       preview: i.preview || undefined,
-      // 不列 path：本机绝对路径对别的 Agent 没意义，
+      // 不列 path：实测绝对路径对别的 Agent 没意义，
       // 而且用户家目录结构不该随便进模型上下文。要看路径在终端里看。
     })),
   };

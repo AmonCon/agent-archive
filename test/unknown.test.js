@@ -33,7 +33,7 @@ test('unknown: 认出含 sessions 子目录的未知应用', () => {
 test('unknown: 会话形态的文件本身不足以入选（避免包管理器缓存误报）', () => {
   const box = sandbox();
   try {
-    // 本机真实误报案例：pnpm-cache 有 251 个 .jsonl，但跟 Agent 无关。
+    // 实测真实误报案例：pnpm-cache 有 251 个 .jsonl，但跟 Agent 无关。
     // 所以入选条件要求"有 sessions 类子目录"或"目录名像会话存储"。
     box.write('.cache-tool/blobs/a.jsonl', '{}\n');
     box.write('.cache-tool/blobs/b.jsonl', '{}\n');

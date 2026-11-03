@@ -241,7 +241,7 @@ function parseMaybeJson(s) {
  * 在执行包目录里按 executionId 找正文。
  *
  * 布局是 <agentRoot>/<hash>/<hash>/<file>，文件名不是 executionId，
- * 所以只能逐文件打开看。本机只有 6 个执行包，全扫一遍可接受。
+ * 所以只能逐文件打开看。实测只有 6 个执行包，全扫一遍可接受。
  *
  * 每一层都过 assertUnder：目录名来自磁盘，理论上可以是任何东西，
  * 拼接前必须确认还在 agentRoot 之内。

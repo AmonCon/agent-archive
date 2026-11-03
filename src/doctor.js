@@ -1,7 +1,7 @@
 /**
  * 采集质量体检。
  *
- * 这个模块回答一个问题：**我们真的把本机的会话都读到了吗，读对了吗？**
+ * 这个模块回答一个问题：**我们真的把实测的会话都读到了吗，读对了吗？**
  *
  * 现有的 stats 只说"扫了多少文件、识别出多少会话"，那是产量而不是质量。
  * 真正会悄悄坏掉的是这些：
@@ -33,7 +33,7 @@ import { stateHome } from './paths.js';
  */
 const PROBLEM_SHOW = 5;
 
-/** 各 Agent 的存储根目录是否存在于本机。 */
+/** 各 Agent 的存储根目录是否存在于实测。 */
 export function detectAgents() {
   return scanners.map((s) => {
     let files = 0;
@@ -149,7 +149,7 @@ export async function auditCollection({ samplePerAgent = 3, noCache = false } = 
     //
     // 只给 failures 那个数字时，doctor 的全部价值就是"今天有 3 个失败"。
     // 用户既不知道是哪个文件、也不知道该不该管——是某个 Agent 的适配整体
-    // 坏了（必须修），还是本机某个坏文件（删掉就行）。这两种处置完全相反，
+    // 坏了（必须修），还是实测某个坏文件（删掉就行）。这两种处置完全相反，
     // 计数却长得一模一样。所以明细必须跟着数据一起出来。
     problems: summarizeProblems(stats),
     duplicates,
@@ -231,7 +231,7 @@ function summarizeProblems(stats) {
  * 一次，只是这次是静默的。
  *
  * **归属要沿链上溯，不能只看父是不是 main。** Codex 支持多级委派：
- * 子代理还能再派子代理，于是"父会话"本身也是 subagent。本机实测 1543 场
+ * 子代理还能再派子代理，于是"父会话"本身也是 subagent。实测 1543 场
  * 子代理里有 181 场的直接父会话是另一个子代理——只看一层会把它们误报成
  * 孤儿。正确的判据是：沿 parent 链往上走，能不能走到一个 main 会话。
  *
@@ -371,7 +371,7 @@ function pickSpread(list, n) {
 }
 
 /**
- * 找出「本机装了但读不到会话」的 Agent 目录。
+ * 找出「实测装了但读不到会话」的 Agent 目录。
  *
  * 这是 doctor 最有用的部分：它不依赖我们写过的 scanner，
  * 而是去看一堆已知的存储位置在不在、里面有没有像会话的东西。
@@ -571,7 +571,7 @@ export function detectGaps() {
  *   1. `detectGaps()` 列的数据文件路径（我们自己写的适配清单）
  *   2. **从已发现会话反推的应用锚点**——见 unknown.js 的 anchorsFromSources。
  *      少了这一步，`AppData/Roaming/Cursor`、`QoderCN` 这些已适配应用
- *      会被当成"未适配"报出来（本机实测过一次）。
+ *      会被当成"未适配"报出来（实测过一次）。
  *
  * 另外排除本工具自己的状态目录，否则 `.agent-archive` 会把自己报成候选。
  *

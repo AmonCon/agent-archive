@@ -28,7 +28,7 @@
  *   node research/probes/remote-verify.mjs --host mac --dry-run     # 只打印要做什么
  *
  * 前提：远端开了「远程登录」（macOS：系统设置 → 通用 → 共享 → 远程登录），
- * 并且你本机能免密登录（推荐先把公钥加到远端 ~/.ssh/authorized_keys）。
+ * 并且你实测能免密登录（推荐先把公钥加到远端 ~/.ssh/authorized_keys）。
  *
  * 全程只写远端的临时目录，跑完删掉；不碰远端任何 Agent 的真实数据
  * ——测试自己造假数据，这点见 test/helpers.js 的沙箱。

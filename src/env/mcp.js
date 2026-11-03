@@ -6,11 +6,11 @@
  * 与 cc-switch / magpie 的关键区别：**它们按名字认服务，我们按指纹认。**
  * cc-switch 的 `McpServer.id` 就是原生配置里的键名，所以同一个 supabase
  * 在 Claude 里叫 adbsupabase、在 Qoder 里叫 supabase，会被当成两个服务。
- * 本机的真实数据是：一个 supabase 服务，4 条注册，3 种启动形态，
+ * 真实数据是：一个 supabase 服务，4 条注册，3 种启动形态，
  * 2 个名字。不按指纹归一，"我到底配了几份、哪份是活的"这个问题就答不了。
  *
  * 另一个硬约束：**env / headers 的值绝不出这个模块。**
- * 本机实测 3 份配置里有明文阿里云 AK。这个模块只回传键名，
+ * 实测多份 Agent 配置里存在明文云厂商 AK。这个模块只回传键名，
  * 要看值必须走终端，永远不经过 MCP。
  */
 
@@ -85,7 +85,7 @@ const SOURCES = [
   {
     agent: 'kiro',
     format: 'json-mcpServers',
-    // Kiro 的用户级 MCP 配置在这个位置；本机不存在，但别的机器上可能有
+    // Kiro 的用户级 MCP 配置在这个位置；实测不存在，但别的机器上可能有
     paths: () => [
       path.join(os.homedir(), '.kiro', 'settings', 'mcp.json'),
       ...userDataCandidates('Kiro').map((r) => path.join(r, 'User', 'settings.json')),
@@ -260,7 +260,7 @@ function parseYamlMcpServers(text) {
     //       - "@modelcontextprotocol/server-github"
     //
     // 必须支持。不支持的话 args 会读成空数组，服务指纹退化成只有
-    // `command: npx`——本机每一种 npx 拉起的服务都会被合并成同一条，
+    // `command: npx`——实测每一种 npx 拉起的服务都会被合并成同一条，
     // 而且不报错。这是"静默出错"里最坏的一种：用户看到的是"我配了 5 个
     // 服务，它说只有 1 个"。
     const argsItemM = line.match(/^ {6,}-\s+(.+)$/);

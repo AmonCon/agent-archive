@@ -22,13 +22,13 @@ import { lineIterator } from './lines.js';
  *   新（projects）：
  *     ~/.qoder[-cn]/projects/<工作区转义路径>/<sessionId>.jsonl
  *     与 Claude Code 同构：每行带 type / timestamp / cwd / sessionId，
- *     工具调用和结果都写在文件里。**这是现在的主存储**——本机 334 个
+ *     工具调用和结果都写在文件里。**这是现在的主存储**——实测 334 个
  *     文件里 316 个是真人会话，只读旧格式会漏掉九成以上。
  *
  * 国际版和中国版是两套独立安装，各有一份，都要读。macOS 上还有
  * Application Support 下的变体目录。
  *
- * 旧格式的实测教训（保留）：本机同时装了 `.qoder` 和 `.qoder-cn`，
+ * 旧格式的实测教训（保留）：实测同时装了 `.qoder` 和 `.qoder-cn`，
  * 前者 7 场、后者 12 场，只读一个会漏一半。
  */
 
@@ -179,7 +179,7 @@ export function discover() {
 
       // 子代理会话：<工作区>/<会话id>/subagents/agent-*.jsonl
       //
-      // 主循环只收工作区**顶层**的 UUID 文件，这一层以前整家漏掉——本机实测
+      // 主循环只收工作区**顶层**的 UUID 文件，这一层以前整家漏掉——实测
       // 78 个这样的文件，一个都没采到。它们记录的是子代理实际干的活，
       // 和 Codex/DSH 的子代理是同一类东西：丢掉等于只存一半事实。
       for (const sd of files) {
@@ -217,7 +217,7 @@ function isProjectFormat(first) {
  * 这个文件是 append-only 的 JSONL，扫描期只要四样东西：开始时间、结束时间、
  * 项目路径、标题。它们几乎都在头尾，中间几十兆是整段对话。
  *
- * 本机实测：整文件读 + 每行 JSON.parse 的写法，448 个文件要 42 秒，其中
+ * 实测：整文件读 + 每行 JSON.parse 的写法，448 个文件要 42 秒，其中
  * 39 个 >100ms 的文件吃掉了绝大部分（最慢单个 1.9 秒，13 MB）。而热扫
  * 只要 0.37 秒——也就是说这 42 秒里绝大部分是「读了用不上的中间部分」。
  *
@@ -228,7 +228,7 @@ function isProjectFormat(first) {
  * 整读一次**。没有这个兜底，一场真实会话会因为「真人消息在中段」被误判成
  * 工具会话而丢掉，那是静默丢数据，比慢严重得多。
  *
- * 兜底只在少数文件上触发（本机 449 个里 6 个），不影响整体收益。
+ * 兜底只在少数文件上触发（实测 449 个里 6 个），不影响整体收益。
  */
 export function parse(file) {
   let ht;
@@ -475,7 +475,7 @@ function parseProjectSession(file, head, tail, first, complete) {
     }
   }
 
-  // 纯工具会话（本机有 2 个）没有人类输入，归档它们只会污染时间线。
+  // 纯工具会话（实测有 2 个）没有人类输入，归档它们只会污染时间线。
   //
   // 但**头尾里没有不等于全篇没有**：真人消息完全可能只出现在中段
   // （长会话、或前面全是工具往返）。所以没读到 human 时标 incomplete，
@@ -622,7 +622,7 @@ export function readMessages(session) {
     throw lastErr || new Error(`拒绝读取根目录之外的路径: ${session.source}`);
   }
 
-  // 逐行读，不再把整份文件读成字符串再 split：本机有 254 MB 的明文会话、
+  // 逐行读，不再把整份文件读成字符串再 split：实测有 254 MB 的明文会话、
   // 单行最长 8.45 MB，整读会同时持有一份字符串和一个字符串数组（约两倍
   // 文件大小）。上面的上限加在行粒度：超长行（工具结果）丢掉，后续照常。
   const it = lineIterator(real);

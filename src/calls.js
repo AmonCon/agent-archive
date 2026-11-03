@@ -10,11 +10,11 @@ import path from 'node:path';
  *
  * ## 数据从哪来
  *
- * 网关（如 magpie）会记录每一次上游请求，本机实测 15 天 2.5 万条。
+ * 网关（如 magpie）会记录每一次上游请求，实测 15 天 2.5 万条。
  * 这份日志的字段划分比各家会话文件细得多：
  *
  *   in / out            本次请求的输入、输出 token
- *   cache_read/_write   提示词缓存命中与写入量（本机实测占输入 96.8%）
+ *   cache_read/_write   提示词缓存命中与写入量（实测占输入 96.8%）
  *   ttft_ms             首 token 延迟
  *   ms                  整次调用耗时
  *   credits / cost      供应商自己报的费用
@@ -23,7 +23,7 @@ import path from 'node:path';
  *
  * ## 边界（重要）
  *
- * 网关只看得见**经过它的**调用。本机实测：dsh 和 hermes 的 session 字段
+ * 网关只看得见**经过它的**调用。实测：dsh 和 hermes 的 session 字段
  * 全空，因为它们不走网关；qoder 只有 76 场被网关看到，而归档有 310 场。
  * 所以调用层永远是"已观测到的成本"，不是全部成本。
  *
@@ -48,7 +48,7 @@ const SOURCES = [
 
 /**
  * @param {object} [opts]
- * @param {Array} [opts.sources] 覆盖日志源（测试用：指向 fixture，不依赖本机装了网关）
+ * @param {Array} [opts.sources] 覆盖日志源（测试用：指向 fixture，不依赖实测装了网关）
  */
 function findSources(opts = {}) {
   const list = Array.isArray(opts.sources) && opts.sources.length ? opts.sources : SOURCES;
@@ -144,7 +144,7 @@ export function readCalls({ fresh = false, sources: srcOverride } = {}) {
         provider: o.provider || null,
         model: o.model || null,
         // 网关实际应答的模型。和 req 不一定相同：`req` 可能是路由组别名
-        // （本机 `group/auto-deepseek-v4-1-flash` 解析成 `deepseek-v4.1-flash`），
+        // （实测 `group/auto-deepseek-v4-1-flash` 解析成 `deepseek-v4.1-flash`），
         // **不能当成"模型被替换"报出去**——那是两回事。
         served: o.served || null,
         request: o.req || null,
@@ -166,7 +166,7 @@ export function readCalls({ fresh = false, sources: srcOverride } = {}) {
         error: o.err || null,
         errorType: o.err_type || null,
         tries: o.tries == null ? null : Number(o.tries),
-        // 供应商自报的**额度消耗**，不是货币。本机字段名就叫 credits，
+        // 供应商自报的**额度消耗**，不是货币。实测字段名就叫 credits，
         // 不同供应商的单位不同（次数/积分/美元都有可能），我们不做换算。
         credits: o.credits == null ? null : num(o.credits),
         effort: o.effort || null,
@@ -311,7 +311,7 @@ export function summarizeCalls({ calls, groupBy = 'agent' } = {}) {
  *
  * 只看 session id 会**跨家错挂**：ZCode 和 OpenCode 都用 `session_xxx` 这类 id，
  * 两家的会话 id 撞车时，一场 qoder 的调用会被算到 opencode 的会话头上。
- * 本机实测过这种同构 id 形态，所以按 `agent|id` 做主键。
+ * 实测过这种同构 id 形态，所以按 `agent|id` 做主键。
  *
  * 网关侧的 agent 名和扫描器名不总是一致（`claude` vs `claude-code`），
  * 所以两边都过一遍 `canonicalAgent`。

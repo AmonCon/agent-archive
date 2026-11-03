@@ -11,7 +11,7 @@ import { extraRoots } from '../config.js';
  *
  * **主存储是 `~/.hermes/state.db`（SQLite），不是 `sessions/*.jsonl`。**
  *
- * 这一条是踩过才知道的：早期版本只扫 `sessions/*.jsonl`，本机读到 34 场，
+ * 这一条是踩过才知道的：早期版本只扫 `sessions/*.jsonl`，实测读到 34 场，
  * 而 state.db 里有 219 场（211 场有消息）。漏了 6/7 的数据——而且它不报错，
  * 只是安静地少算。Hermes 官方文档也写明"旧版 *.jsonl transcript 不再写入或读取"。
  *
@@ -48,7 +48,7 @@ export const name = 'hermes';
 function hermesDir() {
   // HERMES_HOME 是官方支持的重定向（源码里优先级最高）。
   // macOS 默认 ~/.hermes，Windows 官方是 %LOCALAPPDATA%/hermes——
-  // 但本机实测 Windows 上也在 ~/.hermes（早期安装方式），
+  // 但实测 Windows 上也在 ~/.hermes（早期安装方式），
   // 所以两个候选都试，存在的优先。
   const override = process.env.HERMES_HOME;
   const home = os.homedir();
@@ -179,7 +179,7 @@ export function extraFiles(file) {
  *
  * registry 的缓存是按**文件**判的：state.db 一动，整库 165 场全部重解析。
  * 而 Hermes 的库是追加式写入——聊完一场，别的会话一个字都没变。
- * 本机实测整库重解析要读 250 MB 的 messages 表，全部白做。
+ * 实测整库重解析要读 250 MB 的 messages 表，全部白做。
  *
  * 所以这里再套一层按会话的指纹（MAGPIE 对 Hermes 用的是同一套思路）：
  * 用一次 SQL 聚合给每场会话算 `(消息数, 末条时间, 正文总长)`，只有指纹
@@ -349,20 +349,20 @@ function cleanText(s) {
  *
  * ## 查过、但**没有**采用的三个上游做法
  *
- * MAGPIE 处理 Hermes 时做了三件事，我们逐条对着本机真实数据核过，
+ * MAGPIE 处理 Hermes 时做了三件事，我们逐条对着本机的真实数据核过，
  * 结论是都不适用——写在这里，免得以后有人再调研一遍或照着改错：
  *
- * 1. **解码 `\x00json:` 前缀**：本机 state.db 里含 NUL 字节的 content
+ * 1. **解码 `\x00json:` 前缀**：实测 state.db 里含 NUL 字节的 content
  *    只有 9 行，且内容长度为 0（是空消息，不是被编码的 JSON）。
  *    照抄会得到一段永远走不到的代码。
  *    （注：SQLite 的 LIKE 遇到 NUL 会失真，用它统计会得出 18940 这种假数字，
  *    要用 instr()。）
  *
- * 2. **过滤 `display_metadata.model_only`**：本机 133 行有 display_metadata，
+ * 2. **过滤 `display_metadata.model_only`**：实测 133 行有 display_metadata，
  *    内容全是 `{"gateway_input_owner": ...}`，没有 model_only 这个键。
  *
  * 3. **按 display_identity 去重**：看着像"同一份内容被重放几十次"，
- *    实际查下来是 **Agent 真的重试了几十次**——本机一个会话里同一段工具输出
+ *    实际查下来是 **Agent 真的重试了几十次**——实测一个会话里同一段工具输出
  *    出现了 85 次，各有不同的 message_uid 和不同的时间戳，散布在 284 条
  *    其他消息之间。按内容或按 identity 去重会把真实的重试过程删掉。
  *    另有一处用户连问三次同一句话（间隔 32 分钟），同样不能动。

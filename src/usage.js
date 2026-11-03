@@ -13,7 +13,7 @@ import { dayKey } from './model.js';
  *
  * ## 为什么不能把几个数直接相加
  *
- * 同一列 `input_tokens`，四家的含义不一样（本机实测，不是猜的）：
+ * 同一列 `input_tokens`，四家的含义不一样（实测，不是猜的）：
  *
  *   ZCode      input 含缓存。`provider_total_tokens = input + output`，
  *              而 cache_read 是 input 的子集 → 缓存读会被算成全价输入。
@@ -150,7 +150,7 @@ async function readZcode({ dbPath } = {}) {
             input: r.input_tokens,
             // 实测 10,273 行里 provider_total 全部等于 input + output，
             // 而 cache_read 是 input 的子集 → input 是"整段提示词"，含缓存。
-            // 本机没有 cache_creation > 0 的行，所以缓存写是否也在 input 里
+            // 实测没有 cache_creation > 0 的行，所以缓存写是否也在 input 里
             // 未实测；按同一套字段的语义一并减掉，并在文档里标明了这一点。
             semantic: 'total',
             output: r.output_tokens,
@@ -462,7 +462,7 @@ export const SOURCES = [
  * 读所有可用的用量源。
  *
  * `sources` 可覆盖（测试用），每个源是 `{ id, display, read }`；
- * `paths` 可按源指定库文件，避开真实本机数据。
+ * `paths` 可按源指定库文件，避开真实实测数据。
  */
 export async function readUsage({ sources, paths = {} } = {}) {
   const list = Array.isArray(sources) && sources.length ? sources : SOURCES;

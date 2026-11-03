@@ -9,7 +9,7 @@ import { sandbox, makeSqlite, withEnv } from './helpers.js';
  * 曾经导致静默少数据的形状：
  *
  *   1. 主存储是 state.db；旧的 sessions/*.jsonl 已不再写入/读取。
- *      早期只扫 jsonl，本机读到 34 场，而 state.db 里有 219 场——漏了 6/7，
+ *      早期只扫 jsonl，实测读到 34 场，而 state.db 里有 219 场——漏了 6/7，
  *      而且不报错，只是安静地少算。
  *   2. parent_session_id 非空的是子代理：要照常采集并标 kind/parent，
  *      整条跳过等于只存一半事实。
@@ -23,7 +23,7 @@ import { sandbox, makeSqlite, withEnv } from './helpers.js';
  *   8. -wal 必须参与缓存判据，否则刚聊完的会话会漏；-shm 不参与。
  *
  * 上游哪天改了这些形状，这里会先红。全部跑在假家目录里，
- * 不依赖、也不触碰本机真实数据。
+ * 不依赖、也不触碰本机的真实数据。
  */
 
 const scanner = await import('../src/scanners/hermes.js');
@@ -122,7 +122,7 @@ test('hermes: 只有旧的 sessions/*.jsonl 时不再扫出会话', async () => 
 test('hermes: started_at 是 epoch 秒（REAL，带小数），不能当毫秒', async () => {
   const box = sandbox();
   try {
-    const startSec = 1776274941.9466; // 本机实测值：2026-04-15 附近
+    const startSec = 1776274941.9466; // 真实值：2026-04-15 附近
     const endSec = 1776275000.25;
     const db = buildDb(box, {
       sessions: [

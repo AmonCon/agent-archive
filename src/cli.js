@@ -214,7 +214,7 @@ async function cmdTimeline(target, opts) {
     )
   );
 
-  // 真实项目上时间线可以很长（本机一个项目 924 场会话、1423 行输出）。
+  // 真实项目上时间线可以很长（实测一个项目 924 场会话、1423 行输出）。
   // 默认只给最近的一段并明确说明——时间线本身该是完整的，所以这是**显示窗口**，
   // 不是裁剪数据：--all 拿到的仍是全部，上面那行 summary 也始终描述整个项目。
   const shown = opts.showAll ? sessions : sessions.slice(-TIMELINE_WINDOW);
@@ -821,7 +821,7 @@ async function cmdExport(target, opts) {
 async function cmdDoctor(opts) {
   const gaps = detectGaps();
   const r = await auditCollection({ noCache: opts.noCache });
-  // 反向发现的候选：本机有没有"像会话存储但我们读不懂"的地方。
+  // 反向发现的候选：实测有没有"像会话存储但我们读不懂"的地方。
   // 它单独跑（要扫家目录），所以放在体检之后，失败也不影响上面的结论。
   const { discoverUnknownStores } = await import('./doctor.js');
   const unknown = discoverUnknownStores();

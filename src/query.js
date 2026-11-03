@@ -38,7 +38,7 @@ function absProject(p) {
  * 项目清单。
  *
  * 默认只统计主会话：子代理会话不是"一场对话"，把它们算进项目会话数会让
- * 数字虚高（本机 Codex 有 1322 场子代理，是主会话的两倍）。
+ * 数字虚高（实测 Codex 有 1322 场子代理，是主会话的两倍）。
  * `includeSubagents: true` 可以看全量，用于核对采集完整性。
  */
 export function listProjects({ noCache = false, showAll = false, includeSubagents = false } = {}) {

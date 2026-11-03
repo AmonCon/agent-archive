@@ -44,7 +44,7 @@ export const name = 'antigravity';
  * 只会把同一批会话报两遍。
  *
  * 保留这个数组是为了"哪天真有独立变体"时能一行加上去；
- * 目前只有第一项会在本机命中。
+ * 目前只有第一项会在实测命中。
  */
 const ROOT_NAMES = ['antigravity'];
 

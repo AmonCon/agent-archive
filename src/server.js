@@ -31,7 +31,7 @@ import * as pages from './web/pages.js';
  *   3. 会话正文是外部内容（别的 Agent 写的），一律 HTML 转义。
  *
  * 另外校验 Host 头：否则一个恶意网页可以用 DNS rebinding 把
- * evil.com 指到这里，再跨域读走本机的会话存档。
+ * evil.com 指到这里，再跨域读走实测的会话存档。
  */
 
 const DEFAULT_PORT = 7788;
@@ -57,7 +57,7 @@ const SPRITE_ETAG = `W/"${crypto.createHash('sha256').update(SPRITE_SVG).digest(
  *
  * 页面不执行任何内联脚本（交互全在 /assets/app.js），所以 script-src 只留 'self'。
  * 内联 style 仍然允许：图表宽度是服务端算出来的百分比，写在 style 属性上。
- * 默认 default-src 'none'：图片、字体、连接都只能是本机。
+ * 默认 default-src 'none'：图片、字体、连接都只能是实测。
  */
 const CSP =
   "default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; " +
@@ -141,7 +141,7 @@ async function warmCaches() {
 }
 
 async function handle(req, res) {
-  // 只认本机 Host，挡 DNS rebinding
+  // 只认实测 Host，挡 DNS rebinding
   if (!isLocalHost(req.headers.host)) {
     return send(res, 403, { 'content-type': 'text/plain; charset=utf-8' }, '只接受本机访问');
   }

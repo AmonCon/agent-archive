@@ -15,7 +15,7 @@ import { auditCollection } from '../src/doctor.js';
  *   - leafUuid 也相同 → 完全复制（copyOf）；不同 → 分叉（branchOf）
  *
  * 复制品不进入默认视图（mainOnly），分叉保留。
- * 全部跑在假家目录里，不依赖、也不触碰本机真实数据。
+ * 全部跑在假家目录里，不依赖、也不触碰本机的真实数据。
  */
 
 const PROJECT = 'E:/demo';

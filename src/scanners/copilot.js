@@ -19,7 +19,7 @@ import { extraRoots } from '../config.js';
  *
  * 两个必须处理的坑：
  *
- *   1. **大量空会话**。本机 16 个文件里只有 2 个有内容（22 轮 + 1 轮），
+ *   1. **大量空会话**。实测 16 个文件里只有 2 个有内容（22 轮 + 1 轮），
  *      其余 requests 是空数组。文件存在不代表有对话。
  *
  *   2. **.jsonl 是增量格式**：首行 {"kind":0,"v":"<完整JSON字符串>"}，
@@ -154,7 +154,7 @@ export function parse(file) {
   if (!data) return null;
 
   const requests = Array.isArray(data.requests) ? data.requests : [];
-  // 空会话不列：本机 16 个文件里 14 个是这种
+  // 空会话不列：实测 16 个文件里 14 个是这种
   if (!requests.length) return null;
 
   const times = [];

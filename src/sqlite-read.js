@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
  *
  * ## 问题
  *
- * `new DatabaseSync(file, { readOnly: true })` 并不真的"什么都不碰"。实测（本机
+ * `new DatabaseSync(file, { readOnly: true })` 并不真的"什么都不碰"。实测（实测
  * Hermes state.db，复制到临时目录后打开，前后各列一次目录）：
  *
  *     before  [ state.db ]
@@ -217,7 +217,7 @@ export function copyCount() {
  * `state_6.sqlite`（Codex 就是这么做的，cc-switch 的源码注释里也承认
  * "每次 bump 版本号就改这一处"——那是它自己的维护负担）。
  *
- * 对我们更糟：写死等于**在用户升级后静默少掉一部分能力**。本机写死
+ * 对我们更糟：写死等于**在用户升级后静默少掉一部分能力**。实测写死
  * `state_5.sqlite` 时，读不到只表现为"标题和结束时间又变回粗的"，不报错。
  *
  * 所以要按前缀扫描、取数字最大的那个；同时接受无版本号的写法

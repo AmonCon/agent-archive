@@ -1,7 +1,7 @@
 /**
  * 技能（SKILL.md 目录）的跨 Agent 识别。
  *
- * 本机实测：至少 366 处技能安装，其中 `~/.agents/skills` 的 72 个至少还有
+ * 实测：至少 366 处技能安装，其中 `~/.agents/skills` 的 72 个至少还有
  * 四份副本（Claude / Codex / Qoder / Hermes 各自一份目录）。同一个技能
  * 在五个地方装着，只按目录名认会把列表撑爆，所以身份按**内容哈希**算，
  * 名字只作为"别名"。
@@ -51,7 +51,7 @@ const ROOTS = [
     agent: 'zcode',
     dirs: () => [path.join(os.homedir(), '.zcode', 'cli', 'plugins', 'cache')],
     // 插件缓存按 `<插件>/<版本>/skills/<技能>` 组织，升级后旧版本不删。
-    // 本机实测 122 个安装只对应 57 个不同技能——`docx` 有 8 份
+    // 实测 122 个安装只对应 57 个不同技能——`docx` 有 8 份
     // （0.1.0 一路到 0.2.1）、`pdf` 8 份、`computer-use` 6 份。
     //
     // 这不是"装了 8 个不同技能"，是"同一个技能留了 8 个历史版本"。
@@ -110,7 +110,7 @@ const MAX_SKILL_BYTES = 512 * 1024;
  * 一旦在某一层发现 SKILL.md 就停止下探——技能目录里可能有子目录
  * （references/、scripts/），它们不是独立技能。
  *
- * **必须跟随符号链接。** 本机实测 Qoder 的 3 个、Kiro 的 28 个技能
+ * **必须跟随符号链接。** 实测 Qoder 的 3 个、Kiro 的 28 个技能
  * 全是指向 `~/.agents/skills/<name>` 的链接，用 Dirent.isDirectory()
  * 判断会把它们全部漏掉，而且漏得静默——显示"0 个技能"而不是报错。
  * 这正是"用链接共享技能"的典型做法，也是跨 Agent 识别的主战场。
@@ -369,7 +369,7 @@ function readSkill(dir, agent, viaSymlink = false) {
 }
 
 /**
- * 扫描本机所有技能。
+ * 扫描实测所有技能。
  *
  * @returns {{installs: Array, roots: Array, errors: Array}}
  */

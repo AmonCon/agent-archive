@@ -55,7 +55,7 @@ const SESSION_DIRS = new Set([
  * 目录名本身像会话存储的词。
  *
  * 这条是**入选的必要条件之一**（另一个是含 sessions 类子目录）。
- * 为什么不能只看"有没有 .jsonl"：本机实测那样会把 `pnpm-cache`（251 个 .jsonl）
+ * 为什么不能只看"有没有 .jsonl"：实测那样会把 `pnpm-cache`（251 个 .jsonl）
  * 和 `pgAdmin`（一个 .db）都报成"疑似会话存储"——包管理器缓存和数据库工具
  * 跟 Agent 无关，报出来只会让人不再信任这个列表。
  */
@@ -95,7 +95,7 @@ const SKIP_NAMES = new Set([
 const SYSTEM_PREFIXES = ['com.apple.'];
 
 /**
- * 扫一遍本机，返回可疑但未适配的会话存储候选。
+ * 扫一遍实测，返回可疑但未适配的会话存储候选。
  *
  * @param {object} opts
  * @param {Set<string>} [opts.knownPaths] 已知（已适配）的根目录，用于排除
@@ -137,7 +137,7 @@ export function scanUnknownStores(opts = {}) {
       if (roots.some((r) => normPath(r).startsWith(normPath(full) + '/'))) continue;
 
       const signals = inspect(full, { maxDepth, maxEntries });
-      // 空目录不算候选：本机有 `.lody`、`AppData/Roaming/ZCode` 这种
+      // 空目录不算候选：实测有 `.lody`、`AppData/Roaming/ZCode` 这种
       // 只有骨架没数据的，列出来只是噪声
       if (!signals.looksLikeSessions || !signals.files) continue;
       candidates.push({ path: full, name: e.name, ...signals });
@@ -164,7 +164,7 @@ export function scanUnknownStores(opts = {}) {
  *
  * `detectGaps()` 列的是**数据文件**（`state.vscdb`、`workspaceStorage`），
  * 而反向发现扫的是**应用根目录**（`AppData/Roaming/Cursor`）。两者粒度不同，
- * 拿前者排除后者会漏掉一大片——本机实测会把 `AppData/Roaming/Cursor`、
+ * 拿前者排除后者会漏掉一大片——实测会把 `AppData/Roaming/Cursor`、
  * `QoderCN`、`DeepSeekHarness` 全报成"未适配"，而它们其实都是已适配的。
  *
  * 所以从扫描结果反推：每个已发现文件的**应用根那一层**，就是"我们认识的地方"。
@@ -311,7 +311,7 @@ function normPath(p) {
  *
  * ## 两阶段，先便宜后贵
  *
- * 第一版直接递归，在本机跑了 **8.2 秒**——`~/AppData/Roaming` 下有上百个应用，
+ * 第一版直接递归，在实测跑了 **8.2 秒**——`~/AppData/Roaming` 下有上百个应用，
  * 每个都往下走三层，代价全花在明显无关的目录上（浏览器缓存、GPU 缓存……）。
  *
  * 现在先只看**顶层**：如果顶层既没有 sessions 类子目录、也没有会话形态的文件、

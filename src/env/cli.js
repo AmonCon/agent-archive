@@ -24,7 +24,7 @@ import { statePath } from '../paths.js';
 import { tildify } from '../model.js';
 import { openIndex, indexPath, readBody, hasBodyZ } from '../search.js';
 
-/** 产品目录。只用于识别，不代表本机一定装了。 */
+/** 产品目录。只用于识别，不代表实测一定装了。 */
 const CLI_CATALOG = [
   // 云服务与部署
   { id: 'aliyun', display: '阿里云 CLI', category: 'cloud', binaries: ['aliyun', 'ossutil'] },
@@ -376,7 +376,7 @@ let detectAt = 0;
 const DETECT_TTL_MS = 60_000;
 
 /**
- * 探测本机 CLI 安装位置。
+ * 探测实测 CLI 安装位置。
  *
  * PATH 命中优先（那就是 Agent 实际会解析到的那个），私有目录只用来补
  * "没进 PATH、但某个 Agent 自己能找到"的产品。
@@ -647,7 +647,7 @@ function visibilityOf(installs, presentAgents) {
  *
  * @param {object} [opts]
  * @param {boolean} [opts.fresh] 忽略缓存（CLI 的 --no-cache 用）
- * @param {string[]} [opts.presentAgents] 本机存在的 Agent；不传就只用安装/使用记录里出现的
+ * @param {string[]} [opts.presentAgents] 实测存在的 Agent；不传就只用安装/使用记录里出现的
  */
 export function cliSummary({ fresh = false, presentAgents = null } = {}) {
   const installsByProduct = detectCliInstalls({ fresh });

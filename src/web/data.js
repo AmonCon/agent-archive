@@ -59,7 +59,7 @@ export const usageSnapshot = memo(
 /**
  * 侧栏的"最近项目"。
  *
- * 每个页面都要它，而 listProjects() 会触发一次全量 stat（本机 2585 个文件
+ * 每个页面都要它，而 listProjects() 会触发一次全量 stat（实测 2585 个文件
  * 约 1 秒）。这是所有页面首访的共同固定成本——包括根本不需要会话正文的
  * `/env` 和 `/usage`。
  *

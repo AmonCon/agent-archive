@@ -1,6 +1,6 @@
 # 跨 Agent 会话识别机制研究 + 记忆中间件可行性
 
-> 研究日期：2026-10-21　目标机器：本机（Windows）　结论先行版
+> 研究日期：2026-10-21　目标机器：实测（Windows）　结论先行版
 
 ---
 
@@ -99,7 +99,7 @@ pub fn get_or_load(&self, key, fingerprint, load) -> ...
 
 `codex` `claude` `opencode` `openclaw` `gemini` `hermes` `grokbuild` `pi` `mcode` `agy`(Antigravity)
 
-而**配置管理**范围更大——`magpie ls` 在本机识别出 19 个 Agent 的设置文件：Claude Code、Claude Desktop、Codex、OpenCode、Pi、Cursor CLI、VS Code、DeepSeek Harness、Command Code、Devin、Hermes、Cline、Qoder、Qoder CN、ZCode、WorkBuddy、WorkBuddy AI、CodeBuddy Code、Lody。
+而**配置管理**范围更大——`magpie ls` 在实测识别出 19 个 Agent 的设置文件：Claude Code、Claude Desktop、Codex、OpenCode、Pi、Cursor CLI、VS Code、DeepSeek Harness、Command Code、Devin、Hermes、Cline、Qoder、Qoder CN、ZCode、WorkBuddy、WorkBuddy AI、CodeBuddy Code、Lody。
 
 > ⚠️ 重要区别：**"能改配置"的 Agent 数量 ≫ "能读会话"的 Agent 数量**。ZCode 在配置列表里，但不在 CC Switch 的会话 provider 列表里。
 
@@ -182,7 +182,7 @@ func (t *tail) holds(path string) bool {
 | WorkBuddy / CodeBuddy | 自有 JSON | ❌ | ✅ |
 | **Trae / Trae CN** | 未查到适配 | ❌ | ❌ |
 
-> 本机实测覆盖面：`magpie sessions` 一次就返回了 zcode、qoder-cn、hermes、opencode、dsh 五家的真实会话，带标题、项目路径、token 数、恢复命令。而 CC Switch 的 `session_log_sync` 表里只有 codex / claude / opencode 三类——**两家覆盖面确实不同，MAGPIE 更全**。
+> 实测覆盖面：`magpie sessions` 一次就返回了 zcode、qoder-cn、hermes、opencode、dsh 五家的真实会话，带标题、项目路径、token 数、恢复命令。而 CC Switch 的 `session_log_sync` 表里只有 codex / claude / opencode 三类——**两家覆盖面确实不同，MAGPIE 更全**。
 
 **这两家的空缺正好是你的机会**：Trae、Windsurf、Kiro、Cline 这些要么没适配、要么只做了半截。
 
@@ -211,7 +211,7 @@ func (t *tail) holds(path string) bool {
 
 **坑 1：Trae 这类"纯 GUI 闭源"可能根本读不到**
 
-本机的 `.trae-cn` 有 1.3 GB，但我没在里面找到结构化的会话文件。如果会话存在云端或加密，你只能靠"代理流量"或"DOM 抓取"兜底——这两种都很脆。**建议：先只支持"有本地落盘"的 Agent，Trae 单独评估。**
+实测的 `.trae-cn` 有 1.3 GB，但我没在里面找到结构化的会话文件。如果会话存在云端或加密，你只能靠"代理流量"或"DOM 抓取"兜底——这两种都很脆。**建议：先只支持"有本地落盘"的 Agent，Trae 单独评估。**
 
 **坑 2：注入比读取难得多**
 
@@ -232,7 +232,7 @@ func (t *tail) holds(path string) bool {
 
 这是最容易做错的地方。原始对话里 90% 是噪音（工具输出、文件内容、报错长尾）。直接把会话塞进向量库，检索出来的东西又长又偏。
 
-本机数据能说明问题：
+实测数据能说明问题：
 - ZCode `db.sqlite` **271 MB**，`part` 表 65,357 行，`message` 表 14,570 行 → 平均每条消息 4.5 个 part，绝大部分是工具调用和结果。
 - 所有 Agent 会话加起来约 **12 GB**。
 
@@ -273,7 +273,7 @@ func (t *tail) holds(path string) bool {
 ## 五、如果你要做，建议的最小可行路径
 
 **阶段 0（1 天）—— 验证"能不能读全"**
-抄 MAGPIE 的 `callSources()` 思路，写一个注册表 + 每 Agent 一个 `scan()`。先只做**元数据扫描**（会话列表、项目、时间），不做全文解析。用本机 12 GB 数据做压力测试。
+抄 MAGPIE 的 `callSources()` 思路，写一个注册表 + 每 Agent 一个 `scan()`。先只做**元数据扫描**（会话列表、项目、时间），不做全文解析。用实测 12 GB 数据做压力测试。
 
 关键设计（直接从源码抄）：
 - 缓存键 = `(path, mtime, size)`，命中就跳过
@@ -281,7 +281,7 @@ func (t *tail) holds(path string) bool {
 - 路径必须先 `resolve_under_roots` 校验
 
 **阶段 1（3-5 天）—— 统一消息模型 + 增量解析**
-定一份 `UnifiedMessage { role, text, tool_calls, ts, session_id, project, agent }`。**先只做 3 家**：Claude Code（JSONL 最简单）、Codex（JSONL，结构清晰）、ZCode（SQLite，openCode 同构，你本机数据最多）。这三家覆盖了 90% 的使用量。
+定一份 `UnifiedMessage { role, text, tool_calls, ts, session_id, project, agent }`。**先只做 3 家**：Claude Code（JSONL 最简单）、Codex（JSONL，结构清晰）、ZCode（SQLite，openCode 同构，你实测数据最多）。这三家覆盖了 90% 的使用量。
 
 **阶段 2（1 周）—— 记忆抽取管线**
 接 Hy Memory 或自己用 LLM 做抽取。重点不是"抽得全"，而是**"抽得准 + 有置信度 + 冲突能消解"**。这一步决定产品好不好用，比读会话难十倍。

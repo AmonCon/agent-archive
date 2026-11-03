@@ -8,7 +8,7 @@ name: test
 # 建索引时才炸 `no such module: fts5`。这条就是那时候 CI 红出来的。
 #
 # macOS 只在手动触发（workflow_dispatch）时跑，原因不是省事：
-# 私有仓库拿不到 macOS runner——实测每个 macOS job 都在排队 901 秒
+# 私有仓库拿不到 macOS runner——实测 macOS job 排队可达十几分钟
 # （15 分钟上限）后被取消，一个步骤都没跑过，于是每次推送都是红的。
 # 常年红的门等于没有门。发布前手动点一次，把 macOS 补上。
 on:
@@ -74,7 +74,7 @@ jobs:
           export HOME="$RUNNER_TEMP/home" USERPROFILE="$RUNNER_TEMP/home"
           export APPDATA="$RUNNER_TEMP/appdata" LOCALAPPDATA="$RUNNER_TEMP/localappdata"
           export AGENT_ARCHIVE_HOME="$RUNNER_TEMP/state"
-          # 各家的覆盖变量也要清掉：runner 上通常没有，但本机跑同一个脚本时会漏
+          # 各家的覆盖变量也要清掉：runner 上通常没有，但实测跑同一个脚本时会漏
           unset DSH_HOME HERMES_HOME CODEX_HOME CLAUDE_CONFIG_DIR QODER_CONFIG_DIR CURSOR_CONFIG_DIR KIRO_HOME
           mkdir -p "$HOME" "$APPDATA" "$LOCALAPPDATA" "$AGENT_ARCHIVE_HOME"
 
@@ -86,7 +86,7 @@ jobs:
 
   privacy:
     name: 隐私检查
-    # 这是个公开仓库：真实项目名、本机路径、密钥一旦提交就等于公开，
+    # 这是个公开仓库：真实项目名、实测路径、密钥一旦提交就等于公开，
     # 而它们不会让任何测试失败。所以单独一道门，只查被跟踪的文件。
     runs-on: ubuntu-latest
     steps:
@@ -102,7 +102,7 @@ jobs:
     # 这种漂移不会让任何测试失败，只会让陌生人低估这个项目、
     # 让我们自己忘记已经补过什么。所以单独一道门，静态比对 README 与代码。
     #
-    # 只跑一个平台：它只读仓库里的文件，不探测本机、不联网，
+    # 只跑一个平台：它只读仓库里的文件，不探测实测、不联网，
     # 所以在任何系统上结论都一样。
     runs-on: ubuntu-latest
     steps:

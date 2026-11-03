@@ -25,7 +25,7 @@ import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '
  * 只读头部有个静默的后果：**`.zst` 截断帧解压不抛错**。实测
  * `zstdDecompressSync(前 256KB)` 在一份 87 MB 的 rollout 上"成功"返回
  * 0.3% 的内容——原本设想的"解压失败就退回整文件"这条兜底从来没触发过。
- * 于是长会话的 end 取到的是开头的几条事件，本机实测 91 场差 >1 天、
+ * 于是长会话的 end 取到的是开头的几条事件，实测 91 场差 >1 天、
  * 236 场差 >1 小时。整文件解压可以修（实测 2 GB / 110 秒），但没必要。
  *
  * Codex 自己维护 `state_5.sqlite` 的 threads 表，记着每个线程的
@@ -315,7 +315,7 @@ export function parse(file) {
   // 子代理会话（guardian、reviewer 之类）以前整条跳过，理由是"列出来会让
   // 时间线翻倍"。但那是展示问题，不该用丢数据来解决：子代理会话里才记着
   // 具体查了什么、发现了什么。现在照常采集并标记归属，时间线默认按
-  // 导入会话：顶层 timestamp 全部是导入那一刻（本机实测 37 场集中在同一秒），
+  // 导入会话：顶层 timestamp 全部是导入那一刻（实测 37 场集中在同一秒），
   // 用它当起止时间会让这些会话在时间线上全挤到导入那一天。
   // payload 里的 started_at / completed_at 才是原来的时间。
   if (imported && realStart) start = realStart;
@@ -335,7 +335,7 @@ export function parse(file) {
   //
   // `parentId` 本身就足以判定子代理：旧版写法里 `session_id` 指向父会话、
   // `id` 指向自己，两者不同即是委派出来的那一份。**不能只信 `source.subagent`
-  // 标记**——本机与上游的样本里都有不带 source 的旧 rollout，只认标记会把
+  // 标记**——实测与上游的样本里都有不带 source 的旧 rollout，只认标记会把
   // 子代理当成主会话（时间线里凭空多出一场，而且它的 `session_id` 还指向别人）。
   const subagent = isSubagent || Boolean(parentId);
   return makeSession({
@@ -357,18 +357,18 @@ export function parse(file) {
 /**
  * 从 session_meta 里取父会话 id。
  *
- * Codex 有两代写法，本机两种都遇到了：
+ * Codex 有两代写法，实测两种都遇到了：
  *
  *   旧版  session_id 指向父会话、id 指向自己（两者不同）
  *   新版  session_id == id（都是自己），父 id 单独放在 parent_thread_id，
  *         并在 source.subagent.thread_spawn 里再写一遍
  *
- * 只认旧版会在新版全部取不到父 id——本机实测 41 场 subagent 落在这里，
+ * 只认旧版会在新版全部取不到父 id——实测 41 场 subagent 落在这里，
  * 表现是"子代理会话存在但挂不到任何父会话下"。
  *
  * 还有一种**取不到**的情况，不是解析错误而是数据源限制：Codex 的
  * `source.subagent.other = "guardian"` 这类内部看护线程，rollout 里压根
- * 没写父 id（本机 27 场）。它们只能以"无父 id"存在，doctor 会如实报数，
+ * 没写父 id（实测 27 场）。它们只能以"无父 id"存在，doctor 会如实报数，
  * 不要用推测去填一个看起来合理的父 id。
  */
 function parentOf(payload) {
@@ -396,7 +396,7 @@ function parentOf(payload) {
  */
 function readTailEnd(file) {
   // 压缩文件尾部是二进制，逐行解析永远不会成功——直接跳过，
-  // 省下每个文件 64KB 的无用读取（本机 2032 个 .zst，合计 130MB）
+  // 省下每个文件 64KB 的无用读取（实测 2032 个 .zst，合计 130MB）
   if (file.endsWith('.zst')) return null;
 
   let fh;
@@ -498,7 +498,7 @@ export function stripBlocks(text) {
 
   // 其余注入块统一处理，而不是逐个列标签名。
   //
-  // 实测本机 904 场会话里有 273 场的标题是这类标签：<recommended_plugins>（193）、
+  // 实测 904 场会话里有 273 场的标题是这类标签：<recommended_plugins>（193）、
   // <external_codex_apps_open_page>（47）、<command-name>（23）、
   // <in-app-browser-context>、<turn_aborted>……Codex 每加一个功能就多一种标签，
   // 硬编码名单永远追不上。所以按形状剥：自闭合标签、成对标签，整段去掉。
@@ -690,7 +690,7 @@ function unwrapOutput(raw) {
  * Codex 一写这张表就要重读，但它只有 50 MB、1997 行读一次 48 毫秒，
  * 比重新解析任何一场 rollout 都便宜。
  *
- * 判据必须含 `-wal`：这张库是 WAL 模式（本机实测文件头第 18/19 字节都是 2），
+ * 判据必须含 `-wal`：这张库是 WAL 模式（实测文件头第 18/19 字节都是 2），
  * 写入先落 `state_5.sqlite-wal`，主库 size/mtime 只在 checkpoint 时才变。
  * 只盯主库的判据会让"Codex 刚改了标题"这段时间里一直命中旧 memo——
  * 表现为标题和结束时间停在旧值，**不报错**。同一课我们在扫描层已经学过
@@ -770,7 +770,7 @@ function threadIndex() {
 /**
  * threads.updated_at 的格式。
  *
- * 本机实测是 Unix 秒（`1792421580`），但同一张表里 created_at 有被写成
+ * 实测是 Unix 秒（`1792421580`），但同一张表里 created_at 有被写成
  * 毫秒的情况，所以按量级判断——与 model.js 的 toDate 同一套判据。
  */
 function toThreadDate(v) {

@@ -24,7 +24,7 @@ const require = createRequire(import.meta.url);
  *   4. 旁路表文件名带版本号，写死会在上游升版后静默失效
  *
  * 上游哪天改了这些形状，这里会先红——总比用户机器上静默少数据好。
- * 全部跑在假家目录里，不依赖、也不触碰本机真实数据。
+ * 全部跑在假家目录里，不依赖、也不触碰本机的真实数据。
  */
 
 const scanner = await import('../src/scanners/codex.js');
@@ -267,7 +267,7 @@ test('codex: 旁路库是 WAL 模式时，只写 -wal 的新标题也要读到',
   const box = sandbox();
   try {
     // 这条锁的是一个**静默失效**：Codex 的 state_5.sqlite 是 WAL 模式
-    // （本机实测文件头第 18/19 字节都是 2）。WAL 模式下写入先落
+    // （实测文件头第 18/19 字节都是 2）。WAL 模式下写入先落
     // state_5.sqlite-wal，**主库的 size/mtime 只在 checkpoint 时才变**。
     //
     // 旧判据只看主库 (size, mtime) → memo 命中 → 一直用旧标题，

@@ -171,7 +171,7 @@ try {
 `sandbox()` 会把 `USERPROFILE`/`HOME` 指到临时目录。**这是必须的**：
 
 - 真实数据换台机器就没了，测试会失效
-- 本机 2400 多个文件全扫一遍要一分多钟；空家目录是毫秒级
+- 实测 2400 多个文件全扫一遍要一分多钟；空家目录是毫秒级
 - 测试绝不能碰用户真实的会话文件
 
 注意：`box.write()` 是相对**假家目录**的路径；`box.dir` 是沙盒根，别混。
@@ -237,7 +237,7 @@ assert.ok(scanner.decompressFrames(raw).includes('第二帧内容'));
 ## 3. 在没有第二台机器的情况下验证
 
 ```bash
-# 本机：三平台矩阵在 CI 里跑（.github/workflows/test.yml）
+# 实测：三平台矩阵在 CI 里跑（.github/workflows/test.yml）
 # 另一台机器（macOS / Linux），一条命令：
 node research/probes/remote-verify.mjs --host user@192.168.1.10 \
   --node-bin /tmp/node/bin     # 远端没装 Node 时，指向临时解压的 bin
@@ -278,7 +278,7 @@ shell 环境变量"这个场景。
 
 ---
 
-## 5. 别把本机写进仓库
+## 5. 别把实测写进仓库
 
 这个仓库是公开的。开发过程中最容易被顺手写下来的，不是密钥，而是**真实环境**：
 真实项目名当作路径示例、真实局域网地址当作 `--host` 示例、真实的

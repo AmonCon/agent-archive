@@ -15,13 +15,13 @@ import { sandbox, withEnv } from './helpers.js';
  *      253 字节）；24.22 起它已经会解全部帧。所以扫描器不依赖某个版本的行为，
  *      一律按帧魔数切开逐帧解，两种运行时都正确。
  *   2. 数据根不一定是 `~/.dsh`：Windows 桌面版把 DSH_HOME 指到
- *      `~/DeepSeekHarness`。本机就**没有** `~/.dsh`，只写死默认位置会
+ *      `~/DeepSeekHarness`。实测就**没有** `~/.dsh`，只写死默认位置会
  *      得到 0 场且不报错。
  *   3. 升级后同一 session 目录里会留下多代文件（`session.jsonl.zstd` +
- *      `session.v4.jsonl.zstd`，本机 3 个目录如此）。必须只取一个，否则
+ *      `session.v4.jsonl.zstd`，实测 3 个目录如此）。必须只取一个，否则
  *      同一场对话出现两次；多代之间版本号要压过 mtime，否则可能选中
  *      升级前的旧内容。
- *   4. 子代理也是独立 session 文件，header 带 `parentSession`（本机 40 个
+ *   4. 子代理也是独立 session 文件，header 带 `parentSession`（实测 40 个
  *      session 里 20 个是子代理）。早先整条丢弃，等于把"实际查了什么"
  *      扔了一半；现在要标记 kind=subagent 并带 parent。
  *   5. fork 会话以原会话事件开头，`header.createdAt` 只是 fork 时刻；
@@ -34,7 +34,7 @@ import { sandbox, withEnv } from './helpers.js';
  *      （实机 3859 条都没有顶层 `data.toolCallId`）。
  *   8. 追加写入被打断会留下半个帧；不能因为尾部残缺就让整场会话消失。
  *
- * 全部跑在假家目录里，不依赖、也不触碰本机真实数据。
+ * 全部跑在假家目录里，不依赖、也不触碰本机的真实数据。
  */
 
 const scanner = await import('../src/scanners/dsh.js');
@@ -144,7 +144,7 @@ test('dsh: 数据根不只有 ~/.dsh，桌面版 ~/DeepSeekHarness 与 DSH_HOME 
   const box = sandbox();
   try {
     // 这条锁的是"数据根写死成 ~/.dsh"的坑。Windows 桌面版自己把 DSH_HOME
-    // 指到 ~/DeepSeekHarness，本机确实只有后者、没有 ~/.dsh。
+    // 指到 ~/DeepSeekHarness，实测确实只有后者、没有 ~/.dsh。
     // 不锁的后果：在桌面版用户机器上一场都扫不到，doctor 还报"没装"。
     const t0 = Date.UTC(2026, 0, 1);
     const desktop = writeSession(box, {
@@ -492,7 +492,7 @@ test('dsh: 尾部写了一半的帧不该让整场会话消失', async () => {
 
 /**
  * 这条曾经是 skip：`readMessages` 从 `data.content` 取工具结果正文，而实机
- * v4 的 `tool/result` 把正文放在 `data.message.content`——本机 3859 条
+ * v4 的 `tool/result` 把正文放在 `data.message.content`——实测 3859 条
  * `tool/result` 里 0 条有 `data.content`，3859 条都有 `data.message.content`。
  * 结果每个 tool 片段的 output 都是 null，"它干了什么"只剩工具名。
  * 2026-10-28 修好后转绿（保留了 data.content 回退，兼容旧写法）。

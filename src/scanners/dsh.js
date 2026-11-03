@@ -342,7 +342,7 @@ export function readMessages(session) {
               input: call.input,
               callId,
               // 工具结果的正文在 data.message.content 里；data.content 是别的
-              // 事件类型用的。写错的话所有工具输出都会是 null——本机实测
+              // 事件类型用的。写错的话所有工具输出都会是 null——实测
               // 40 场会话 3859 条 tool/result 全在 message.content 下，
               // data.content 命中 0 条。回退保留，兼容旧版本写法。
               output: contentText((data.message && data.message.content) ?? data.content),

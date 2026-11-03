@@ -197,7 +197,7 @@ export function skillAliases(name) {
  * 第一版就是没合并，结果列表里 xlsx 出现三次、computer-use 出现两次，
  * 看起来像"装了三个 xlsx"。
  *
- * 匹配不上的是"用了但本机没装"——可能是已删的技能、或别处的技能，
+ * 匹配不上的是"用了但实测没装"——可能是已删的技能、或别处的技能，
  * 单独报出来，因为它说明清单有缺口。
  */
 export function joinUsage(skills, usage) {
@@ -246,7 +246,7 @@ export function joinUsage(skills, usage) {
     .map((u) => ({ skill: u.skill, calls: u.count }))
     .sort((a, b) => b.calls - a.calls);
 
-  // 同名不同内容的技能：本机 xlsx 有 3 份（zcode 两个版本 + hermes 一份），
+  // 同名不同内容的技能：实测 xlsx 有 3 份（zcode 两个版本 + hermes 一份），
   // 哈希不同就是不同的文件。它们各自匹配到同一批使用记录——
   // 这不是 join 的 bug，是"同名技能确实有多个实现"。
   // 但要标出来，否则列表里三个 xlsx 看着像重复行。

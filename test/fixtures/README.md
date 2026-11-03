@@ -20,7 +20,7 @@
 | `qoder-legacy.jsonl` | Qoder 旧格式：没有时间戳、没有 cwd，项目只能从目录名反推、时间取 mtime |
 
 这些样本是从两个上游项目（MAGPIE / cc-switch）的源码读出的格式契约，
-加上本机真实数据的形状合成的；判断记录在 `research/upstream/LESSONS.md`。
+加上本机的真实数据的形状合成的；判断记录在 `research/upstream/LESSONS.md`。
 
 ## 两类夹具，缺一不可
 

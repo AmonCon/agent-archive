@@ -10,7 +10,7 @@
  * 用法：
  *   node research/probes/check-env.mjs
  *
- * 断言针对"结构"而不是"本机具体数字"，所以换台机器也能跑：
+ * 断言针对"结构"而不是"实测具体数字"，所以换台机器也能跑：
  * 数字会变，但 supabase 应该永远归成一个服务，凭证永远不该出现。
  */
 
@@ -54,7 +54,7 @@ check(
 );
 
 // 同一个服务不该同时以两个服务身份出现。
-// 本机 adbsupabase / supabase 曾经被算成两个——按名认就会这样。
+// 实测 adbsupabase / supabase 曾经被算成两个——按名认就会这样。
 const byPkgGroup = new Map();
 for (const s of services) {
   const base = s.service.split('/').pop();
@@ -108,8 +108,8 @@ const inconsistent = groups.filter((g) => {
 });
 check('每个技能组内哈希一致', inconsistent.length === 0, inconsistent.map((g) => g.name).join(','));
 
-// 符号链接必须被跟随。判断依据：如果本机存在符号链接式技能目录，
-// 它应该出现在结果里。这里只检查"可跟随"，不假设本机一定有。
+// 符号链接必须被跟随。判断依据：如果实测存在符号链接式技能目录，
+// 它应该出现在结果里。这里只检查"可跟随"，不假设实测一定有。
 const symlinked = installs.filter((s) => s.viaSymlink);
 if (symlinked.length) {
   check('符号链接形式的技能被识别到', symlinked.length > 0, `${symlinked.length} 处`);
@@ -147,7 +147,7 @@ console.log('\n凭证边界（最关键）');
 const inv = fullInventory();
 const audit = auditEnvironment();
 
-// 用特征的"形状"检查，而不是硬编码本机的具体密钥——
+// 用特征的"形状"检查，而不是硬编码实测的具体密钥——
 // 这样换台机器依然能发现泄漏
 const blob = JSON.stringify(inv) + JSON.stringify(audit) + JSON.stringify(services) + JSON.stringify(groups);
 

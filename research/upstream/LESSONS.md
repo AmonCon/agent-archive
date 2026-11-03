@@ -147,7 +147,7 @@ HOME 下"的直觉去改，Windows 上反而会读不到。
 | TurnIndex + 分块下发 | **已采用（目录 + 分块）/ pending（流式）** | cc-switch `cache.rs:311-431` 后端算提问目录；`commands/session_manager.rs:36-77` 按 `Header → Messages(≤150 条/256KB) → Done` 流式 | 目录 + 首屏 200 条 + `/api/session/html` 分块已做；真正的流式（一条连接连续推）还没做。2026-11-03 复核：两家做流式都是为了解决「整场一次推完卡 UI」，我们已切到 203 KB，前提消失 → 降级为「先量再说」 |
 | 契约 fixture 双端共享 | pending（**定位已修正**） | cc-switch `tests/fixtures/sessions/*.messages.json` 同时被 Rust 往返与 TS schema 校验（`model.ts` / `sessionFixtures.test.ts:347-489`） | 2026-11-03：fixture 抓不到「同一份数据 + 不同环境输入」的 bug（DSH_HOME 大小写那条就是）。所以要做**两类**：数据夹具 + 环境夹具。见第三轮 |
 | FTS5 倒排增量维护 | **已采用（2026-10-30）** | 归因更正（2026-11-03）：**cc-switch 全仓没有 FTS5、没有虚拟表、没有倒排索引**，它的会话检索是前端 FlexSearch 只索引元数据。我们这三条触发器是**自研**，正确对照是 Elysian 的 `text_index.py`（CJK 二元组 + DF 截断），不是 cc-switch | `search.js` 加三条 `doc_fts_*` 触发器；首次/`--force`/`reindex` 才 rebuild。实时改一场 2–3s（其中约 2s 是冷扫描），全量 7.3s |
-| Node 24 + Windows 空 WAL 导致 `disk I/O error` | **已修复（2026-10-30）** | 本机实测：写连接正常关闭后留下 0 字节 `-wal` + `-shm`，下一次打开直接失败；副本无此问题 | `openIndex` 在写打开前清 0 字节边车；只读打开失败时清一次再重试，仍失败才退 immutable。非空 WAL 一律不动 |
+| Node 24 + Windows 空 WAL 导致 `disk I/O error` | **已修复（2026-10-30）** | 实测：写连接正常关闭后留下 0 字节 `-wal` + `-shm`，下一次打开直接失败；副本无此问题 | `openIndex` 在写打开前清 0 字节边车；只读打开失败时清一次再重试，仍失败才退 immutable。非空 WAL 一律不动 |
 | 索引正文压缩 | **已采用（2026-10-30）** | 实测 doc 表 183 MB（body 66.8M 字符），正文 deflate 压缩率约 23% | `doc.body_z` + `readBody()`；老库首开自动迁移并 VACUUM。真实索引 **240 → 169 MB（-26%）**，搜索摘录/凭证结果逐条一致 |
 | 会话页分块加载 | **已采用（2026-10-30）** | cc-switch 的 TurnIndex + 流式下发；我们整页 1.59 MB | 首屏 200 条 + `/api/session/html` 片段 + 「加载更多」；1914 条会话 **1.6 MB → 203 KB**，`&all=1` 兜底 |
 | 扫描器代码进缓存指纹 | **已采用（2026-10-30）** | 缓存原来只认源文件 (mtime, ctime, size)，改扫描器必须手工加 `CACHE_VERSION` | 缓存加 `__fingerprint`（内置 + 用户扫描器内容哈希）；改代码自动全量重扫一次 |
@@ -169,8 +169,8 @@ HOME 下"的直觉去改，Windows 上反而会读不到。
 
 ---
 
-| Hermes 内容保真（解码 `\x00json:`、过滤 `model_only`、按 display_identity 去重） | 已查证**不适用** | 三条都对着本机真实库核过，详见 `scanners/hermes.js` 的注释。关键一条：看着像"重放"的重复其实是 Agent 真的重试了 85 次（各自有不同时间戳和 message_uid），去重会删掉真实过程 |
-| `calls` 口径（`credits` 不是钱、`handed_on` 不算调用、`rejected` 单列） | 已采用（部分） | `calls.js`：`rejected` 单列并给 `upstreamCalls`；`credits` 改标"额度消耗"；会话匹配改 `agent\|id`。`handed_on` / `source=reported` 本机 3.2 万条里一条都没有，不做 |
+| Hermes 内容保真（解码 `\x00json:`、过滤 `model_only`、按 display_identity 去重） | 已查证**不适用** | 三条都对着实测真实库核过，详见 `scanners/hermes.js` 的注释。关键一条：看着像"重放"的重复其实是 Agent 真的重试了 85 次（各自有不同时间戳和 message_uid），去重会删掉真实过程 |
+| `calls` 口径（`credits` 不是钱、`handed_on` 不算调用、`rejected` 单列） | 已采用（部分） | `calls.js`：`rejected` 单列并给 `upstreamCalls`；`credits` 改标"额度消耗"；会话匹配改 `agent\|id`。`handed_on` / `source=reported` 实测 3.2 万条里一条都没有，不做 |
 
 | 两级缓存（列表 + 正文 LRU） | 已采用 | `transcript-cache.js`：按源文件指纹失效，双限 LRU。实测同一场大会话第二次读 1082ms → 0.4ms |
 | 字节游标增量索引 | 已否决 | 先量过：索引成本 99% 在读文件+解析，不在索引文本（40 场抽样：读 11.9s / 拆文本 7ms / 分词 36ms）。而稳态索引只有 2.8s，90s 仅出现在首次全量——游标救不了首次全量 |
@@ -376,7 +376,7 @@ cc-switch 219 文件 / 76 提交），不是通读。两份带 `file:line` 的�
 | mcp-hub → mcp-router | **不采纳功能，只采纳失败答复纪律** | 两者是同一端点改名 + 扩写（`/mcp/magpie/hub`、`hubPool` 键名一字未改），不是换代。可学的只有：错误必须**点名服务端 + 原因**（`mcp-router.md:32`），且「我不知道」与「它不存在」必须是两个不同答复（`hub_mcp.go:533-566` 刚修好一个把「工具不在当前列表」答成「服务端被关了」的 bug） |
 | 外部取数三段式上限（content-length → 流式累计 → 解压后再查） | **下一轮** | `pricing.js:136-147` 是全仓唯一 HTTP 取数点，目前只有 `res.ok` 检查。照 cc-switch `model_pricing.rs:366-455` 补，成本约 30 行 |
 | 大文件改成逐行读 + 单行上限 | **下一轮（先量）** | 本轮已量：2579 文件 / 4.88 GB，107 个 > 8 MB，明文最长单行 8.45 MB（qoder）。cc-switch 的纪律是「上限加在**记录**粒度，绝不加在文件粒度」（`session_usage_grokbuild.rs:148-152`：整文件封顶会把后续 token 全部漏记）。先只换 qoder（447 文件 / 25.9 秒） |
-| `codex.js:374` 取第一个 `"timestamp"` | **假警报，不改** | magpie 的 `tsat_test.go` 证明的是**它自己字节层解析**下内嵌 timestamp 会出错；我们走 `JSON.parse` 后取 `o.timestamp`，`indexOf` 只是预筛。本机 1896 个 .zst + 706 行 Claude 明文实测 0 例多 timestamp |
+| `codex.js:374` 取第一个 `"timestamp"` | **假警报，不改** | magpie 的 `tsat_test.go` 证明的是**它自己字节层解析**下内嵌 timestamp 会出错；我们走 `JSON.parse` 后取 `o.timestamp`，`indexOf` 只是预筛。实测 1896 个 .zst + 706 行 Claude 明文实测 0 例多 timestamp |
 | 真两趟 / ContentRef / 流式 / tail | 见「仍待做」 | |
 
 ### 本轮暴露的、我们自己的欠账（非上游）
@@ -411,7 +411,7 @@ qoder 的 `parse()` 改走这条快路径，并在「项目 / 标题 / 时间 / 
 user 消息是对话后段的内容（经常是工具回显），拿它当标题会得到一行 tool output。
 第一版没分开，实测 449 个文件里有 6 个标题变成了工具输出，就是这条造成的。
 
-**实测（本机 449 个 qoder 文件 / 4.88 GB 全库）**
+**实测（449 个 qoder 文件 / 4.88 GB 全库）**
 
 | 指标 | 改造前 | 改造后 |
 |---|---|---|
@@ -470,13 +470,13 @@ user 消息是对话后段的内容（经常是工具回显），拿它当标题
 - 只在提交 `qoder.js` 时踩到一个坑：用 `for...of` 取第一行再 `break` 会把
   生成器 `return()` 掉（finally 里关掉 fd），后半段就再也读不到了。改成
   手动 `it.next()`。
-- **实测（本机最大的 qoder 会话，254 MB）**：旧写法在 512 MB 堆上限下直接
+- **实测（最大的 qoder 会话，254 MB）**：旧写法在 512 MB 堆上限下直接
   `FATAL ERROR: Reached heap limit` 崩掉；新写法 heap 只涨 36 MB、1.6 秒读完。
   也就是说这不只是「省内存」，那条会话以前 `cat`/网页/ MCP 读它是会崩的。
 
 ### 2. 新增 WorkBuddy（腾讯桌面 Agent）扫描器
 
-本机有 24 个 session（20 主 + 4 子代理），是这轮覆盖面里最实在的一块。
+实测有 24 个 session（20 主 + 4 子代理），是这轮覆盖面里最实在的一块。
 格式与 Claude Code 同构（`projects/<工作区>/<id>.jsonl`），但有五个坑，
 全部写进了 `test/workbuddy.test.js`：
 
@@ -485,12 +485,12 @@ user 消息是对话后段的内容（经常是工具回显），拿它当标题
 | 用户消息里裹着几 KB 的 `<system-reminder>` 注入上下文 | 只取 `<user_query>` 里的话；没有标签才剥 reminder |
 | `timestamp` 是**毫秒** | `msToDate()` 按 13 位判断，容忍秒级/ISO |
 | `function_call` 的 `id` 是消息 id，`callId` 才是工具 id | 按 `callId` 配对结果，否则工具调用全是"有调用无输出" |
-| 编辑重发会留下旧 user message + `resend-fork-notice` | 先扫一遍收集被取代的 id，输出时跳过；本机实测一个会话 6 条 user 消息只有 3 条到达过模型 |
+| 编辑重发会留下旧 user message + `resend-fork-notice` | 先扫一遍收集被取代的 id，输出时跳过；实测一个会话 6 条 user 消息只有 3 条到达过模型 |
 | 限流/网络失败也写成 assistant message | 带 `providerData.error` 的跳过，不冒充模型发言 |
 
-另外 `~/WorkBuddy/<时间戳>` 是它自己的临时工作区（本机 8 个会话都是），
+另外 `~/WorkBuddy/<时间戳>` 是它自己的临时工作区（实测 8 个会话都是），
 当项目列出来会污染项目清单，已按"自己的落脚点"置空；`.workbuddy-ai` 是
-同产品另一个客户端（本机是空壳），一并纳入候选根，避免它掉进"未适配"。
+同产品另一个客户端（实测是空壳），一并纳入候选根，避免它掉进"未适配"。
 
 ### 3. 价目表取数加三段式上限与超时（`src/pricing.js`）
 

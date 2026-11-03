@@ -42,7 +42,7 @@ import { readHeadTail, headLines, tailLines, allLines, jsonLines } from './headt
  *
  * ## 扫描期只要头尾
  *
- * 单个会话文件本机最大 3.2 MB，但这类文件只会越写越长（同 Claude Code）。
+ * 单个会话文件实测最大 3.2 MB，但这类文件只会越写越长（同 Claude Code）。
  * 元数据（标题、cwd、起止时间）在头尾：`ai-title` 通常很早出现，结束时间
  * 在最后一行。所以走 `headtail.js` 的快路径，缺字段时整读兜底。
  */
@@ -167,7 +167,7 @@ function projectFromLine(o) {
 /**
  * WorkBuddy 自己的「临时工作区」不是用户的项目。
  *
- * 它没绑定真实目录时会开一个 `~/WorkBuddy/<时间戳>` 当工作区（本机 8 个会话
+ * 它没绑定真实目录时会开一个 `~/WorkBuddy/<时间戳>` 当工作区（实测 8 个会话
  * 都是这种）。把它们当项目列出来，项目清单里会塞满
  * `WorkBuddy/2026-08-28-15-48-29` 这种噪声——错的路径比缺数据更难发现。
  * 真绑定了项目目录的（如 `e:/my-app`，占位示例）照常保留。
@@ -317,7 +317,7 @@ function projectFromMeta(file) {
   }
 }
 
-/** 毫秒时间戳（本机实测全是 13 位毫秒）；容忍秒级与 ISO。 */
+/** 毫秒时间戳（实测全是 13 位毫秒）；容忍秒级与 ISO。 */
 function msToDate(v) {
   if (!v) return null;
   if (typeof v === 'number') {
@@ -360,7 +360,7 @@ function hasProviderError(o) {
  *
  * WorkBuddy 允许改一条已发出的用户消息再重发。实现方式是追加一条新的
  * user message，再写一条 `resend-fork-notice` 指回被改的那条
- * （`editedUserItemId`）。本机实测一个会话里 6 条 user 消息只有 3 个真正
+ * （`editedUserItemId`）。实测一个会话里 6 条 user 消息只有 3 个真正
  * 到达过模型：前两版都被后一版取代了。
  *
  * 所以先扫一遍收集"被取代的 id"，输出时跳过它们。**这不是去重**：每条

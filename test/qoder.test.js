@@ -32,7 +32,7 @@ import { sandbox } from './helpers.js';
  *      active-leaf / file-history-snapshot 是运行时记录，不是对话。
  *  11. `isSidechain` 行属于子代理那棵树，混进父会话会让标题/时间/正文全错。
  *
- * 全部跑在假家目录里，不依赖、也不触碰本机真实数据。
+ * 全部跑在假家目录里，不依赖、也不触碰本机的真实数据。
  */
 
 const scanner = await import('../src/scanners/qoder.js');
@@ -535,7 +535,7 @@ test('qoder: isSidechain 行属于子代理那棵树，不能混进父会话', a
  *
  * 修之前两处叠加把它完全丢掉：discover 只收工作区顶层 `<uuid>.jsonl`；
  * 即使手动 parse，也会因为跳过所有 isSidechain 行而返回 null。
- * 本机实测 78 个这样的文件一个都没采到。
+ * 实测 78 个这样的文件一个都没采到。
  * 2026-10-28 修好后转绿。
  */
 test(

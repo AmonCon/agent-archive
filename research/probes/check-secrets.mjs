@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 /**
- * 扫描本机已知的 Agent 配置文件，检查是否还有明文阿里云 AccessKey。
+ * 扫描实测已知的 Agent 配置文件，检查是否还有明文阿里云 AccessKey。
  *
  * 只做只读检查，输出里一律掩码——绝不把完整凭证打到终端或日志里。
  */
