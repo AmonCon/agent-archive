@@ -106,6 +106,30 @@ function trackedFiles() {
 }
 
 /**
+ * 未跟踪、也未被 .gitignore 排除的文件。
+ *
+ * ## 为什么必须扫它们（真实事故）
+ *
+ * 这个检查器原来只扫 `git ls-files` 的输出——**还没 `git add` 的新文件不在
+ * 扫描范围里**。真出过一次：一个刚写完的新扫描器（未 add）注释里带着真实
+ * 项目名，先跑了 `npm run privacy` 显示通过，随后 add + commit + push 一次
+ * 完成，真实项目名就这样进了公开仓库。门禁在「检查→暂存→提交」的间隙里
+ * 是盲的。
+ *
+ * 所以这里用 `git ls-files --others --exclude-standard` 把「不在索引、但也没
+ * 被 .gitignore 排除」的文件一并纳入——它们就是下一次 add 的候选，现在就该
+ * 按同样的标准检查。已被 .gitignore 排除的（node_modules、.agent-archive 等）
+ * 不会进仓库，不扫。
+ */
+function untrackedFiles() {
+  try {
+    return git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * 词表里可能夹着中文。纯 ASCII 词按词边界匹配，否则带空格的短词会把
  * `plugin id` 这类正常文本也算命中；中文没有词边界，退回子串匹配。
  */
@@ -122,7 +146,7 @@ function denyMatcher(word) {
 const denyRules = deny.map((w) => ({ word: w, test: denyMatcher(w) }));
 const findings = [];
 
-const files = trackedFiles();
+const files = [...new Set([...trackedFiles(), ...untrackedFiles()])];
 for (const rel of files) {
   if (skip.some((p) => rel.startsWith(p))) continue;
   let text;
