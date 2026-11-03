@@ -120,13 +120,21 @@ export function parseAll(file) {
 
 function firstUserText(db, sessionId) {
   try {
+    // 两个坑，都是实测踩出来的：
+    //   1. message 和 part 都有叫 data 的列——SELECT 里不写表前缀，
+    //      JOIN 之下直接抛 "ambiguous column name: data"，被 catch 吞掉后
+    //      所有默认标题的会话都静默变成 "(untitled)"
+    //   2. 第一条 user 消息可能是注入的上下文（semantics.origin=agent_runtime），
+    //      拿它当标题就是一块模板文本。跳过注入的；老数据没有 semantics
+    //      字段时 coalesce 成空串，照常算真人
     const row = db
       .prepare(
-        `select json_extract(data,'$.role') as role, p.data as part_data
+        `select json_extract(m.data,'$.role') as role, p.data as part_data
          from message m
          join part p on p.message_id = m.id
          where m.session_id = ? and json_extract(m.data,'$.role') = 'user'
            and json_extract(p.data,'$.type') = 'text'
+           and coalesce(json_extract(m.data,'$.semantics.origin'),'') != 'agent_runtime'
          order by m.sequence asc, p.sequence asc
          limit 1`
       )

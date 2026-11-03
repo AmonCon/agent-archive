@@ -529,14 +529,21 @@ npm test          # node --no-warnings --test
 
 上游改了格式，这些用例会先红——比用户机器上静默少数据好。
 
-**还缺的**：Copilot Chat、OpenCode、ZCode 三家还没有契约测试
-（这三家的解析细节目前只写在各自扫描器的注释里）。按 `test/codex.test.js` 的形状加即可。
-其余八家（Claude Code、Codex、DeepSeek Harness、Hermes、Qoder、Cursor、Antigravity、Kiro）
-已有契约测试——其中 Antigravity 与 Kiro 锁的正是实测踩过的静默缺陷：
+**还缺的**：十二家现在全部有契约测试（`.claims-skip` 已清空）。
+下一个会过期的不是"有没有测试"，而是**上游格式漂移**：哪家改了存储结构，
+先在这里加一条"还缺的"说明，再按 `test/codex.test.js` 的形状补用例——
+门禁会逼着这条说明和现实保持一致。
+
+补测试这件事本身就是有产出的：ZCode 的用例写下去当天就抓到一个真 bug——
+默认标题的回退查询里 `json_extract(data,…)` 没写表前缀，JOIN 之下抛
+"ambiguous column name"被吞掉，**所有默认标题的会话一直静默显示
+"(untitled)"**。修复后本机 310 场 ZCode 会话全部有了真标题。
+
+其中 Antigravity 与 Kiro 锁的也是实测踩过的静默缺陷：
 「元数据能搜到、正文只有 3/21 能读」和「assistant 正文是占位符、真回复在执行包里」。
 
-这三行不是靠人记着的：它们写在 `.claims-skip` 里，`npm run claims` 要求这里点名的
-每一家都在 `test/` 下真有契约测试——补上之后忘了删清单行，门禁会红。
+那个登记机制还在：哪天又有扫描器没配测试，把 slug 写进 `.claims-skip`、
+在这里点名，`npm run claims` 会逼着两边保持一致。
 
 ### 跨平台路径也是被测的
 
