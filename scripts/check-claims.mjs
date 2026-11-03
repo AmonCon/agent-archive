@@ -7,11 +7,16 @@
  * 于是 README 说「这四家还没有契约测试」，而 test/ 里那四个文件已经写了三个月。
  * 这种漂移不会让任何测试失败，只会让读者低估我们、让我们自己忘记已经补过。
  *
- * 查四类，全是确定性的静态检查（不跑扫描、不碰本机、不联网）：
- *   1. scanner-contract  每个 src/scanners/*.js 都被 registry 注册，且有 test/<slug>.test.js
+ * 查五类，全是确定性的静态检查（不跑扫描、不碰本机、不联网）：
+ *   1. scanner-contract  每个扫描器都被 registry 注册，且有 test/<slug>.test.js
  *   2. readme-commands   README 里出现的 CLI 命令，都必须是 src/cli.js 真实注册过的
- *   3. readme-agents     「当前支持」表里每一家，都能解析到一个真实 scanner
+ *   3. readme-agents     「当前支持」表里每一家，都能解析到一个真实扫描器
  *   4. stale-gap         「还缺的」段落点名的 Agent，不能再有契约测试（有就是 README 没更新）
+ *   5. scanner-documented 注册了的扫描器，必须出现在「当前支持」表里（加了没写=陌生人以为不支持）
+ *
+ * 「扫描器」的判据是导出 `export const name`：src/scanners/ 里还有共享工具模块
+ * （headtail.js、lines.js——只读写文件，不对应任何 Agent）。把它们也当扫描器
+ * 会误报「没有注册」，噪声会让门禁很快没人看。
  *
  * 给所有人用的前提，也决定了写法：只读 git 仓库里的文件，不读 $HOME，
  * 不看本机装了什么。所以在别人的机器上、在 CI 里、在任何系统上结论都一样。
@@ -152,6 +157,17 @@ export function parseSkipList(text) {
     .filter(Boolean);
 }
 
+/**
+ * 判断 src/scanners/ 里的一份源码是不是扫描器。
+ *
+ * 判据只有一条：导出 `export const name`。扫描器的契约都从这里开始
+ * （registry 按它认家、doctor 按它报名）；共享工具模块（headtail、lines）
+ * 不导出它，也就不该被「必须注册、必须有测试」约束。
+ */
+export function isScannerSource(source) {
+  return /export\s+const\s+name\s*=/.test(source);
+}
+
 // ---------------------------------------------------------------- 规则
 
 export function ruleScannerContract({ slugs, scannerSlugs, hasTest }) {
@@ -182,6 +198,26 @@ export function ruleReadmeAgents({ table, slugs }) {
   for (const display of table.agents) {
     if (!resolveScanner(display, slugs)) {
       v.push(`README「当前支持」里的 \`${display}\` 解析不到任何 src/scanners/*.js`);
+    }
+  }
+  return v;
+}
+
+/**
+ * 反方向：注册了的扫描器，README 必须写。
+ *
+ * 「还缺的」抓的是 README 写了但代码没跟上；这条抓的是反过来的漂移——
+ * 扫描器加好了、注册了、测试也写了，唯独 README 没加那一行。
+ * 对陌生人的效果是「支持了十二家却只写十一家」，和写错没有区别。
+ */
+export function ruleScannersDocumented({ slugs, table }) {
+  const v = [];
+  for (const slug of slugs) {
+    const covered = table.agents.some((d) => resolveScanner(d, slugs) === slug);
+    if (!covered) {
+      v.push(
+        `scanner \`${slug}\` 已注册，但 README「当前支持」表没写它——支持了一家不写，陌生人会以为不支持`
+      );
     }
   }
   return v;
@@ -240,9 +276,11 @@ function main({ selfTest = false } = {}) {
   const readme = read(README);
   const cliSource = read(CLI);
   const registrySource = read(REGISTRY);
+  // 只有导出 `name` 的才是扫描器；headtail.js/lines.js 这类共享工具模块不算
   const scannerSlugs = fs
     .readdirSync(SCANNERS)
     .filter((f) => f.endsWith('.js'))
+    .filter((f) => isScannerSource(read(path.join(SCANNERS, f))))
     .map((f) => f.replace(/\.js$/, ''));
   const hasTest = (slug) => {
     const p = path.join(TESTS, `${slug}.test.js`);
@@ -266,6 +304,7 @@ function main({ selfTest = false } = {}) {
       cliCommands: parseCliCommands(cliSource),
     }),
     ...ruleReadmeAgents({ table, slugs: scannerSlugs }),
+    ...ruleScannersDocumented({ slugs: scannerSlugs, table }),
     ...ruleStaleGap({ gapText, table, hasTest, slugs: scannerSlugs }),
     ...ruleSkipList({ skipped, slugs: scannerSlugs, table, gapText, hasTest }),
   ];
@@ -308,6 +347,23 @@ function main({ selfTest = false } = {}) {
           gapText: '**还缺的**：Codex 还没有契约测试。',
           hasTest,
         }),
+      },
+      {
+        name: '注册了但 README 没写的扫描器',
+        got: ruleScannersDocumented({
+          slugs: ['codex', 'workbuddy'],
+          table: { found: true, agents: ['Codex'] },
+        }),
+      },
+      {
+        // isScannerSource 返回 false 才是对的（工具模块不是扫描器）。
+        // 套进「抓住才算过」的框架，反转成：认错了才给空。
+        name: '工具模块（不导出 name）不算扫描器',
+        got: isScannerSource('export function readHeadTail() {}\n') ? [] : ['ok'],
+      },
+      {
+        name: '真扫描器（导出 const name）要能被认出来',
+        got: isScannerSource("export const name = 'kiro';\n") ? ['ok'] : [],
       },
     ];
     let failed = 0;
