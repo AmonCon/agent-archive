@@ -1,7 +1,18 @@
 # 上游参照台账
 
-三个参照项目里我们**读过、判断过**的东西，以及采用了哪些。
-配套脚本：`node research/upstream/refresh.mjs --diff`（只看新变化）。
+四个参照项目里我们**读过、判断过**的东西，以及采用了哪些。
+
+配套脚本：
+
+```sh
+node research/upstream/refresh.mjs            # 只看有没有新提交（秒级）
+node research/upstream/refresh.mjs --diff     # 拉增量，列出关注范围内的改动
+node research/upstream/triage.mjs             # 把改动排成「先读哪」的清单
+node research/upstream/triage.mjs --md x.md   # 写成文件，给研究子代理当输入
+```
+
+读法与取舍（要不要 clone、GitHub 上能看什么、sparse 镜像实测）见
+`docs/上游代码怎么读.md`。每轮的原始取证记录在 `research/upstream/findings/`。
 
 目的很实际：MAGPIE 每天在改，靠反复通读来跟进不现实，而且每次重读都会重新
 推导同一批结论。所以这里记的是**判断结果**，不是代码转述——下次只需复核变化
@@ -132,10 +143,10 @@ HOME 下"的直觉去改，Windows 上反而会读不到。
 | **日期口径统一** | **已采用（2026-10-30）** | `cli.js:231`、`export.js:69`、`query.js:179`、`digest.js:221` 用 `toISOString()` 取 **UTC 日**；`web/format.js:28`、`usage.js:620` 用**本地日**。东八区 00:00–08:00 的会话在终端与网页会落到相邻两天 | `model.dayKey()` 统一走本地日；CLI/导出/摘要/查询/网页/用量六处全部替换，测试锁住 00:30 不漂移 |
 | **状态目录两处绕过 `statePath`** | **已采用（2026-10-30）** | `secrets.js:91` 写死 `~/.agent-archive/index/fulltext-v1.sqlite`（同时忽略 `AGENT_ARCHIVE_HOME` 与 `INDEX_VERSION`）；`env/skills.js:273` 写死 `~/.agent-archive/cache/skills-v1.json` | `secrets.js` 改用 `search.indexPath()`；`skills.js` 改用 `statePath('cache', ...)` |
 | `/api/session` 无上限 | **已采用（2026-10-30）** | `server.js` 直出整场 `messages`；MCP 的 `read_session` 有 8000/40000 字上限 | 默认前 200 条，`limit`（上限 1000）/`offset` 翻页，响应带 `total`/`hasMore`/`nextOffset`/`turns`；`?message=N` 不变 |
-| ContentRef 惰性正文指针 | pending（边际收益重估） | cc-switch `model.rs:329-354`（Jsonl offset/len/pointer、Sqlite 主键+列、File、Sidecar），读取前校验行边界（`content.rs:312-364`） | 正文已经压缩到 169MB 索引里；再做指针化要先量摘录/凭证扫描的取数成本，不急 |
-| TurnIndex + 分块下发 | **已采用（目录 + 分块）/ pending（流式）** | cc-switch `cache.rs:311-431` 后端算提问目录；`commands/session_manager.rs:36-77` 按 `Header → Messages(≤150 条/256KB) → Done` 流式 | 目录 + 首屏 200 条 + `/api/session/html` 分块已做；真正的流式（一条连接连续推）还没做 |
-| 契约 fixture 双端共享 | pending | cc-switch `tests/fixtures/sessions/*.messages.json` 同时被 Rust 往返与 TS schema 校验（`model.ts` / `sessionFixtures.test.ts:347-489`） | 我们 178 个用例都是临时造数据，无 fixture 目录。可以先把漂移样本（Codex 三代父 id、DSH 多帧 zstd、Cursor 权威路径）抽成 JSON，供扫描器与 Web/MCP 共用 |
-| FTS5 倒排增量维护 | **已采用（2026-10-30）** | cc-switch 的增量思路（不是直接抄代码）：doc 的任何变化都同步到倒排，而不是全量 rebuild | `search.js` 加三条 `doc_fts_*` 触发器；首次/`--force`/`reindex` 才 rebuild。实时改一场 2–3s（其中约 2s 是冷扫描），全量 7.3s |
+| ContentRef 惰性正文指针 | **已否决（2026-11-03）** | cc-switch `model.rs:329-354`（Jsonl offset/len/pointer）之所以成立，是因为它读**明文** `.jsonl`；我们主力格式是 zstd 单帧（`codex.js:493-494` 自己的注释：「只能整体解压」），**没有随机访问**。2039/2579 个文件是这种格式，指针化的前提不存在 | 见 2026-11-03 第三轮：从「边际收益待评估」改成明确否决，理由不是收益小而是物理做不到。继续挂 pending 会让每次深读重新纠结 |
+| TurnIndex + 分块下发 | **已采用（目录 + 分块）/ pending（流式）** | cc-switch `cache.rs:311-431` 后端算提问目录；`commands/session_manager.rs:36-77` 按 `Header → Messages(≤150 条/256KB) → Done` 流式 | 目录 + 首屏 200 条 + `/api/session/html` 分块已做；真正的流式（一条连接连续推）还没做。2026-11-03 复核：两家做流式都是为了解决「整场一次推完卡 UI」，我们已切到 203 KB，前提消失 → 降级为「先量再说」 |
+| 契约 fixture 双端共享 | pending（**定位已修正**） | cc-switch `tests/fixtures/sessions/*.messages.json` 同时被 Rust 往返与 TS schema 校验（`model.ts` / `sessionFixtures.test.ts:347-489`） | 2026-11-03：fixture 抓不到「同一份数据 + 不同环境输入」的 bug（DSH_HOME 大小写那条就是）。所以要做**两类**：数据夹具 + 环境夹具。见第三轮 |
+| FTS5 倒排增量维护 | **已采用（2026-10-30）** | 归因更正（2026-11-03）：**cc-switch 全仓没有 FTS5、没有虚拟表、没有倒排索引**，它的会话检索是前端 FlexSearch 只索引元数据。我们这三条触发器是**自研**，正确对照是 Elysian 的 `text_index.py`（CJK 二元组 + DF 截断），不是 cc-switch | `search.js` 加三条 `doc_fts_*` 触发器；首次/`--force`/`reindex` 才 rebuild。实时改一场 2–3s（其中约 2s 是冷扫描），全量 7.3s |
 | Node 24 + Windows 空 WAL 导致 `disk I/O error` | **已修复（2026-10-30）** | 本机实测：写连接正常关闭后留下 0 字节 `-wal` + `-shm`，下一次打开直接失败；副本无此问题 | `openIndex` 在写打开前清 0 字节边车；只读打开失败时清一次再重试，仍失败才退 immutable。非空 WAL 一律不动 |
 | 索引正文压缩 | **已采用（2026-10-30）** | 实测 doc 表 183 MB（body 66.8M 字符），正文 deflate 压缩率约 23% | `doc.body_z` + `readBody()`；老库首开自动迁移并 VACUUM。真实索引 **240 → 169 MB（-26%）**，搜索摘录/凭证结果逐条一致 |
 | 会话页分块加载 | **已采用（2026-10-30）** | cc-switch 的 TurnIndex + 流式下发；我们整页 1.59 MB | 首屏 200 条 + `/api/session/html` 片段 + 「加载更多」；1914 条会话 **1.6 MB → 203 KB**，`&all=1` 兜底 |
@@ -256,11 +267,15 @@ deferred 一等状态、不存在也是一种状态、注解即契约、方言�
 
 **仍待做（按价值排序）**
 
-1. 共享 fixture：把 Codex 三代父 id、DSH 多帧 zstd、Cursor 权威路径等漂移样本
-   抽到 `test/fixtures/`，供扫描器与 Web/MCP 共用。
-2. 真正的流式下发：现在是分块轮询，下一步做 `Header → Messages → Done`。
-3. tail 增量续读：只在"单文件持续追加且体积很大"时才有优势，等有真实样本再做。
-4. ContentRef 式正文指针：压缩已经拿掉 26% 体积，指针化的边际收益需要重新评估。
+1. 共享 fixture（**定位修正**）：不是"替代临时造数据"，而是「一份数据、多入口共用」
+   + 「同一份数据、不同环境输入」两类。见 2026-11-03 第三轮。
+2. 真正的流式下发：**降级为"先量再说"**。前提（整场推送卡 UI）已随 1.6 MB→203 KB 消失，
+   收益只剩一次往返的几十 ms。要做先量：单场页 HTML 最大体积、加载更多的 P95。
+3. tail 增量续读：**维持否决，理由升级**。magpie 自己为增量付"窗口过期即整份重读"的税
+   （`revision_cache.go:13-20`，5 min → 1 h，21 MB rollout 为一行整读）。我们用 ctime 判据
+   + 整读，没有这笔税。
+4. ~~ContentRef 式正文指针~~ **已否决（2026-11-03）**：主力格式 zstd 单帧无随机访问，
+   前提不存在。见上表。
 
 已完成的两项（2026-10-28）：契约式测试（56 个用例，覆盖 Codex / Hermes / DSH /
 Qoder / Cursor / 注册表 / 跨平台路径 / 反向发现），以及未知 Agent 的反向发现
@@ -320,3 +335,261 @@ Qoder / Cursor / 注册表 / 跨平台路径 / 反向发现），以及未知 Ag
    会话匹配要带 agent 而不只是 id、`cache_unknown` 不等于 miss。
 
 5. **补覆盖面**：Gemini CLI、Kimi、Pi（cc-switch 有，我们没有）。
+
+---
+
+## 2026-11-03 第三轮增量深读（magpie `a3768cdd` / cc-switch `7afceec1`）
+
+这一轮只读「从上次 pin 到现在」的变化（magpie 3 天 2668 文件 / +158k 行；
+cc-switch 219 文件 / 76 提交），不是通读。两份带 `file:line` 的原始记录在
+`research/upstream/findings/`，读法与取舍见 `docs/上游代码怎么读.md`。
+
+### 已采用（本轮落到代码里）
+
+| 事项 | 判断 | 上游证据 | 去向 |
+|---|---|---|---|
+| **per-scanner 缓存指纹** | **已采用（2026-11-03）** | magpie `sessions.go:1110-1118`：「a raise of `cacheVersion` reads every file of every agent again, minutes of CPU for a long history after each update (#2278)」；`cache_decode.go:39-47,92` 逐条丢；`call_cache.go:54-60,674` 同一模式用在调用索引 | `registry.js`：`__fingerprint`（单值）→ `__fingerprints`（按扫描器的映射），条目加 `scanner` 字段。**实测**：改 dsh 扫描器从「重解析 2582 个文件 / 37–66 秒」降到「73 个文件 / 3.8 秒」；改 claude-code（2 个文件）从 35.8 秒降到 ~39 毫秒 |
+| **老缓存迁移不丢条目** | **已采用（2026-11-03）** | magpie `cache_decode.go:39-47`「老条目没有 agent 名时，只有没有任何 agent 版本动过才保留」；`sessions.go:1332-1338`「第一次刷新顺手补名而不是丢弃」 | 读老格式（单值）时**一条都不作废**，只补 `scanner` 名并写新键。否则升级本身会触发一次 40 秒全量重扫，用户体感是「更新完第一屏卡了」 |
+| **路径身份按 pathKey 去重（含 sources 兜底）** | **已采用（2026-11-03）** | cc-switch `dsh_config.rs:39-43`（#9100）：同一 profile 目录经 symlink / junction / 8.3 短名 / 大小写出现两次，导致同一把 `<file>.lock` 取两次、每次写都报假冲突 | `dsh.js` 候选根 + discover 文件级去重；`registry.js` 的 `sources` 合并也按 `pathKey`。**这不是潜在缺陷，是可复现的真 bug**：`DSH_HOME` 写成全小写 → 146 个文件（基线 73）→ `source` 拼成两段 → `readMessages` 不拆 `\|` → **ENOENT，DSH 整家 cat/网页/MCP 挂而 timeline 正常**。修复后 73 文件、`source` 无 `\|`、正文读得出 |
+| **旁路库判据必须含 `-wal`，失败不 memo** | **已采用（2026-11-03）** | cc-switch `session_usage_codex.rs:2050,2096-2098`（读完复验父文件 stamp）；magpie `call_cache.go:204-211`（`callRoot == ""` 被当成「根已移动」，把刚写好的分片全 prune 掉——「未知」不能与「已变更」共用一个判别值） | `sqlite-read.js` 导出 `stampForDb()`（主库 + `-wal`），`codex.threadIndex` 改用它；打不开 / 缺列 / 查询抛错时返回 null 且**不写 memo**（下一轮重试）。实测 `state_5.sqlite` 是 WAL 模式（文件头 18/19 字节 = 2），旧判据在 checkpoint 前一直命中旧标题 |
+| **正文缓存补 ctime** | **已采用（2026-11-03）** | 「同一纪律落地程度不一」：`registry.js` 的 `sameStatOnly` 已用 ctime，`transcript-cache.js` 的 `fileStamp` 只有 `(size, mtime)` | 两处判据统一。等长原地改写 + 回填 mtime 时不再返回旧正文 |
+
+### 复核后维持 / 修正的既有判断
+
+| 事项 | 结论 |
+|---|---|
+| 「cc-switch 吞掉单家解析失败」 | **仍成立，但要收窄**：`session_manager/mod.rs:72-80` 的 `hN.join().unwrap_or_default()` 本轮未动；但同一仓库的**用量同步**早就把每家 `Err` 汇总进 `errors`（`session_usage.rs:127-136`，旧 pin 就有）。准确说法是「会话列表路径吞，用量同步路径不吞」 |
+| 「`state_5.sqlite` 写死」 | 仍成立，且本轮零改动。但补一条：**目录不是写死的**——它解析 `config.toml` 的 `sqlite_home` 与 `CODEX_SQLITE_HOME`，候选可能有两条。我们的 `findVersionedDb()` 优势在版本号，两者可并存（见待办） |
+| ContentRef / TurnIndex | 见上面的判断修正（前者否决，后者降级） |
+| 「tail 增量否决」 | 维持，理由升级（见待办 #3）。magpie 把空闲窗口 5 min → 1 h 恰恰反证增量要付「窗口过期即整份重读」的税 |
+| 「目录列举缓存否决」 | 维持。magpie 本轮新增的是**请求内共享列举**和**字符串复用**，与「跨扫描的目录 mtime 缓存」是两件事 |
+| 「handoff 不是跨 Agent 接力」 | 维持。本轮只改了 fd 取法（`Fd` → `SyscallConn`），仍是 socket 交接 |
+| 「Claude 分叉去重已采用」 | 维持，`cc_copies.go` 本轮无改动 |
+| 「calls 口径」 | 维持，`HandedOn` 不计调用、`Rejected` 单列，逐行与旧 pin 一致 |
+| 「Codex 逐请求 delta 计价 维持不做」 | 加强：上游又加了一层 bounded fork 验证（`history_base` / `end_byte_offset` / 父文件双 stamp），复杂度继续上升 |
+
+### 新记的判断（本轮没做，但结论已经确定）
+
+| 事项 | 判断 | 理由 / 证据 |
+|---|---|---|
+| 「一趟读两用」（magpie `callsAlong`） | **不采纳，因为我们已做到** | `search.js:620-623` 一次 `readSessionContent` 同时产出 FTS 文本与压缩正文。真正的两趟是**跨进程**（index 与 cat 是两个 CLI），magpie 能合是因为它同进程持有两个句柄 |
+| mcp-hub → mcp-router | **不采纳功能，只采纳失败答复纪律** | 两者是同一端点改名 + 扩写（`/mcp/magpie/hub`、`hubPool` 键名一字未改），不是换代。可学的只有：错误必须**点名服务端 + 原因**（`mcp-router.md:32`），且「我不知道」与「它不存在」必须是两个不同答复（`hub_mcp.go:533-566` 刚修好一个把「工具不在当前列表」答成「服务端被关了」的 bug） |
+| 外部取数三段式上限（content-length → 流式累计 → 解压后再查） | **下一轮** | `pricing.js:136-147` 是全仓唯一 HTTP 取数点，目前只有 `res.ok` 检查。照 cc-switch `model_pricing.rs:366-455` 补，成本约 30 行 |
+| 大文件改成逐行读 + 单行上限 | **下一轮（先量）** | 本轮已量：2579 文件 / 4.88 GB，107 个 > 8 MB，明文最长单行 8.45 MB（qoder）。cc-switch 的纪律是「上限加在**记录**粒度，绝不加在文件粒度」（`session_usage_grokbuild.rs:148-152`：整文件封顶会把后续 token 全部漏记）。先只换 qoder（447 文件 / 25.9 秒） |
+| `codex.js:374` 取第一个 `"timestamp"` | **假警报，不改** | magpie 的 `tsat_test.go` 证明的是**它自己字节层解析**下内嵌 timestamp 会出错；我们走 `JSON.parse` 后取 `o.timestamp`，`indexOf` 只是预筛。本机 1896 个 .zst + 706 行 Claude 明文实测 0 例多 timestamp |
+| 真两趟 / ContentRef / 流式 / tail | 见「仍待做」 | |
+
+### 本轮暴露的、我们自己的欠账（非上游）
+
+1. **失败只有计数，没有身份。** `registry.js` 的 `stats.failures` / `emptied` /
+   `keptStale` 是纯计数，`parseFile` 连异常 message 都扔了；`doctor` 只能说「3 个失败」，
+   说不出是哪个文件、为什么；MCP 的「我不认识这个 Agent」「文件在但读不出来」
+   「确实没有这场会话」三句话同形。
+2. **`codexDir()` 只取第一个根。** `codexDirs()` 已经多候选且用 `sameNorm` 去重，
+   但 `threadIndex` 与 `assertUnder` 都只取 `[0]`。用户同时有 `CODEX_HOME` 和
+   `~/.codex` 时，state 库在第二个根 → enrich 静默失效。
+3. **同一纪律三处落地程度不一**：路径归一（`codex.js` 用 `sameNorm`、`qoder.js` 用
+   `pathKey`、`dsh.js` 原来一处都没用）；缓存判据（扫描层用了 ctime + `-wal`，
+   正文缓存和旁路库 memo 都没用）。本轮修掉两处，剩下的要一次清扫。
+
+---
+
+## 2026-11-03 落地：P0 三条改造（研究 → 代码）
+
+上面那三条欠账当场改掉了，连同「扫描期只读头尾」。这一节记**结果与代价**，
+方便下次判断值不值得再做同类改动。
+
+### 1. 扫描期只读头尾（qoder）
+
+新增 `src/scanners/headtail.js`：`readHeadTail()` 只读头 256 KB + 尾 64 KB，
+`headLines()` / `tailLines()` 分开给出完整行（丢掉接缝处的半行）。
+qoder 的 `parse()` 改走这条快路径，并在「项目 / 标题 / 时间 / 真人判定」
+缺任何一样时**整读兜底**——没有兜底就会把「真人消息只在中段」的会话当成
+工具会话丢掉，那是静默丢数据。
+
+**为什么标题只能看头段**：标题的定义是「第一句真人输入」，它在开头；尾段里的
+user 消息是对话后段的内容（经常是工具回显），拿它当标题会得到一行 tool output。
+第一版没分开，实测 449 个文件里有 6 个标题变成了工具输出，就是这条造成的。
+
+**实测（本机 449 个 qoder 文件 / 4.88 GB 全库）**
+
+| 指标 | 改造前 | 改造后 |
+|---|---|---|
+| qoder 单家冷扫 | 42 s | **2.2 s** |
+| 全库冷扫 | 37–66 s | **20.7 s** |
+| 走整读兜底的大文件 | — | 6 个（真人消息在中段的那些） |
+| 行为等价 | — | 449/449 文件逐字段一致（差异仅来自当时正在写入的 2 个活文件） |
+
+剩余 20.7 s 里约 15 s 是 codex：它的 `.zst` 必须整份解压才能拿到任何内容
+（实测最大的 40 个文件：解压 983 ms vs 逐行 `JSON.parse` 544 ms），
+先解压再说，所以这一项到此为止；再要快只能换存储形态，不划算。
+
+### 2. 失败要有身份
+
+- `parseFile` 不再吞异常：返回 `reason`；`stats.problems` 记
+  `{agent, file, kind: 'parse'|'emptied', reason}`，**50 条上限** +
+  `problemsDropped`（计数不能取自明细长度，否则坏了上万个文件也只显示 50）。
+- `doctor` 输出：
+  ```
+  待办：
+    采集问题 1 个：解析失败 1 · 解析为空 0
+    fakeagent  ~/.fakeagent/a.jsonl  [解析失败] 模拟：这一家的格式变了，解析必抛
+  ```
+- MCP：`not_found` / `read_failed` / 未知 Agent / `ambiguous` 四种 `code` 分开；
+  handler 抛错也带 `code`，避免调用方把「参数错」和「环境坏」当成同一件事。
+
+### 3. codex 多数据根
+
+`codexDirs()` 早就能列多个根，但 `codexDir()` 只取 `[0]`。改成：
+`findThreadDb()` 按候选顺序取第一个**真正有 state 库**的目录；`readMessages`
+换 `assertUnderAny(codexDirs())`；另补 `CODEX_SQLITE_HOME` 候选。
+两个新用例都是「先红后绿」验证过的（旧代码上分别表现为标题退化成 `(untitled)`、
+`cat` 抛「拒绝读取根目录之外的路径」）。
+
+### 结论：这三条属于「同一纪律补齐」，不是新功能
+
+都是已有正确写法在另一处的复制（`codex.js` 早就会头尾读、`search.js` 早就会
+把派生输入算进缓存判据、`qoder.js` 早就用 `pathKey`）。**收益却最大**：
+20 秒的冷扫、一行能定位的失败、两个静默失效。以后每轮深读都该问一句
+「这条纪律在我们代码里落地了几处」。
+
+---
+
+## 2026-11-03 P1 落地：逐行读、WorkBuddy 覆盖、取数上限
+
+第二轮按「剩下值得做的」清单继续，结果如下。
+
+### 1. 正文读取改成逐行流式（`src/scanners/lines.js`）
+
+`qoder` / `claude-code` 的 `readMessages` 从「整文件读成字符串 → split」改成
+`lineIterator()`：64 KiB 分块 `readSync`，**同步**（扫描器 API 就是同步的）。
+
+- 单行上限 8 MiB：超长行（工具结果的 base64/长输出）**丢掉这一行、字节照常
+  消费、后面的行照常读**——绝不因为一行超长放弃整个文件（cc-switch 的
+  `session_usage_grokbuild.rs:148-152` 讲的就是这个）。
+- 只在提交 `qoder.js` 时踩到一个坑：用 `for...of` 取第一行再 `break` 会把
+  生成器 `return()` 掉（finally 里关掉 fd），后半段就再也读不到了。改成
+  手动 `it.next()`。
+- **实测（本机最大的 qoder 会话，254 MB）**：旧写法在 512 MB 堆上限下直接
+  `FATAL ERROR: Reached heap limit` 崩掉；新写法 heap 只涨 36 MB、1.6 秒读完。
+  也就是说这不只是「省内存」，那条会话以前 `cat`/网页/ MCP 读它是会崩的。
+
+### 2. 新增 WorkBuddy（腾讯桌面 Agent）扫描器
+
+本机有 24 个 session（20 主 + 4 子代理），是这轮覆盖面里最实在的一块。
+格式与 Claude Code 同构（`projects/<工作区>/<id>.jsonl`），但有五个坑，
+全部写进了 `test/workbuddy.test.js`：
+
+| 坑 | 处理 |
+|---|---|
+| 用户消息里裹着几 KB 的 `<system-reminder>` 注入上下文 | 只取 `<user_query>` 里的话；没有标签才剥 reminder |
+| `timestamp` 是**毫秒** | `msToDate()` 按 13 位判断，容忍秒级/ISO |
+| `function_call` 的 `id` 是消息 id，`callId` 才是工具 id | 按 `callId` 配对结果，否则工具调用全是"有调用无输出" |
+| 编辑重发会留下旧 user message + `resend-fork-notice` | 先扫一遍收集被取代的 id，输出时跳过；本机实测一个会话 6 条 user 消息只有 3 条到达过模型 |
+| 限流/网络失败也写成 assistant message | 带 `providerData.error` 的跳过，不冒充模型发言 |
+
+另外 `~/WorkBuddy/<时间戳>` 是它自己的临时工作区（本机 8 个会话都是），
+当项目列出来会污染项目清单，已按"自己的落脚点"置空；`.workbuddy-ai` 是
+同产品另一个客户端（本机是空壳），一并纳入候选根，避免它掉进"未适配"。
+
+### 3. 价目表取数加三段式上限与超时（`src/pricing.js`）
+
+全仓唯一的外部 HTTP 点，原来只有 `res.ok` 检查。现在：
+**32 MiB 预检**（content-length 超限连第一个字节都不读）→ **流式累计**（超限
+立即 cancel 并报出已读字节）→ **完整内容再查一次**；不认识的
+`content-encoding` 直接报错（绝不把压缩字节当 JSON 解）；外加 60 秒超时。
+Node 的 fetch 会自动解压，所以按**解压后**的字节卡——否则一个压缩炸弹
+能用 1 MB 撑出 1 GB。
+
+### 结果
+
+- 全量用例 **206 → 228**，全绿（新增 7 条 WorkBuddy + 6 条 lines + 5 条 pricing）。
+- 冷扫不变（约 20 秒，瓶颈仍是 codex 的 zstd 解压）；这次改的是**内存与
+  单文件鲁棒性**，不是速度。
+- WorkBuddy 接入后 `doctor` 的「已接入」多一家，`未适配` 列表变空。
+
+---
+
+## 2026-11-03 夹具层：两类夹具 + 它当场抓到的一个缺口
+
+### 为什么现在做
+
+前两轮新增的用例大多是「每个用例自己造数据」：同一个漂移样本会在扫描器
+用例里造一遍、在 Web/MCP 用例里再造一遍。两处只要有一处跟不上上游格式，
+就会出现「扫描器能解析、网页读出来是空的」这种只在一端复现的不一致，而
+两次造数据的人并不知道对方造了什么。
+
+### 做了什么
+
+`test/fixtures/`：
+
+- `samples/` 五组**按真实形状合成的最小样本**（十几到几十行，去掉隐私）：
+  WorkBuddy 编辑重发/工具配对、Claude 复制与分叉（3 个文件）、Codex 三代父 id
+  （3 个文件）、DSH 多帧 zstd（二进制）、Qoder 旧格式。
+- `index.js` 登记「物化到 sandbox 的哪个路径、用哪个扫描器、期望看到什么」；
+  新样本没登记、登记了文件不存在，元测试都会报。
+- **数据夹具**（`fixtures-contract.test.js`）：同一份字节跑
+  **扫描 → 正文 → Web 渲染 → MCP read_session** 四个环节，断言关键内容一路不丢。
+- **环境夹具**（`fixtures-env.test.js`）：同一份数据 + 不同的环境输入
+  （`DSH_HOME` 大小写、`CODEX_HOME` 空目录、`WORKBUDDY_CONFIG_DIR`、配置 `roots`）。
+
+### 它当场抓到的缺口
+
+Codex 旧版子代理：`session_meta` 里 `session_id` 指向父、`id` 指向自己，
+但**没有 `source.subagent` 标记**。原实现只在有该标记时才认子代理，
+于是这种 rollout 被当成主会话——时间线里凭空空出一场，`parent` 也丢了。
+
+修法：`parentId` 存在本身就足以判定子代理（旧版写法的定义就是两者不同），
+`kind/parent` 改按 `isSubagent || parentId` 决定。既有用例全绿。
+
+这件事值得记下来：**数据夹具的价值不只是"省去重复造数据"，而是"同一份
+数据被四个入口各读一遍"**——单入口的用例很难发现"某一层把事实吞掉了"。
+
+---
+
+## 2026-11-03 索引层测量：结论是「不动」
+
+按约定先量再说。方法：真实索引只读解剖（dbstat + 正确的字节口径）；
+全量重建在隔离的 `AGENT_ARCHIVE_HOME` 里跑（不碰真实库）；增量用
+「touch 一场源文件 → 新进程 buildIndex」测真实路径。
+
+### 索引 168.7 MB 的构成（磁盘字节，非字符数）
+
+| 组件 | 大小 | 占比 |
+|---|---|---|
+| `doc.fts_text`（token 文本列） | 96.8 MB | 57% |
+| `doc_fts_data`（FTS5 倒排 block） | 40.6 MB | 24% |
+| `doc.body_z`（deflate 正文） | 25.4 MB | 15% |
+| 行头 / 二级索引 / 空闲页 | ~5.9 MB | 4% |
+
+> 口径坑：`length(text列)` 返回**字符数**，中文 UTF-8 是 3 字节——
+> 之前台账里记的「fts_text 67.9 M」低估了 43%。量磁盘必须
+> `length(cast(x as blob))`。
+
+### 成本
+
+| 路径 | 耗时 | 说明 |
+|---|---|---|
+| 全量重建 | 104.8 s | collect 98.6 s（**94%**，读正文+分词+写表）+ FTS rebuild 6.2 s |
+| 增量（改 6 场） | 3.4 s | ≈0.5 s/场；外加扫描发现变化 2.4 s（全量 stat，缓存命中） |
+| 查询 | 72–420 ms | 首次含冷打开；均可用 |
+| freelist | 1.6 MB | 无碎片问题，VACUUM 无意义 |
+
+### 否决（写下来，下次别再议）
+
+| 方案 | 否决理由 |
+|---|---|
+| body_z 换 zstd | 实测 150 场抽样：1.00x，省 0.1 MB。零收益换一层复杂度 |
+| VACUUM | 空闲页 1.6 MB |
+| **清空/砍掉 fts_text 列** | 它是 FTS5 external content（`content='doc'`）的工作列：增量触发器把新值喂给倒排、delete 时回读旧值。contentless 表不支持按行删——砍掉它等于放弃「改一场只付一场」的增量路径。96.8 MB 是**增量+自维护+自带摘录**三件事的合理代价 |
+| fts_text 压缩成 blob | 触发器是纯 SQL，解压要进应用层 → 重写整个同步协议；磁盘换不来任何性能路径的收益（查询读倒排+body_z，不读这列） |
+
+### 结论
+
+1. **索引层不是瓶颈。** 全量重建 105 s 的 94% 在读正文，与扫描同源
+   （LESSONS 老数据交叉验证：40 场抽样「读 11.9 s / 拆文本 7 ms / 分词
+   36 ms」）。索引层自己只占 FTS rebuild 6.2 s + 写表。
+2. **日常路径健康**：增量 0.5 s/场、查询 <0.5 s、扫描缓存命中 1.5 s。
+   没有要修的性能问题。
+3. 唯一留下的钩子：如果会话量翻几倍（比如 >100 M 字符），重看
+   「fts_text 压缩 + 应用层同步」——现在明确不做。

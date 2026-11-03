@@ -132,18 +132,126 @@ function catalogToMap(catalog) {
   return map;
 }
 
-/** 发一次请求、建索引、写盘。只有这个函数会联网。 */
-export async function syncCatalog({ fetchImpl = globalThis.fetch, now = new Date() } = {}) {
+/**
+ * 发一次请求、建索引、写盘。只有这个函数会联网。
+ *
+ * `timeoutMs` 只为测试留口子；正常调用用默认的 60 秒。
+ */
+export async function syncCatalog({ fetchImpl = globalThis.fetch, now = new Date(), timeoutMs = FETCH_TIMEOUT_MS } = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('这个 Node 没有 fetch，无法同步价目表');
-  const res = await fetchImpl(CATALOG_SOURCE);
+
+  const controller = new AbortController();
+  let res;
+  try {
+    res = await withTimeout(
+      fetchImpl(CATALOG_SOURCE, { signal: controller.signal }),
+      timeoutMs
+    );
+  } catch (e) {
+    // 超时被 abort 时，fetch 抛的是 AbortError；换成能看懂的话
+    if (e && (e.name === 'AbortError' || /abort/i.test(String(e.message)))) {
+      throw new Error(`下载超时：超过 ${Math.round(timeoutMs / 1000)} 秒没有完成`);
+    }
+    throw e;
+  }
   if (!res.ok) throw new Error(`下载失败：HTTP ${res.status}`);
-  const raw = await res.json();
+
+  // 三段式上限：content-length 预检 → 流式累计 → 完整内容再查一次。
+  // 目的只有一个：上游返回一个畸形大包时，把进程撑爆之前就停下。
+  // 我们唯一的外部取数点就是这里，不设限等于把内存交给别人控制。
+  const body = await readBodyCapped(res, MAX_RESPONSE_BYTES);
+
+  let raw;
+  try {
+    raw = JSON.parse(body.toString('utf8'));
+  } catch (e) {
+    throw new Error(`价目表不是合法 JSON（${body.length} 字节）：${e.message}`);
+  }
   const catalog = buildCatalog(raw, { fetchedAt: now.toISOString() });
 
   const file = catalogPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(catalog), 'utf8');
   return { file, count: catalog.count, fetchedAt: catalog.fetchedAt };
+}
+
+/** 单个响应最多 32 MiB：models.dev 的 api.json 实际约 6 MB，留足余量。 */
+const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+const FETCH_TIMEOUT_MS = 60 * 1000;
+
+/** 把 promise 包一层超时：即使 fetchImpl 不理会 AbortSignal，也不会永远挂着。 */
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms);
+    Promise.resolve(promise).then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
+
+/**
+ * 读取响应体，并在三个位置检查大小。
+ *
+ * Node 的 fetch 会**自动解压**，所以流式读到的就是解压后的字节——
+ * 这一点很重要：如果只检查 `content-length`（那是压缩后的长度），
+ * 一个 1 MB 的压缩炸弹可以解出 1 GB。所以必须按**解压后**的累计字节来卡。
+ */
+async function readBodyCapped(res, maxBytes) {
+  const headers = res.headers;
+  const encoding = headers && typeof headers.get === 'function' ? headers.get('content-encoding') : null;
+  if (encoding && !/^(identity|gzip|deflate|br|zstd)$/i.test(String(encoding).trim())) {
+    // 不认识的编码：绝不能把压缩字节当 JSON 解析，那样只会得到乱码错误
+    throw new Error(`响应编码不认识（content-encoding: ${encoding}），拒绝解析`);
+  }
+
+  const lenHeader = headers && typeof headers.get === 'function' ? headers.get('content-length') : null;
+  const declared = Number(lenHeader);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    // 预检命中就别读了：连第一个字节都不该拉下来
+    throw new Error(`响应过大：content-length ${declared} 字节，超过上限 ${maxBytes}`);
+  }
+
+  // 没有流式 body（测试里的假 Response、或旧实现）：退回整块读，读完再查
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > maxBytes) {
+      throw new Error(`响应过大：${buf.length} 字节，超过上限 ${maxBytes}`);
+    }
+    return buf;
+  }
+
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    const piece = Buffer.from(value);
+    total += piece.length;
+    if (total > maxBytes) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* 取消失败无所谓，我们已经在报错了 */
+      }
+      throw new Error(`响应过大：已读 ${total} 字节，超过上限 ${maxBytes}`);
+    }
+    chunks.push(piece);
+  }
+
+  const body = Buffer.concat(chunks);
+  // 解压后（fetch 已解压）再查一次：这是最后一道闸
+  if (body.length > maxBytes) {
+    throw new Error(`响应过大：${body.length} 字节，超过上限 ${maxBytes}`);
+  }
+  return body;
 }
 
 /**

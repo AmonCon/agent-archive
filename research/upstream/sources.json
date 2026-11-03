@@ -10,18 +10,18 @@
       "repo": "https://github.com/yetone/magpie",
       "why": "个人版模型网关；会话读取、增量校验、零副作用只读打开、旁路表修正",
       "license": "MIT",
-      "commit": "ace8ee1e1cf9f5bea039b0d46edea108249ea596",
-      "fetchedAt": "2026-10-30",
-      "notes": "2026-10-30 完整源码深读：sessions/tail.go、discovery.go、cc_copies.go、redact；internal/handoff 是 socket 交接，不是跨 Agent 接力"
+      "commit": "a3768cdd1113118998863ed36bd6dd77c8e9e2cc",
+      "fetchedAt": "2026-11-03",
+      "notes": "2026-11-03 第三轮增量深读（2668 文件 / +158k 行）：per-agent parseVersions（改一家只重扫一家，已采用）、cache_decode 老条目迁移不丢、call_cache 的「未知≠已变更」、callsAlong（一趟读两用，我们已做到）、revision_cache 窗口 5min→1h（反证 tail 增量要付窗口过期税）。mcp-hub→mcp-router 是改名+扩写不是换代，只采失败答复纪律"
     },
     {
       "id": "cc-switch",
       "repo": "https://github.com/farion1231/cc-switch",
       "why": "供应商切换器；会话解析的逐家模块、两级缓存、契约式测试体系",
       "license": "MIT",
-      "commit": "9941a6455ef9405cf9d3620057fddd283223a607",
-      "fetchedAt": "2026-10-30",
-      "notes": "2026-10-30 完整源码深读：session_manager 的 ContentRef/两级缓存/TurnIndex、codex_state_db、providers_*、tests/fixtures"
+      "commit": "7afceec14b977ecc2f4373e8ffb40e7223b435ac",
+      "fetchedAt": "2026-11-03",
+      "notes": "2026-11-03 第三轮增量深读（219 文件 / 76 提交，v4.0.25）：Grok 逐行读+单行上限+字节游标（上限加在记录粒度）、路径别名按 realpath(父目录)+文件名取身份（已采用 pathKey 版）、旁路库「只填不清」+读完复验 stamp、MCP 连通性失败故意不可见是凭据取舍。核出 FTS5 归因是错的：全仓无 FTS5，检索是前端 FlexSearch 只索引元数据。ContentRef 因 zstd 单帧无随机访问改为已否决"
     },
     {
       "id": "autoswarm",

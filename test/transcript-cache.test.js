@@ -86,6 +86,32 @@ test('cache: 等长但内容被改写、mtime 也变了，同样失效', async (
   }
 });
 
+test('cache: 等长改写并回填 mtime 时，靠 ctime 失效', async () => {
+  const box = sandbox();
+  try {
+    clearTranscriptCache();
+    const f = box.write('.x/a.jsonl', 'aaaa\n');
+    const session = { agent: 'x', id: '1', source: f };
+    let calls = 0;
+    const loader = () => {
+      calls++;
+      return [];
+    };
+
+    await getOrLoad('x|1', session, loader);
+    const before = fs.statSync(f);
+    // 等长改写 + 把 mtime 回填成原值（恢复备份、云盘回写、git checkout
+    // 都会制造这种形状）。只有 ctime 会变——判据漏了它就会一直返回旧正文。
+    fs.writeFileSync(f, 'bbbb\n');
+    fs.utimesSync(f, before.atime, before.mtime);
+    await getOrLoad('x|1', session, loader);
+    assert.equal(calls, 2, '回填 mtime 的等长改写也必须重读（ctime 判据）');
+  } finally {
+    clearTranscriptCache();
+    box.cleanup();
+  }
+});
+
 test('cache: 多段 source（Codex 续接）取所有段的指纹', async () => {
   const box = sandbox();
   try {

@@ -6,6 +6,7 @@ import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '
 import { withOverrides } from '../platform.js';
 import { isDirEntry } from '../fsentry.js';
 import { extraRoots } from '../config.js';
+import { lineIterator } from './lines.js';
 
 /**
  * Claude Code 会话扫描。
@@ -324,10 +325,12 @@ function isNoise(text) {
  */
 export function readMessages(session) {
   const file = assertUnderAny(projectDirs(), session.source);
-  const text = fs.readFileSync(file, 'utf8');
   const out = [];
 
-  for (const line of text.split('\n')) {
+  // 逐行读，不整份读成字符串再 split：大会话文件（几十 MB）整读会同时
+  // 持有字符串和字符串数组两份内存；单行超长（工具结果）时丢掉那一行、
+  // 后续照常，绝不因为一行超长就放弃整个文件。
+  for (const line of lineIterator(file)) {
     if (!line.trim()) continue;
     let o;
     try {

@@ -97,6 +97,7 @@ codex       → claude-code     +17.6h 接续
 | Antigravity | `~/.gemini/antigravity/conversation_summaries.db` | 部分会话是加密 .pb |
 | Kiro | `%APPDATA%/Kiro/.../kiro.kiroagent/` | 正文在执行包里 |
 | Copilot Chat | `%APPDATA%/Code/User/workspaceStorage/<hash>/chatSessions/` | 大量空会话 |
+| WorkBuddy | `~/.workbuddy[-ai]/projects/<工作区>/<uuid>.jsonl` | 注入上下文包着真话；编辑重发只留最后一版 |
 
 **格式差异就是适配成本。** 每家的坑都不一样，都在各自扫描器里写明了：
 

@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { statePath } from './paths.js';
 import { disabledAgents } from './config.js';
+import { pathKey } from './platform.js';
 import { makeSession } from './model.js';
 
 import * as claudeCode from './scanners/claude-code.js';
@@ -18,6 +19,7 @@ import * as opencode from './scanners/opencode.js';
 import * as antigravity from './scanners/antigravity.js';
 import * as kiro from './scanners/kiro.js';
 import * as copilot from './scanners/copilot.js';
+import * as workbuddy from './scanners/workbuddy.js';
 
 /**
  * 扫描器注册表。
@@ -43,6 +45,7 @@ export const scanners = [
   antigravity,
   kiro,
   copilot,
+  workbuddy,
 ];
 
 /**
@@ -58,11 +61,18 @@ export const scanners = [
  * 内置扫描器，而源会话文件一字未变。这时旧解析结果会被无限期复用，必须
  * 手工把 CACHE_VERSION 加一才生效——用户完全看不出原因。
  *
- * 所以缓存里多存一个 `__fingerprint`（见 `scannerFingerprint()`）：它是
- * 内置 src/scanners/*.js 与用户扫描器目录里全部 .js/.mjs 的内容哈希。
- * 每次扫描先比它，不一致就把整份缓存当作空的、全量重解析一次；一致才
- * 逐文件比源文件指纹。它不参与文件条目的遍历，是缓存里的元数据而不是
- * 一个"文件路径"。
+ * 所以缓存里多存一份 `__fingerprints`（见 `scannerFingerprints()`）：它是
+ * **按扫描器分开**的映射——内置 src/scanners/*.js 与用户扫描器目录里
+ * 每个 .js/.mjs 各算一个内容哈希，键是扫描器名。命中前先比这一家的指纹，
+ * 只丢这一家的条目，其余家照常命中。
+ *
+ * 为什么必须分开：折叠成一个值时，改一行注释就要把全部会话重新解析。
+ * 本机 2579 个文件：热扫 1.0–1.2 秒，全量重扫 37–66 秒，而逐家成本极不均
+ * （qoder 447 文件 25.9 秒、codex 2039 文件 15.2 秒、claude-code 2 文件
+ * 39 毫秒）。分开之后「改哪家只付哪家的钱」。
+ *
+ * 它不参与文件条目的遍历，是缓存里的元数据而不是一个"文件路径"；
+ * 老格式（单值 `__fingerprint`）仍能读，迁移时不丢条目。
  *
  * ## SQLite 源必须把 -wal 一起算进判据
  *
@@ -103,8 +113,16 @@ export const scanners = [
  */
 const CACHE_VERSION = 5;
 
-/** 缓存里存解析代码指纹的键。它不是文件路径，遍历缓存时必须跳过。 */
-const FINGERPRINT_KEY = '__fingerprint';
+/**
+ * 缓存里存解析代码指纹的键。它不是文件路径，遍历缓存时必须跳过。
+ *
+ * 新格式存**按扫描器的映射**（`{dsh: 'ab12…', codex: 'cd34…'}`）；
+ * 老缓存里是折叠成一个字符串。两者都要能读——见 `scanAll` 的迁移规则。
+ */
+const FINGERPRINT_KEY = '__fingerprints';
+
+/** 老格式（单值）的键，只用于读旧缓存做迁移。 */
+const LEGACY_FINGERPRINT_KEY = '__fingerprint';
 
 /** 头部哈希取多少字节。与 MAGPIE 的 headLen 一致。 */
 const HEAD_BYTES = 256;
@@ -132,24 +150,72 @@ function cacheFile() {
  * 只读文件内容：11 个内置扫描器约 150 KB，启动一次的开销可以忽略，
  * 所以不做 mtime 之类的短路——那会让"改回原内容"这种操作漏过指纹。
  * 用户扫描器多了以后代价会线性增长，但那是用户自己的选择。
+ *
+ * ## 为什么要**按扫描器分开**，而不是折叠成一个值
+ *
+ * 折叠成一个值的后果是：改一行注释也要把 2579 个文件全部重新解析。
+ * 本机实测：热扫 1.0–1.2 秒，全量重扫 37–66 秒。而逐家的成本极不均衡——
+ * qoder 447 个文件要 25.9 秒、codex 2039 个文件 15.2 秒、claude-code
+ * 2 个文件 39 毫秒。也就是说「改哪家只付哪家的钱」能省下 900 倍量级的
+ * 无效工作，代价只是一次按名字的映射查询。
+ *
+ * 这是照 MAGPIE 的 `parseVersions` 改的（`sessions.go:1110-1118` 原话：
+ * "a raise of cacheVersion reads every file of every agent again, minutes of
+ * CPU for a long history after each update"）。同一个模式在它的调用索引上
+ * 还有第二份实现（`callParseVersions`），说明这不是一次性取巧。
+ *
+ * 内置扫描器的键就是它的模块文件名（`scanners/dsh.js` → `dsh`），
+ * 用户扫描器用 `user:<相对路径>`——两者不会撞名。
  */
 let fingerprintMemo = null;
 
-export function scannerFingerprint() {
-  if (fingerprintMemo === null) fingerprintMemo = computeScannerFingerprint();
+/** 全部扫描器的指纹映射：`{ 'dsh': 'ab12…', 'user:mine.js': 'cd34…' }`。 */
+export function scannerFingerprints() {
+  if (fingerprintMemo === null) fingerprintMemo = computeScannerFingerprints();
   return fingerprintMemo;
 }
 
-function computeScannerFingerprint() {
-  const hash = crypto.createHash('sha256');
+function computeScannerFingerprints() {
+  const out = {};
   const builtinDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'scanners');
   for (const [rel, full] of listScannerSources(builtinDir, false)) {
-    hash.update(`builtin:${rel}\n${fileHash(full)}\n`);
+    out[builtinKey(rel)] = fileHash(full).slice(0, 12);
   }
   for (const [rel, full] of listScannerSources(statePath('scanners'), true)) {
-    hash.update(`user:${rel}\n${fileHash(full)}\n`);
+    out[`user:${rel}`] = fileHash(full).slice(0, 12);
   }
-  return hash.digest('hex').slice(0, 12);
+  return out;
+}
+
+/** `scanners/dsh.js` / `dsh.js` → `dsh`。去扩展名，与 scanner.name 一致。 */
+function builtinKey(rel) {
+  return String(rel)
+    .replace(/^scanners\//, '')
+    .replace(/\.m?js$/i, '');
+}
+
+/**
+ * 一条缓存条目属于哪个指纹键。
+ *
+ * 内置扫描器就是它的 `name`；用户扫描器用 `user:<文件名>`——因为两个用户
+ * 扫描器文件可以导出同一个 `name`（校验会拦，但历史缓存里可能已经有了），
+ * 而文件名在一个目录内唯一，用它做键不会歧义。
+ */
+export function fingerprintKeyOf(scanner) {
+  if (scanner && scanner.__user && scanner.__file) return `user:${scanner.__file}`;
+  return scanner && scanner.name ? scanner.name : '';
+}
+
+/**
+ * 单个扫描器的指纹。查不到（例如用户删掉了那个扫描器文件）时返回 null——
+ * 调用方按"这次不知道"处理，宁可让它重扫一次，也不要静默复用旧结果。
+ */
+export function scannerFingerprint(scannerOrName) {
+  const key =
+    typeof scannerOrName === 'string' ? scannerOrName : fingerprintKeyOf(scannerOrName);
+  const all = scannerFingerprints();
+  if (key && Object.prototype.hasOwnProperty.call(all, key)) return all[key];
+  return null;
 }
 
 /**
@@ -384,22 +450,43 @@ function sameStatOnly(a, b) {
  * @returns {{sessions: Array, stats: object}}
  */
 export function scanAll({ noCache = false, only = null } = {}) {
-  const fingerprint = scannerFingerprint();
+  const fingerprints = scannerFingerprints();
   const loaded = noCache ? {} : loadCache();
-  // 解析代码指纹不一致（用户改了扫描器 / 应用升级了扫描器）→ 整份缓存作废。
-  // 旧缓存没有这个键，也会走到这里，于是自然全量重扫一次。
-  const cache = loaded && loaded[FINGERPRINT_KEY] === fingerprint ? loaded : {};
+  // 老缓存（单值 `__fingerprint`）与新缓存（映射 `__fingerprints`）都要能读。
+  //
+  // 迁移规则照 MAGPIE 的 `cache_decode.go:39-47` + `sessions.go:1332-1338`：
+  // **老缓存一条都不丢，只补名**。反过来"发现格式变了就整份作废"的代价是
+  // 升级后第一次扫描付 37–66 秒全量重解析，用户体感是"更新完第一屏卡了"，
+  // 而他什么都没改。
+  const legacy = loaded && typeof loaded[LEGACY_FINGERPRINT_KEY] === 'string';
+  const stored = loaded && loaded[FINGERPRINT_KEY] && typeof loaded[FINGERPRINT_KEY] === 'object'
+    ? loaded[FINGERPRINT_KEY]
+    : legacy
+      ? null // 老格式：不知道每家各自读到哪一版，按"全部视为当前"迁移
+      : null;
+  const cache = loaded && (stored || legacy) ? loaded : {};
   const wanted = only && only.length ? new Set(only) : null;
   // 用户可以在配置文件里禁用某几家（不用、坏了、或者扫描太慢）
   const disabled = disabledAgents();
   // 只扫一部分时，必须**保留**其余 Agent 的缓存条目。
   // 否则保存时会把整份缓存覆盖成子集，下一次全量扫描等于全部重解析
   // （本机实测 50 秒），而且用户完全看不出发生了什么。
-  // 这里复制的是**已通过指纹校验**的那份；`__fingerprint` 只是元数据，
+  // 这里复制的是**已通过指纹校验**的那份；指纹只是元数据，
   // 复制过来无妨，保存时会用当前值覆盖。
   const nextCache = wanted ? { ...cache } : {};
   const sessions = [];
-  const stats = { files: 0, parsed: 0, cached: 0, failures: 0, byAgent: {}, headChecked: 0 };
+  // problems 是**本轮扫描的诊断**，不进磁盘缓存：缓存条目是
+  // `{ scanner, stamp, sessions }`，往里塞诊断一是会把缓存写大，
+  // 二是让"文件指纹"和"扫描过程"耦在一起，以后谁读缓存都得先理解诊断。
+  const stats = {
+    files: 0,
+    parsed: 0,
+    cached: 0,
+    failures: 0,
+    byAgent: {},
+    headChecked: 0,
+    problems: [],
+  };
 
   for (const scanner of scanners) {
     if (wanted && !wanted.has(scanner.name)) continue;
@@ -410,6 +497,18 @@ export function scanAll({ noCache = false, only = null } = {}) {
     } catch {
       files = [];
     }
+
+    // 这一家的解析代码变了吗？没变才允许它的条目命中缓存。
+    //
+    // 三种情形：
+    //   - 老格式缓存（stored 为 null）：一律视为"没变"，迁移时不丢条目；
+    //   - 新格式里没有这一家的键：说明这家是后加的（或文件被删过又回来），
+    //     按"变了"处理。它本来就没有缓存条目，所以不会付任何代价；
+    //   - 有键且相等：命中。
+    const fpKey = fingerprintKeyOf(scanner);
+    const fpNow = scannerFingerprint(scanner);
+    const fpWas = stored ? stored[fpKey] : null;
+    const fpOk = !stored || (fpWas !== undefined && fpNow !== null && fpWas === fpNow);
 
     for (const file of files) {
       stats.files++;
@@ -424,7 +523,9 @@ export function scanAll({ noCache = false, only = null } = {}) {
       let stamp = statStamp;
       let hit = false;
 
-      if (prev && sameStatOnly(prev.stamp, statStamp)) {
+      // 条目若属于另一家（理论上不该发生），按"这次变了"处理，别串用结果
+      const sameOwner = !prev || !prev.scanner || prev.scanner === scanner.name;
+      if (prev && fpOk && sameOwner && sameStatOnly(prev.stamp, statStamp)) {
         // 第二层只在 ctime 不可用时才做头部哈希。
         //
         // 以前这里是"stat 相同就再算头哈希"，代价是每个未变文件一次
@@ -458,6 +559,17 @@ export function scanAll({ noCache = false, only = null } = {}) {
         if (!res.ok || emptied) {
           if (emptied) stats.emptied = (stats.emptied || 0) + 1;
           else stats.failures++;
+          // 两个分支都要留身份，但 kind 必须分开：解析抛错是"我做不到"，
+          // 解析为空是"文件还在、但里面没有我认识的东西"（多半正写到一半）。
+          // 合成一类的话，用户看到一个永远修不好的计数，会开始无视它。
+          recordProblem(stats, {
+            agent: scanner.name,
+            file,
+            kind: emptied ? 'emptied' : 'parse',
+            reason: emptied
+              ? `上一次解析出 ${prev.sessions.length} 场会话，这次一场都没有（文件可能正被写入，或格式变了）`
+              : res.reason,
+          });
           if (prev && Array.isArray(prev.sessions) && prev.sessions.length) {
             got = prev.sessions;
             keptStale = true;
@@ -478,7 +590,8 @@ export function scanAll({ noCache = false, only = null } = {}) {
 
       // 时间戳统一成 ISO 字符串存缓存，避免 JSON 里 Date 变字符串的歧义
       const normalized = got.map(serialize);
-      nextCache[key] = { stamp: stampToStore, sessions: normalized };
+      // 条目记下自己是哪家扫出来的：这是"改哪家只丢哪家"的唯一依据。
+      nextCache[key] = { scanner: scanner.name, stamp: stampToStore, sessions: normalized };
       for (const s of normalized) sessions.push(deserialize(s));
       stats.byAgent[scanner.name] = (stats.byAgent[scanner.name] || 0) + normalized.length;
     }
@@ -489,8 +602,10 @@ export function scanAll({ noCache = false, only = null } = {}) {
     if (typeof s.closeStore === 'function') s.closeStore();
   }
 
-  // 元数据跟条目一起存：下次扫描先比它，再比每个文件的源指纹
-  nextCache[FINGERPRINT_KEY] = fingerprint;
+  // 元数据跟条目一起存：下次扫描先比它，再比每个文件的源指纹。
+  // 老键（单值）不再写，读的时候兼容即可。
+  nextCache[FINGERPRINT_KEY] = fingerprints;
+  delete nextCache[LEGACY_FINGERPRINT_KEY];
   saveCache(nextCache);
 
 // 同一场会话可能散在多个文件里（Codex 续接会话就是如此：
@@ -655,12 +770,24 @@ function mergeByKey(sessions) {
     // 标题优先用有真实用户输入的那一个：占位标题（"(xxx)"）
     // 不该盖掉真正的内容
     if (s.title && isPlaceholder(prev.title) && !isPlaceholder(s.title)) prev.title = s.title;
-    if (s.source && !prev.sources.includes(s.source)) prev.sources.push(s.source);
+    // source 去重也按路径键，不按字符串。
+    //
+    // 这是兜底：任何扫描器（包括用户自己写的）如果同一文件经两种拼写
+    // 被发现两次，这里必须合成一条。否则 source 会被 `|` 拼起来，而
+    // 读取侧把它当单个路径用——列表正常、正文 ENOENT，是最难查的一类失败。
+    if (s.source) {
+      const k = pathKey(s.source);
+      if (!prev.sourceKeys) prev.sourceKeys = new Set(prev.sources.map(pathKey));
+      if (!prev.sourceKeys.has(k)) {
+        prev.sourceKeys.add(k);
+        prev.sources.push(s.source);
+      }
+    }
   }
 
   const out = [];
   for (const s of byKey.values()) {
-    const { sources, ...rest } = s;
+    const { sources, sourceKeys, ...rest } = s;
     rest.source = sources.length === 1 ? sources[0] : sources.join('|');
     out.push(rest);
   }
@@ -673,9 +800,13 @@ function isPlaceholder(title) {
 }
 
 /**
- * 解析一个文件，返回 `{ sessions, ok }`。
+ * 解析一个文件，返回 `{ sessions, ok, reason }`。
  *
  * `ok:false` **只在解析抛异常时**出现——那是明确的"我试了但做不到"。
+ * 这时必须把异常信息一起带出来：只回一个 `ok:false`，上层就只能数出
+ * "今天有 3 个文件失败"，说不出是哪个文件、哪一类、为什么。用户看到
+ * doctor 报"解析失败 3"时既没法修也没法判断要不要修——等于什么都没说。
+ * 这正是 MAGPIE / cc-switch 这一轮都在补的那件事：失败要有身份。
  *
  * 为什么不用"返回空"当失败信号：我们的扫描器里，返回 null 有正当含义。
  * Copilot 的 16 个会话文件里 14 个 `requests` 是空数组（文件在但没有对话），
@@ -692,8 +823,36 @@ function parseFile(scanner, file) {
     }
     const one = scanner.parse(file);
     return { sessions: normalizeAll(scanner, one ? [one] : []), ok: true };
-  } catch {
-    return { sessions: [], ok: false };
+  } catch (e) {
+    // e.message 可能是空串（`throw {}`、`throw ''` 这类），那时退回 String(e)；
+    // 两者都空的极少，但 reason 绝不能是 "undefined"——doctor 会原样打出来。
+    const reason = (e && e.message ? String(e.message) : String(e)).trim();
+    return { sessions: [], ok: false, reason: reason || '解析器抛了错，但没有给出原因' };
+  }
+}
+
+/**
+ * 本轮扫描要记多少条"失败的身份"。超出只留计数。
+ *
+ * 为什么不设上限会出事：缓存是 JSON（scan-v*.json），problems 一旦跟着
+ * 结构化数据膨胀下去，一份本来 1 MB 的缓存会被诊断信息撑到几百 KB，
+ * 而每次扫描都要序列化一遍。50 条足够覆盖"某个扫描器整体坏了"这种
+ * 成片失败（前几条就能看出是哪一家），也不至于让人在 doctor 里翻不到头。
+ */
+const PROBLEM_CAP = 50;
+
+/**
+ * 记一条"失败的身份"。
+ *
+ * 只给计数的话，doctor 只能说"解析失败 3"，用户无法判断该不该修——
+ * 是本机的某一个坏文件（可以删掉不管），还是整个 Agent 的适配坏了
+ * （必须修）。这两种情况的处置完全不同，靠计数区分不出来。
+ */
+function recordProblem(stats, problem) {
+  if (stats.problems.length < PROBLEM_CAP) {
+    stats.problems.push(problem);
+  } else {
+    stats.problemsDropped = (stats.problemsDropped || 0) + 1;
   }
 }
 

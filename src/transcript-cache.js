@@ -81,7 +81,11 @@ function fileStamp(files) {
   for (const f of files) {
     try {
       const st = fs.statSync(f);
-      parts.push(`${st.size}:${st.mtimeMs}`);
+      // 带 ctime：与 registry.js 的 sameStatOnly 用同一套判据。
+      // 只按 (size, mtime) 判会在"等长原地改写 + 回填 mtime"时漏检——
+      // 那是恢复备份、云盘回写、git checkout 都会制造的形状，
+      // 结果是正文缓存永远停在旧内容。两处判据不一致本身就是缺陷。
+      parts.push(`${st.size}:${st.mtimeMs}:${st.ctimeMs}`);
     } catch {
       // 附属文件（-wal）不存在很正常，记成 '-' 而不是失败
       if (f.endsWith('-wal')) {

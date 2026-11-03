@@ -6,6 +6,8 @@ import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../
 import { pathKey } from '../platform.js';
 import { isDirEntry, isFileEntry } from '../fsentry.js';
 import { extraRoots } from '../config.js';
+import { readHeadTail, headLines, tailLines, allLines, jsonLines } from './headtail.js';
+import { lineIterator } from './lines.js';
 
 /**
  * Qoder 会话扫描。
@@ -207,32 +209,82 @@ function isProjectFormat(first) {
   return first && typeof first.type === 'string' && (first.sessionId || first.type === 'workspace-directories');
 }
 
+/**
+ * 扫描一个 Qoder 会话文件。
+ *
+ * ## 为什么先读头尾，而不是整文件
+ *
+ * 这个文件是 append-only 的 JSONL，扫描期只要四样东西：开始时间、结束时间、
+ * 项目路径、标题。它们几乎都在头尾，中间几十兆是整段对话。
+ *
+ * 本机实测：整文件读 + 每行 JSON.parse 的写法，448 个文件要 42 秒，其中
+ * 39 个 >100ms 的文件吃掉了绝大部分（最慢单个 1.9 秒，13 MB）。而热扫
+ * 只要 0.37 秒——也就是说这 42 秒里绝大部分是「读了用不上的中间部分」。
+ *
+ * ## 快路径必须带兜底
+ *
+ * 头尾之间可能有东西：一条只出现在中段的真人消息、一个更晚的 cwd。所以
+ * 三个解析函数都会返回 `incomplete` 标记——**头尾里没找到必要字段时，退回
+ * 整读一次**。没有这个兜底，一场真实会话会因为「真人消息在中段」被误判成
+ * 工具会话而丢掉，那是静默丢数据，比慢严重得多。
+ *
+ * 兜底只在少数文件上触发（本机 449 个里 6 个），不影响整体收益。
+ */
 export function parse(file) {
-  let text;
+  let ht;
   try {
-    text = fs.readFileSync(file, 'utf8');
+    ht = readHeadTail(file);
   } catch {
     return null;
   }
 
-  const lines = text.split('\n').filter((l) => l.trim());
-  if (!lines.length) return null;
+  const fast = parseParts(file, headLines(ht), tailLines(ht), ht.whole);
+  if (!fast) return null;
+  if (!fast.incomplete || ht.whole) return fast.session;
 
-  let first;
+  // 快路径缺字段：整读一次再解析。只对头尾读不全的文件付这笔钱。
   try {
-    first = JSON.parse(lines[0]);
+    const lines = allLines(file);
+    const full = parseParts(file, lines, [], true);
+    return full ? full.session : null;
   } catch {
-    return null;
+    // 整读失败（文件被删/权限）就退回快路径的结果，别让一场会话消失
+    return fast.session;
   }
+}
+
+/**
+ * 按「头段 / 尾段」分别解析，返回 `{ session, incomplete }`。
+ *
+ * **头段决定标题与「是不是真人会话」，头尾共同决定时间。** 这不是实现细节：
+ * 标题的定义是"第一句真人输入"，它在开头；尾段里的 user 消息是对话后段的
+ * 内容（经常是工具回显），拿它当标题会得到一行 tool output。
+ *
+ * @param {string} file
+ * @param {string[]} head 头段完整行
+ * @param {string[]} tail 尾段完整行（整读时为空）
+ * @param {boolean} complete 是否已经是全文（全文解析时 incomplete 无意义）
+ */
+function parseParts(file, head, tail, complete) {
+  const first = firstJson(head) || firstJson(tail);
+  if (!first) return null;
 
   // 子代理文件：每一行都带 isSidechain=true 和 agentId。
   // 必须先判它，否则会被当成普通项目会话——而普通路径会跳过所有
   // isSidechain 行，结果是一场空会话，什么都读不出来。
   if (first && first.agentId && first.isSidechain) {
-    return parseSubagentSession(file, lines, first);
+    return parseSubagentSession(file, head, tail, first, complete);
   }
 
-  return isProjectFormat(first) ? parseProjectSession(file, lines, first) : parseLegacy(file, lines);
+  return isProjectFormat(first)
+    ? parseProjectSession(file, head, tail, first, complete)
+    : parseLegacy(file, head, tail, first, complete);
+}
+
+/** 第一条能解析成对象的行；格式判定就靠它。 */
+function firstJson(lines) {
+  for (const o of jsonLines(lines)) return o;
+  return null;
 }
 
 /**
@@ -244,7 +296,7 @@ export function parse(file) {
  *      所以不能套用主会话那条"没有真人输入就丢弃"的规则
  *   3. 每一行都是 isSidechain，读正文时不能过滤
  */
-function parseSubagentSession(file, lines, first) {
+function parseSubagentSession(file, head, tail, first, complete) {
   const parent = first.sessionId ? String(first.sessionId) : null;
   const id = first.agentId ? String(first.agentId) : path.basename(file, '.jsonl');
 
@@ -254,21 +306,14 @@ function parseSubagentSession(file, lines, first) {
   let start = null;
   let end = null;
 
-  for (const line of lines) {
-    let o;
-    try {
-      o = JSON.parse(line);
-    } catch {
-      continue;
-    }
+  // 标题只看头段（见 parseParts 的说明）
+  for (const o of jsonLines(head)) {
     if (!project && o.cwd) project = o.cwd;
-
     const d = toDate(o.timestamp);
     if (d) {
       if (!start || d < start) start = d;
       if (!end || d > end) end = d;
     }
-
     if (o.type === 'ai-title' && o.title) title = o.title;
     if (!title && o.type === 'user' && o.message) {
       const t = cleanUserText(extractText(o.message));
@@ -278,6 +323,17 @@ function parseSubagentSession(file, lines, first) {
       fallbackTitle = extractText(o.message.content);
     }
   }
+
+  // 尾段只补结束时间（子代理会话可能持续很久，最后的事件在文件末尾）
+  for (const o of jsonLines(tail)) {
+    const d = toDate(o.timestamp);
+    if (d) {
+      if (!end || d > end) end = d;
+    }
+  }
+
+  // 头尾里没拿到时间：可能整场只有中段有事件。没读完就标 incomplete。
+  const incomplete = !complete && !start && !end;
 
   if (!start && !end) {
     try {
@@ -289,18 +345,21 @@ function parseSubagentSession(file, lines, first) {
     }
   }
 
-  return makeSession({
-    agent: name,
-    id,
-    project,
-    title: title || fallbackTitle,
-    start,
-    end: end || start,
-    source: file,
-    resume: null,
-    kind: 'subagent',
-    parent,
-  });
+  return {
+    incomplete,
+    session: makeSession({
+      agent: name,
+      id,
+      project,
+      title: title || fallbackTitle,
+      start,
+      end: end || start,
+      source: file,
+      resume: null,
+      kind: 'subagent',
+      parent,
+    }),
+  };
 }
 
 /**
@@ -309,18 +368,13 @@ function parseSubagentSession(file, lines, first) {
  * 项目只能从目录名反推（"my-app-5e450c46" → "my-app"），
  * 时间只能取文件 mtime。两处都如实标出，不猜一个看起来合理的值。
  */
-function parseLegacy(file, lines) {
+function parseLegacy(file, head, tail, _first, complete) {
   let firstUserText = null;
   let firstAssistantText = null;
   let messageCount = 0;
 
-  for (const line of lines) {
-    let o;
-    try {
-      o = JSON.parse(line);
-    } catch {
-      continue;
-    }
+  // 标题只看头段；尾段只用来确认"文件不是空的"（旧格式没有时间戳）
+  for (const o of jsonLines(head)) {
     messageCount++;
     const role = o.role;
     const t = extractText(o.message);
@@ -330,6 +384,12 @@ function parseLegacy(file, lines) {
       if (cleaned) firstUserText = cleaned;
     } else if (role === 'assistant' && !firstAssistantText) {
       firstAssistantText = t;
+    }
+  }
+  if (!messageCount && tail.length) {
+    for (const _o of jsonLines(tail)) {
+      messageCount++;
+      break;
     }
   }
 
@@ -346,16 +406,21 @@ function parseLegacy(file, lines) {
     /* 没有就算了 */
   }
 
-  return makeSession({
-    agent: name,
-    id,
-    project: projectName,
-    title: firstUserText || firstAssistantText,
-    start: mtime,
-    end: mtime,
-    source: file,
-    resume: null,
-  });
+  // 旧格式没有时间戳，标题只能靠头尾里的第一轮问答。两样都没找到就标
+  // incomplete：中段可能有真人消息，整读一次再说。
+  return {
+    incomplete: !complete && !firstUserText && !firstAssistantText,
+    session: makeSession({
+      agent: name,
+      id,
+      project: projectName,
+      title: firstUserText || firstAssistantText,
+      start: mtime,
+      end: mtime,
+      source: file,
+      resume: null,
+    }),
+  };
 }
 
 /**
@@ -364,7 +429,7 @@ function parseLegacy(file, lines) {
  * 时间戳是现成的（ISO 或毫秒），项目路径是现成的，不再需要用 mtime
  * 和目录名近似——这正是新格式值得单独解析的原因。
  */
-function parseProjectSession(file, lines, first) {
+function parseProjectSession(file, head, tail, first, complete) {
   let sessionId = first.sessionId || path.basename(file, '.jsonl');
   let project = Array.isArray(first.directories) ? first.directories[0] : null;
   let title = null;
@@ -373,13 +438,8 @@ function parseProjectSession(file, lines, first) {
   let end = null;
   let human = false;
 
-  for (const line of lines) {
-    let o;
-    try {
-      o = JSON.parse(line);
-    } catch {
-      continue;
-    }
+  // 头段：项目、标题、真人判定、开始时间都从这里取
+  for (const o of jsonLines(head)) {
     if (o.isSidechain) continue;
     if (o.sessionId) sessionId = o.sessionId;
     if (!project && o.cwd) project = o.cwd;
@@ -405,8 +465,31 @@ function parseProjectSession(file, lines, first) {
     }
   }
 
-  // 纯工具会话（本机有 2 个）没有人类输入，归档它们只会污染时间线
-  if (!human) return null;
+  // 尾段只补结束时间。**不要**从尾段取标题或判真人：尾段里的 user 消息
+  // 是对话后段的内容（往往是工具回显），拿它当标题会得到一行 tool output。
+  for (const o of jsonLines(tail)) {
+    if (o.isSidechain) continue;
+    const d = toDate(o.timestamp);
+    if (d) {
+      if (!end || d > end) end = d;
+    }
+  }
+
+  // 纯工具会话（本机有 2 个）没有人类输入，归档它们只会污染时间线。
+  //
+  // 但**头尾里没有不等于全篇没有**：真人消息完全可能只出现在中段
+  // （长会话、或前面全是工具往返）。所以没读到 human 时标 incomplete，
+  // 让 parse() 退回整读一次再下结论——这里直接 return null 会把一场
+  // 真会话静默丢掉，那比慢更糟。
+  if (!human) {
+    if (!complete) return { incomplete: true, session: null };
+    return null;
+  }
+
+  // 头尾里缺了「项目 / 标题 / 时间」中的任何一样，都可能是它只在文件
+  // 中段出现过。宁可整读一次，也不要拿个空字段当结论。
+  const incomplete =
+    !complete && (!project || (!title && !fallbackTitle) || (!start && !end));
 
   if (!start && !end) {
     try {
@@ -418,16 +501,19 @@ function parseProjectSession(file, lines, first) {
     }
   }
 
-  return makeSession({
-    agent: name,
-    id: sessionId,
-    project,
-    title: title || fallbackTitle,
-    start,
-    end: end || start,
-    source: file,
-    resume: null,
-  });
+  return {
+    incomplete,
+    session: makeSession({
+      agent: name,
+      id: sessionId,
+      project,
+      title: title || fallbackTitle,
+      start,
+      end: end || start,
+      source: file,
+      resume: null,
+    }),
+  };
 }
 
 function extractText(message) {
@@ -536,14 +622,27 @@ export function readMessages(session) {
     throw lastErr || new Error(`拒绝读取根目录之外的路径: ${session.source}`);
   }
 
-  const lines = fs
-    .readFileSync(real, 'utf8')
-    .split('\n')
-    .filter((l) => l.trim());
+  // 逐行读，不再把整份文件读成字符串再 split：本机有 254 MB 的明文会话、
+  // 单行最长 8.45 MB，整读会同时持有一份字符串和一个字符串数组（约两倍
+  // 文件大小）。上面的上限加在行粒度：超长行（工具结果）丢掉，后续照常。
+  const it = lineIterator(real);
+  let firstLine = null;
+  // 用 it.next() 手动取第一行，**不要用 for...of + break**：
+  // for...of 中途 break 会调用迭代器的 return()，把生成器关掉（finally 里
+  // 已经把 fd 关了），后面再 prepend 就什么都读不到。
+  for (;;) {
+    const step = it.next();
+    if (step.done) break;
+    if (step.value && step.value.trim()) {
+      firstLine = step.value;
+      break;
+    }
+  }
+  if (!firstLine) return [];
 
   let first;
   try {
-    first = JSON.parse(lines[0]);
+    first = JSON.parse(firstLine);
   } catch {
     return [];
   }
@@ -552,12 +651,19 @@ export function readMessages(session) {
   // 过滤了就什么都没了。主会话文件里夹带的 sidechain 行仍然要跳过
   // （那是它派出去的子代理，单独有一场）。
   const allowSidechain = !!(session && session.kind === 'subagent');
+  const lines = prepend(firstLine, it);
   if (first && first.agentId && first.isSidechain) {
     return readProjectMessages(lines, { allowSidechain: true });
   }
   return isProjectFormat(first)
     ? readProjectMessages(lines, { allowSidechain })
     : readLegacyMessages(lines);
+}
+
+/** 把已经取出的第一行接回迭代器前面。 */
+function* prepend(first, rest) {
+  yield first;
+  yield* rest;
 }
 
 function readLegacyMessages(lines) {

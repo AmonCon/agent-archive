@@ -1,0 +1,2 @@
+{"timestamp":"2026-01-01T00:03:00Z","type":"session_meta","payload":{"id":"44444444-aaaa-4bbb-8ccc-dddddddddddd","session_id":"22222222-aaaa-4bbb-8ccc-dddddddddddd","cwd":"E:/demo-project","timestamp":"2026-01-01T00:03:00Z"}}
+{"timestamp":"2026-01-01T00:03:30Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"子代理的任务（旧写法：session_id 指向父）"}]}}

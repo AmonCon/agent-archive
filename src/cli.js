@@ -1047,7 +1047,11 @@ async function cmdDoctor(opts) {
   }
   if (missing.length) problems.push(`${missing.length} 个 Agent 未接入`);
 
-  if (!problems.length) {
+  // 采集失败不能只报一个数。`r.problems` 带着「哪一家、哪个文件、为什么」，
+  // 这里逐行打出来——否则用户看到"解析失败 3"之后无事可做，只能来问我们。
+  const detail = r.problems && Array.isArray(r.problems.lines) ? r.problems.lines : [];
+
+  if (!problems.length && !detail.length) {
     console.log(
       c(C.ok, r.total ? '采集正常' : '没有可体检的数据') +
         c(C.dim, r.total ? '：所有支持范围内的会话都读到了、读对了。' : '：先让至少一家 Agent 产生会话，再回来体检。')
@@ -1064,6 +1068,13 @@ async function cmdDoctor(opts) {
         c(C.dim, `  项目覆盖率 ${(r.coverage.project * 100).toFixed(1)}%，差额来自临时工作区（设计如此）。`)
       );
     }
+  }
+
+  // 失败明细单独一块，缩进两格：一眼能看到是哪个文件、什么错，
+  // 而不是只有一个计数。总数超过明细上限时，doctor 会自己说"其余未列出"。
+  if (detail.length) {
+    console.log('');
+    for (const line of detail) console.log(c(C.dim, `  ${line}`));
   }
 
   // 这个命令只管会话采集。能力面（MCP/技能/记忆）是另一层，

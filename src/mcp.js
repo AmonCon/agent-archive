@@ -189,11 +189,18 @@ const TOOLS = [
       additionalProperties: false,
     },
     handler: async ({ id, agent, maxChars = 8000, offset = 0, includeTools = false }) => {
+      // 先分辨"Agent 名打错了"。旧实现把这一步并进"没有匹配"里，
+      // 调用方（一个模型）会以为是 id 错了，于是换 id 重试——重试再多次
+      // 也不会成功，而真正该做的是换 Agent 名或看可用列表。
+      const unknown = await unknownAgentError(agent);
+      if (unknown) return unknown;
+
       const { matches, total } = findSessions({ query: id, agent });
-      if (!matches.length) return { error: `没有匹配 ${id} 的会话` };
+      if (!matches.length) return { error: `没有匹配 ${id} 的会话`, code: 'not_found' };
       if (matches.length > 1) {
         return {
           error: `${total} 场会话匹配 ${id}，请用更长的 id 前缀`,
+          code: 'ambiguous',
           candidates: matches.slice(0, 5).map((s) => ({
             agent: s.agent,
             id: s.id,
@@ -203,7 +210,21 @@ const TOOLS = [
       }
 
       const session = matches[0];
-      const messages = await readSessionContent(session);
+      let messages;
+      try {
+        messages = await readSessionContent(session);
+      } catch (e) {
+        // 会话在档案里、但正文读不出来的第三种情况——它和"没有这场会话"
+        // 必须分开说：元数据还在，说明它确实存在过；读不出多半是源文件
+        // 被删/被移走/格式变了/权限没了。用户拿到 read_failed 会去查文件，
+        // 拿到 not_found 只会换个 id 再试，两者不该长得一样。
+        return {
+          error: `会话存在但读不出来：${e && e.message ? e.message : String(e)}`,
+          code: 'read_failed',
+          session: { agent: session.agent, id: session.id, title: session.title },
+          hint: '档案里还留着它的元数据，说明它曾被采集到；源文件可能已删除、移动，或格式变了。',
+        };
+      }
       const full = renderMessages(messages, includeTools);
 
       const cap = Math.min(Math.max(Number(maxChars) || 8000, 500), 40000);
@@ -339,11 +360,16 @@ const TOOLS = [
       additionalProperties: false,
     },
     handler: async ({ id, agent }) => {
+      // 同上：不认识的 Agent 名是真话，别用"没有匹配"掩盖掉。
+      const unknown = await unknownAgentError(agent);
+      if (unknown) return unknown;
+
       const { matches, total } = findSessions({ query: id, agent });
-      if (!matches.length) return { error: `没有匹配 ${id} 的会话` };
+      if (!matches.length) return { error: `没有匹配 ${id} 的会话`, code: 'not_found' };
       if (matches.length > 1) {
         return {
           error: `${total} 场会话匹配 ${id}，请用更长的 id 前缀`,
+          code: 'ambiguous',
           candidates: matches.slice(0, 5).map((s) => ({ agent: s.agent, id: s.id, title: s.title })),
         };
       }
@@ -931,9 +957,16 @@ async function dispatch(msg) {
         data = await tool.handler(args);
       } catch (e) {
         // 工具执行错误用 isError，而不是协议错误——
-        // 这样模型能看到原因并自己决定怎么改
+        // 这样模型能看到原因并自己决定怎么改。
+        //
+        // 外加 code：抛出来的错误和"handler 返回 error"在客户端看来都是
+        // isError:true。没有 code 时调用方只能把整句话原样转述；有 code
+        // 才能分辨这是参数问题、环境问题，还是该重试。
+        const message = e && e.message ? e.message : String(e);
+        const code = (e && e.code) || 'handler_threw';
         return {
-          content: [{ type: 'text', text: `执行失败: ${e && e.message ? e.message : e}` }],
+          content: [{ type: 'text', text: `执行失败(${code}): ${message}` }],
+          structuredContent: { error: message, code },
           isError: true,
         };
       }
@@ -964,6 +997,29 @@ function send(obj) {
 }
 
 /* ------------------------------ 小工具 ------------------------------ */
+
+/**
+ * `agent` 参数给了个不认识的扫描器名时，返回"我不认识这个 Agent"。
+ *
+ * 旧实现里这三种失败长得一模一样：Agent 名写错、会话找到但正文读不出来、
+ * 确实没有这场会话，全都回一句"没有匹配 X 的会话"。对调用方（通常是另一个
+ * 模型）来说，这句话把"我查错了"和"东西不在"混成了一件——它会去换个 id
+ * 反复重试，而正确动作可能是改 Agent 名、或者根本不该再试。
+ *
+ * 可用列表取自 registry 的 scanners：**用户自己写的扫描器也在里面**，
+ * 否则用户装了自家扫描器却被报"不认识"，是比原问题更难解释的错。
+ */
+async function unknownAgentError(agent) {
+  if (!agent) return null;
+  const { scanners } = await import('./registry.js');
+  const names = [...new Set(scanners.map((s) => s.name))].filter(Boolean).sort();
+  if (names.includes(agent)) return null;
+  return {
+    error: `我不认识 Agent「${agent}」。这台机器上已接入的：${names.join('、')}`,
+    code: 'unknown_agent',
+    knownAgents: names,
+  };
+}
 
 function iso(d) {
   if (!d) return null;

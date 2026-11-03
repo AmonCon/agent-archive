@@ -590,3 +590,113 @@ test(
     }
   }
 );
+
+/**
+ * 大头文件的三条契约。
+ *
+ * 扫描期只读头尾之后，最怕的不是慢，而是**静默读少**：中段的真人消息被漏掉，
+ * 整场会话就会被当成"纯工具会话"丢掉。所以下面三条必须一起测：
+ *
+ *   - 真人消息在头部 → 走快路径，**不许整读**（这是收益本身）；
+ *   - 真人消息只在中段 → 必须发现读不全、退回整读，最终拿到正确标题；
+ *   - 整篇真的没有真人 → 返回 null（这是"丢弃工具会话"的正确行为）。
+ */
+function bigFillerLine(bytes = 40 * 1024) {
+  return assistantMessage('filler', 'x'.repeat(bytes), '2026-01-01T00:05:00Z');
+}
+
+test('qoder: 大头文件里真人消息在头部时，不许整文件读', async () => {
+  const box = sandbox();
+  try {
+    const id = uuid(21);
+    const events = [
+      workspaceDirs(id, ['E:\\big-app']),
+      userMessage(id, '头部里的真人问题', '2026-01-01T00:01:00Z'),
+      assistantMessage(id, '回答', '2026-01-01T00:02:00Z'),
+      // 中段填充：把文件撑到远超头+尾（256KB + 64KB）
+      ...Array.from({ length: 20 }, () => bigFillerLine()),
+    ];
+    // 结尾再来一条，保证尾段有内容
+    events.push(assistantMessage(id, '最后一条', '2026-01-01T09:00:00Z'));
+    const file = writeProject(box, { id, events });
+    assert.ok(fs.statSync(file).size > 600 * 1024, '前提：文件必须足够大');
+
+    await box.run(() => {
+      // 统计"整读"次数：headtail 走 open/read，只有兜底才 readFileSync
+      const orig = fs.readFileSync;
+      let fullReads = 0;
+      fs.readFileSync = function (...a) {
+        fullReads++;
+        return orig.apply(this, a);
+      };
+      let s;
+      try {
+        s = scanner.parse(file);
+      } finally {
+        fs.readFileSync = orig;
+      }
+
+      assert.ok(s, '会话必须被采集');
+      assert.equal(s.title, '头部里的真人问题', '标题取头部第一句真人消息');
+      assert.equal(s.project, 'E:/big-app');
+      assert.equal(fullReads, 0, '头部已经够用，不该整读（整读就失去这次优化的意义）');
+    });
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('qoder: 真人消息只在中段时，必须退回整读并找到它', async () => {
+  const box = sandbox();
+  try {
+    const id = uuid(22);
+    const events = [
+      workspaceDirs(id, ['E:\\mid-app']),
+      // 头部先塞满"工具回显"型 user 消息（不是人话），把真人话挤出头段
+      ...Array.from({ length: 12 }, (_, i) => ({
+        type: 'user',
+        sessionId: id,
+        timestamp: `2026-01-01T00:0${i}:00Z`,
+        message: { role: 'user', content: [{ type: 'text', text: `# Input / Tool: tool_${i}` }] },
+      })),
+      ...Array.from({ length: 12 }, () => bigFillerLine()),
+      // 真人消息埋在中段：头段读不到、尾段也读不到
+      userMessage(id, '埋在中段的真人问题', '2026-01-01T03:00:00Z'),
+      ...Array.from({ length: 12 }, () => bigFillerLine()),
+    ];
+    const file = writeProject(box, { id, events });
+    assert.ok(fs.statSync(file).size > 600 * 1024);
+
+    await box.run(() => {
+      const s = scanner.parse(file);
+      assert.ok(s, '有真人输入的会话不能被当成空会话丢掉');
+      assert.equal(s.title, '埋在中段的真人问题', '退回整读后要拿到真正的标题');
+    });
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('qoder: 整篇只有工具回显时返回 null（不许因为读头尾就误留）', async () => {
+  const box = sandbox();
+  try {
+    const id = uuid(23);
+    const events = [
+      workspaceDirs(id, ['E:\\tool-only']),
+      ...Array.from({ length: 30 }, (_, i) => ({
+        type: 'user',
+        sessionId: id,
+        timestamp: `2026-01-01T00:0${i % 10}:00Z`,
+        message: { role: 'user', content: [{ type: 'text', text: `# Input / Tool: tool_${i}` }] },
+      })),
+      ...Array.from({ length: 10 }, () => bigFillerLine()),
+    ];
+    const file = writeProject(box, { id, events });
+
+    await box.run(() => {
+      assert.equal(scanner.parse(file), null, '纯工具会话不该进时间线');
+    });
+  } finally {
+    box.cleanup();
+  }
+});

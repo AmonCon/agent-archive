@@ -1,0 +1,10 @@
+{"type":"session-meta","id":"meta-1","sessionId":"aaaaaaaa-1111-4222-8333-444444444444","timestamp":1787903311000,"meta":{}}
+{"id":"wb-u1","timestamp":1787903311471,"type":"message","role":"user","content":[{"type":"input_text","text":"<system-reminder data-role=\"user-context\">\n<user_info>\nOS Version: win32\nShell: bash\n</user_info>\n</system-reminder>\n<user_query>第一版问题</user_query>"}],"sessionId":"aaaaaaaa-1111-4222-8333-444444444444","cwd":"E:\\demo-project"}
+{"type":"resend-fork-notice","id":"wb-n1","timestamp":1787903312000,"editedUserItemId":"wb-u1"}
+{"id":"wb-u2","timestamp":1787903312100,"type":"message","role":"user","content":[{"type":"input_text","text":"<system-reminder data-role=\"user-context\">\n<user_info>\nOS Version: win32\nShell: bash\n</user_info>\n</system-reminder>\n<user_query>第二版问题</user_query>"}],"sessionId":"aaaaaaaa-1111-4222-8333-444444444444","cwd":"E:\\demo-project"}
+{"type":"reasoning","id":"wb-r1","timestamp":1787903312200,"rawContent":[{"type":"reasoning_text","text":"先想一下"}]}
+{"type":"function_call","id":"wb-call-msg","callId":"call_demo_1","name":"search","arguments":"{\"q\":\"demo\"}","timestamp":1787903312300}
+{"type":"function_call_result","id":"wb-res","callId":"call_demo_1","name":"search","status":"completed","output":{"type":"text","text":"工具输出：找到 1 条"},"timestamp":1787903312400}
+{"id":"wb-a1","timestamp":1787903312500,"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"这是最终回答"}],"sessionId":"aaaaaaaa-1111-4222-8333-444444444444","cwd":"E:\\demo-project"}
+{"id":"wb-a2","timestamp":1787903312600,"type":"message","role":"assistant","status":"incomplete","content":[{"type":"output_text","text":"429 queue.full.title"}],"sessionId":"aaaaaaaa-1111-4222-8333-444444444444","cwd":"E:\\demo-project","providerData":{"error":{"code":6021,"message":"429 queue.full.title"}}}
+{"type":"ai-title","aiTitle":"WorkBuddy 演示会话","sessionId":"aaaaaaaa-1111-4222-8333-444444444444","timestamp":1787903315000,"cwd":"E:\\demo-project"}

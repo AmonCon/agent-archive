@@ -142,6 +142,30 @@ function statOrNull(p) {
 }
 
 /**
+ * 一个 SQLite 源库（含 `-wal`）的变化判据。
+ *
+ * **导出它，是为了只有一份实现。** 这个项目里有三处需要判断"这个库变没变"：
+ * 临时副本的复用（`copyFor`）、Codex 旁路库 memo（`codex.threadIndex`）、
+ * 以及将来的调用层缓存。三处各写一遍必然漂移，而漂移的后果是静默的：
+ * 判据漏了 `-wal` 时，WAL 模式下的写入（Codex 改标题、Hermes 收新消息）
+ * 先落 `-wal`，主库 size/mtime 只在 checkpoint 时才动，于是"没变化"，
+ * 缓存命中，用户看到的是过期数据，且没有任何报错。
+ *
+ * 所以判据必须同时含 `-wal`。这里与 `copyFor` 用的是同一串：
+ * `主库 size:mtime[-wal size:mtime | nowal]`。
+ *
+ * @param {string} file 数据库文件路径
+ * @returns {string|null} 判据串；主库不存在或读不了返回 null
+ */
+export function stampForDb(file) {
+  if (!file) return null;
+  const dbStat = statOrNull(file);
+  if (!dbStat || !dbStat.isFile()) return null;
+  const walStat = statOrNull(`${file}-wal`);
+  return `${dbStat.size}:${dbStat.mtimeMs}:${walStat ? `${walStat.size}:${walStat.mtimeMs}` : 'nowal'}`;
+}
+
+/**
  * 复制一个库文件，尽量用**写时复制**。
  *
  * Cursor 的 `state.vscdb` 可能有几个 GB，真复制既慢又占盘。macOS 的 APFS 和

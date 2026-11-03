@@ -539,3 +539,47 @@ test(
     }
   }
 );
+
+test('dsh: DSH_HOME 写成大小写变体时，同一目录不能被当成两个根', async () => {
+  const box = sandbox();
+  try {
+    // 这条锁的是一个**可复现的真 bug**，不是假想的边界。
+    //
+    // 触发条件很常见：用户把 DSH_HOME 抄成小写（Git Bash、CI 变量、手输路径），
+    // 而默认根是 ~/DeepSeekHarness。两者指向同一个目录，但字符串不同。
+    //
+    // 旧行为的后果不是"多扫一遍"，是**正文读不出来**：
+    //   discover() 从两个根各产出一次同一文件
+    //   → mergeByKey 把两条 source 用 `|` 拼起来
+    //   → readMessages 把整串当一个路径交给 readFileSync → ENOENT
+    // 而 timeline / 索引完全正常，只有 cat、网页会话页、MCP read_session 挂。
+    // 这类"列表对、正文挂"的失败最难查，所以必须锁住。
+    const t0 = Date.UTC(2026, 0, 1);
+    const file = writeSession(box, {
+      root: 'DeepSeekHarness',
+      dir: 'session-ci',
+      file: 'session.jsonl',
+      content: jsonl(
+        header({ id: 'ci-alias', createdAt: t0 }),
+        ev('user/message', t0 + 1000, { source: { kind: 'user' }, content: [{ type: 'text', text: '大小写变体' }] })
+      ),
+    });
+    const lower = box.path('DeepSeekHarness').toLowerCase();
+
+    await box.run(() =>
+      withEnv({ DSH_HOME: lower }, () => {
+        const files = scanner.discover();
+        assert.equal(files.length, 1, '同一目录经两种拼写也只算一个文件');
+        assert.equal(scanner.name, 'dsh');
+
+        const s = scanner.parse(files[0]);
+        assert.ok(s, '会话仍要能解析');
+        assert.equal(s.source.includes('|'), false, 'source 不能出现多段');
+        const msgs = scanner.readMessages(s);
+        assert.ok(msgs.length > 0, '正文必须读得出来（旧行为这里 ENOENT）');
+      })
+    );
+  } finally {
+    box.cleanup();
+  }
+});

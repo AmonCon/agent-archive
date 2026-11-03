@@ -9,6 +9,7 @@ import {
   priceFor,
   estimateCost,
   loadCatalog,
+  syncCatalog,
 } from '../src/pricing.js';
 import { summarizeUsage } from '../src/usage.js';
 
@@ -115,4 +116,132 @@ test('pricing: 自报成本与估算成本分开累计', () => {
   assert.equal(Number(g.costEst.toFixed(6)), 100, '只有 m1 那条能估：1e6 × 100 / 1e6');
   assert.equal(g.costEstRecords, 1);
   assert.equal(g.unpricedRecords, 1, '查不到价的要单独计数');
+});
+
+/**
+ * 取数的三段式上限。
+ *
+ * 这是全仓唯一的外部 HTTP 取数点。不设限的后果不是"慢"，是上游返回一个
+ * 畸形大包时把进程内存打满。三段式分别是：content-length 预检、流式累计、
+ * 拿到完整内容后再查一次（Node 的 fetch 会自动解压，所以要按解压后的字节算）。
+ */
+
+function headers(obj) {
+  return { get: (k) => (Object.prototype.hasOwnProperty.call(obj, k) ? obj[k] : null) };
+}
+
+/** 造一个可控的假 Response。只统计 reader 被取用了几次，不预读。 */
+function fakeResponse({ chunks = [], contentLength = null, contentEncoding = null, ok = true, status = 200 } = {}) {
+  let readerCalls = 0;
+  let index = 0;
+  const body = {
+    getReader() {
+      readerCalls++;
+      return {
+        async read() {
+          if (index >= chunks.length) return { done: true, value: undefined };
+          const value = Buffer.from(chunks[index++]);
+          return { done: false, value };
+        },
+        async cancel() {},
+      };
+    },
+  };
+  return {
+    ok,
+    status,
+    headers: headers({
+      ...(contentLength != null ? { 'content-length': String(contentLength) } : {}),
+      ...(contentEncoding ? { 'content-encoding': contentEncoding } : {}),
+    }),
+    body,
+    get readerCalls() {
+      return readerCalls;
+    },
+    get pulled() {
+      return index;
+    },
+    async arrayBuffer() {
+      return Buffer.concat(chunks.map((c) => Buffer.from(c))).buffer;
+    },
+  };
+}
+
+test('pricing: content-length 超限时直接失败，一个字节都不读', async () => {
+  const box = sandbox();
+  try {
+    const res = fakeResponse({ chunks: ['{}'], contentLength: 40 * 1024 * 1024 });
+    let called = 0;
+    const fetchImpl = async () => {
+      called++;
+      return res;
+    };
+    await assert.rejects(
+      () => syncCatalog({ fetchImpl }),
+      /content-length .*超过上限/
+    );
+    assert.equal(res.readerCalls, 0, '预检命中就不该开始读 body');
+    assert.equal(called, 1);
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('pricing: 流式读到一半超限就中止，并报出已读字节', async () => {
+  const box = sandbox();
+  try {
+    // 每块 8 MiB，共 8 块 = 64 MiB，远超 32 MiB 上限
+    const chunks = Array.from({ length: 8 }, () => Buffer.alloc(8 * 1024 * 1024, 0x20));
+    const res = fakeResponse({ chunks });
+    await assert.rejects(
+      () => syncCatalog({ fetchImpl: async () => res }),
+      /响应过大：已读 .* 字节/
+    );
+    assert.ok(res.pulled < chunks.length, '超限后不应把整个流读完');
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('pricing: 不认识的 content-encoding 明确报错，不当成 JSON 乱解析', async () => {
+  const box = sandbox();
+  try {
+    const res = fakeResponse({ chunks: ['{}'], contentEncoding: 'br, magic' });
+    await assert.rejects(
+      () => syncCatalog({ fetchImpl: async () => res }),
+      /响应编码不认识/
+    );
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('pricing: 正常响应仍然能同步出目录（回归）', async () => {
+  const box = sandbox();
+  try {
+    const payload = JSON.stringify({
+      anthropic: { models: { 'claude-x': { cost: { input: 3, output: 15 } } } },
+    });
+    const res = fakeResponse({ chunks: [payload] });
+    const out = await box.run(() => syncCatalog({ fetchImpl: async () => res }));
+    assert.equal(out.count, 1);
+    const loaded = await box.run(() => loadCatalog());
+    assert.equal(loaded.ready, true);
+    assert.equal(loaded.models.get('claude-x').input, 3);
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('pricing: 超时给出能看懂的原因', async () => {
+  const box = sandbox();
+  try {
+    const never = new Promise(() => {});
+    await assert.rejects(
+      () => syncCatalog({ fetchImpl: () => never, timeoutMs: 30 }),
+      /超时|timeout/
+    );
+  } finally {
+    box.cleanup();
+  }
 });

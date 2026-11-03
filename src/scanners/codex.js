@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import zlib from 'node:zlib';
-import { openReadOnly, findVersionedDb } from '../sqlite-read.js';
+import { openReadOnly, findVersionedDb, stampForDb } from '../sqlite-read.js';
 import { isDirEntry, isFileEntry } from '../fsentry.js';
 import { extraRoots } from '../config.js';
 import { makeSession } from '../model.js';
-import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
+import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '../messages.js';
 
 /**
  * Codex 会话扫描。
@@ -78,9 +78,46 @@ function codexDirs() {
   return out;
 }
 
-/** 兼容旧调用点。 */
-function codexDir() {
-  return codexDirs()[0];
+/**
+ * 旁路库（`state_*.sqlite`）可能所在的目录。
+ *
+ * **与会话根不是同一组**：Codex 解析 state 库位置时还会看
+ * `CODEX_SQLITE_HOME` 和 `config.toml` 的 `sqlite_home`（codex-rs 的
+ * home-dir 模块；cc-switch 的 `codex_state_db.rs:24-36` 也是这个顺序）。
+ * 所以"会话还在 `~/.codex/sessions`、库却在别的目录"是合法状态。
+ *
+ * 只做环境变量、不读 `config.toml`：本项目零依赖，读 toml 得自带解析器，
+ * 而 `sqlite_home` 还可能被 profile 覆盖。代价明显大于收益——漏读的后果
+ * 只是标题和结束时间退回粗值，不报错、不少会话；等真有人这么配了再加。
+ */
+function codexDbDirs() {
+  const out = [];
+  const add = (p) => {
+    if (!p) return;
+    const norm = path.resolve(p);
+    if (!out.some((x) => sameNorm(x, norm))) out.push(norm);
+  };
+
+  for (const p of codexDirs()) add(p);
+  for (const p of envOverrideList('CODEX_SQLITE_HOME')) add(p);
+
+  return out;
+}
+
+/**
+ * 找旁路库：按候选顺序取**第一个真正有库的目录**。
+ *
+ * 注意不是"第一个根里的库"。多根时按候选顺序优先（配置里写的根最前），
+ * 但第一个根里没有库时，第二、第三个根有就该用它——以前的实现是
+ * `findVersionedDb(codexDirs()[0], 'state')`，第二根里的库永远读不到，
+ * 表现为标题和结束时间静默变粗（不报错，最难查）。
+ */
+function findThreadDb() {
+  for (const dir of codexDbDirs()) {
+    const dbPath = findVersionedDb(dir, 'state');
+    if (dbPath) return dbPath;
+  }
+  return null;
 }
 
 /**
@@ -295,6 +332,12 @@ export function parse(file) {
   }
 
   // kind === 'main' 过滤，列表不会翻倍，事实也不再丢。
+  //
+  // `parentId` 本身就足以判定子代理：旧版写法里 `session_id` 指向父会话、
+  // `id` 指向自己，两者不同即是委派出来的那一份。**不能只信 `source.subagent`
+  // 标记**——本机与上游的样本里都有不带 source 的旧 rollout，只认标记会把
+  // 子代理当成主会话（时间线里凭空多出一场，而且它的 `session_id` 还指向别人）。
+  const subagent = isSubagent || Boolean(parentId);
   return makeSession({
     agent: name,
     id: sessionId,
@@ -306,8 +349,8 @@ export function parse(file) {
     end,
     source: file,
     resume: `codex resume ${sessionId}`,
-    kind: isSubagent ? 'subagent' : 'main',
-    parent: isSubagent ? parentId : null,
+    kind: subagent ? 'subagent' : 'main',
+    parent: subagent ? parentId : null,
   });
 }
 
@@ -499,7 +542,10 @@ export function readMessages(session) {
   const parts = String(session.source).split('|').filter(Boolean);
   const out = [];
   for (const src of parts) {
-    const real = assertUnder(codexDir(), src);
+    // 根可能有好几个（配置 / CODEX_HOME / ~/.codex）：只要 source 是从
+    // 其中一个根发现的，读它就是合法的。只校验第一个根时，第二根里的
+    // 会话会被判成"越界"——rollout 明明已经在列表里，`cat` 却直接抛错。
+    const real = assertUnderAny(codexDirs(), src);
     let text;
     if (real.endsWith('.zst')) {
       text = zlib.zstdDecompressSync(fs.readFileSync(real)).toString('utf8');
@@ -640,61 +686,84 @@ function unwrapOutput(raw) {
  *
  * ## 缓存
  *
- * 按 (size, mtime) 记住上次读的那份。Codex 一写这张表就要重读，但它只有
- * 50 MB、1997 行读一次 48 毫秒，比重新解析任何一场 rollout 都便宜。
+ * 按 `stampForDb()`（主库 **含 -wal** 的 (size, mtime)）记住上次读的那份。
+ * Codex 一写这张表就要重读，但它只有 50 MB、1997 行读一次 48 毫秒，
+ * 比重新解析任何一场 rollout 都便宜。
+ *
+ * 判据必须含 `-wal`：这张库是 WAL 模式（本机实测文件头第 18/19 字节都是 2），
+ * 写入先落 `state_5.sqlite-wal`，主库 size/mtime 只在 checkpoint 时才变。
+ * 只盯主库的判据会让"Codex 刚改了标题"这段时间里一直命中旧 memo——
+ * 表现为标题和结束时间停在旧值，**不报错**。同一课我们在扫描层已经学过
+ * （`registry.stampOf` 的 `extraFiles`），旁路层必须用同一套判据。
  *
  * ## 读不到的机器
  *
  * 老版本 Codex 可能没有这张表，或者用户把 state 库搬走了。读不到就返回
- * 空 Map，enrich 会退化成"什么都不改"——采集照常，只是 end 精度回到
+ * `null`，enrich 会退化成"什么都不改"——采集照常，只是 end 精度回到
  * 头部推断的水平。**不能因为旁路数据缺失就让 Codex 整个读不出来。**
+ *
+ * 关键区别：**"读失败"不能 memo 成"读到了空表"**。
+ * 打不开、缺列、查询抛错，都是"这次不知道"，必须返回 null 且**不写 memo**，
+ * 下一轮重试。若把空 Map 记进 memo，进程生命周期内再也不会重试，而用户
+ * 看到的只是"标题一直是粗的"——与"Codex 确实没给标题"完全同形，查不出来。
  */
 let threadIndexMemo = null;
+/** 上一次 threadIndex() 是否真的读到了东西。供 enrichStats 区分「读到 0 行」与「没读到」。 */
+let lastIndexRead = false;
 
 function threadIndex() {
-  const dbPath = findVersionedDb(codexDir(), 'state');
+  lastIndexRead = false;
+  const dbPath = findThreadDb();
   if (!dbPath) return null;
-  let stamp;
-  try {
-    const st = fs.statSync(dbPath);
-    stamp = `${st.size}:${st.mtimeMs}`;
-  } catch {
-    return null; // 没有这张表
+  const stamp = stampForDb(dbPath);
+  if (!stamp) return null; // 没有这张表
+  // memo 的键要含路径：两台机器的 state 库、或同一进程里换过根，
+  // 判据串（size:mtime）可能撞上，撞上就会把别人家的表当自己的用。
+  if (threadIndexMemo && threadIndexMemo.path === dbPath && threadIndexMemo.stamp === stamp) {
+    lastIndexRead = true;
+    return threadIndexMemo.map;
   }
-  if (threadIndexMemo && threadIndexMemo.stamp === stamp) return threadIndexMemo.map;
 
   const map = new Map();
   const db = openReadOnly(dbPath);
-  if (db) {
+  // 打不开就是"这次不知道"，不写 memo，下一轮重试
+  if (!db) return null;
+  let readOk = false;
+  try {
+    // 只取需要的列。title 可能很长，限制长度避免把整表读进内存
+    const rows = db
+      .prepare(
+        `select id, title, updated_at, cwd, tokens_used
+         from threads
+         where id is not null`
+      )
+      .all();
+    for (const r of rows) {
+      map.set(String(r.id), {
+        title: r.title == null ? null : String(r.title),
+        updatedAt: toThreadDate(r.updated_at),
+        cwd: r.cwd == null ? null : String(r.cwd),
+        tokensUsed: Number.isFinite(r.tokens_used) ? r.tokens_used : null,
+      });
+    }
+    readOk = true;
+  } catch {
+    /* 表结构变了或读不了：这次不知道，不写 memo */
+  } finally {
     try {
-      // 只取需要的列。title 可能很长，限制长度避免把整表读进内存
-      const rows = db
-        .prepare(
-          `select id, title, updated_at, cwd, tokens_used
-           from threads
-           where id is not null`
-        )
-        .all();
-      for (const r of rows) {
-        map.set(String(r.id), {
-          title: r.title == null ? null : String(r.title),
-          updatedAt: toThreadDate(r.updated_at),
-          cwd: r.cwd == null ? null : String(r.cwd),
-          tokensUsed: Number.isFinite(r.tokens_used) ? r.tokens_used : null,
-        });
-      }
+      db.close();
     } catch {
-      /* 表结构变了或读不了：当空表处理 */
-    } finally {
-      try {
-        db.close();
-      } catch {
-        /* 忽略 */
-      }
+      /* 忽略 */
     }
   }
+  if (!readOk) return null;
 
-  threadIndexMemo = { stamp, map };
+  // 读完之后复验：读的过程中库被写过，这一份就不是"当前"的，
+  // 丢掉结果、下一轮重试（对照 cc-switch session_usage_codex.rs 的父文件双 stamp 校验）。
+  if (stampForDb(dbPath) !== stamp) return null;
+
+  threadIndexMemo = { path: dbPath, stamp, map };
+  lastIndexRead = true;
   return map;
 }
 
@@ -778,7 +847,13 @@ function isPlaceholderTitle(t) {
   return false;
 }
 
-/** 会话时长，供上游排序用。 */
+/**
+ * 旁路库的读取状态，供 doctor 区分「读到了 0 行」和「这次没读到」。
+ *
+ * 这两个状态对用户的意义完全不同：前者是"Codex 没给标题"，后者是"我们
+ * 这次读不出来"——后者本该报出来、下一轮重试，不该表现成前者。
+ */
 export function enrichStats() {
-  return threadIndexMemo ? { indexed: threadIndexMemo.map.size } : { indexed: 0 };
+  if (!lastIndexRead) return { indexed: 0, read: false };
+  return { indexed: threadIndexMemo ? threadIndexMemo.map.size : 0, read: true };
 }

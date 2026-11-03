@@ -20,10 +20,18 @@ import os from 'node:os';
 import path from 'node:path';
 import { scanAll, scanners } from './registry.js';
 import { readSessionContent } from './query.js';
-import { projectKey, isProjectPath, isSubagent, mainOnly } from './model.js';
+import { projectKey, isProjectPath, isSubagent, mainOnly, tildify } from './model.js';
 import { userDataCandidates, dataCandidates, candidatesWith } from './platform.js';
 import { scanUnknownStores, anchorsFromSources, knownPathsFromGaps } from './unknown.js';
 import { stateHome } from './paths.js';
+
+/**
+ * doctor 最多列几条失败明细。
+ *
+ * 取 5 而不是全列：成片失败（某个扫描器整体坏了）时明细里会有几百条
+ * 一模一样的 reason，列全了反而看不出是哪一家——前几条已经够认出身份。
+ */
+const PROBLEM_SHOW = 5;
 
 /** 各 Agent 的存储根目录是否存在于本机。 */
 export function detectAgents() {
@@ -137,6 +145,13 @@ export async function auditCollection({ samplePerAgent = 3, noCache = false } = 
     copies: copyAudit,
     files: stats.files,
     failures: stats.failures,
+    // 失败的身份：哪个文件、哪一类、为什么。
+    //
+    // 只给 failures 那个数字时，doctor 的全部价值就是"今天有 3 个失败"。
+    // 用户既不知道是哪个文件、也不知道该不该管——是某个 Agent 的适配整体
+    // 坏了（必须修），还是本机某个坏文件（删掉就行）。这两种处置完全相反，
+    // 计数却长得一模一样。所以明细必须跟着数据一起出来。
+    problems: summarizeProblems(stats),
     duplicates,
     agents,
     coverage: {
@@ -156,6 +171,56 @@ export async function auditCollection({ samplePerAgent = 3, noCache = false } = 
       withoutUserInput: ratio(sessions, (s) => !/^\(.*\)$/.test(String(s.title || ''))),
     },
   };
+}
+
+/**
+ * 把本轮扫描记下的失败明细整理成「能一眼看出是哪一家、哪个文件、什么错」。
+ *
+ * ## 为什么计数字段和明细分开算
+ *
+ * `failures` / `emptied` 是**精确计数**（每个失败都 +1），而 problems 明细
+ * 有 50 条上限（缓存是 JSON，不封顶会膨胀）。所以总数必须取自计数器，
+ * 不能取自明细长度——否则一台机器上坏了一万个文件时，报告会显示"50 个
+ * 失败"，看起来像是刚过阈值，实际是整个采集崩了。
+ *
+ * ## 为什么不只返回结构化数据
+ *
+ * CLI 只打印 `解析失败 ${r.failures}`。结构化字段落到终端前总要有人渲染，
+ * 而这一层的输出是给人看的：直接带上 `lines`，任何渲染方拿去逐行打就是
+ * 一眼能读的体检结论，不必各自再拼一遍格式。
+ */
+function summarizeProblems(stats) {
+  const list = Array.isArray(stats.problems) ? stats.problems : [];
+  const dropped = stats.problemsDropped || 0;
+  // 按 kind 分组：解析抛错（我做不到）和解析为空（文件里没有我认识的东西）
+  // 是两种完全不同的故障，混在一起报会让人无法判断该不该管。
+  const byKind = { parse: stats.failures || 0, emptied: stats.emptied || 0 };
+  const total = byKind.parse + byKind.emptied;
+
+  // 只列前几条。同一种故障（比如某个扫描器整体的适配坏了）在明细里会是
+  // 几百条同样的 reason，列 5 条已经足够认出是哪一家。
+  const top = list.slice(0, PROBLEM_SHOW).map((p) => ({
+    agent: p.agent,
+    // 路径缩写到 ~：Windows 上的绝对路径常常六七十个字符，
+    // 一屏放不下三条，反而看不清是哪个文件。
+    file: tildify(p.file),
+    kind: p.kind,
+    reason: p.reason,
+  }));
+
+  const lines = [];
+  if (total) {
+    lines.push(
+      `采集问题 ${total} 个：解析失败 ${byKind.parse} · 解析为空 ${byKind.emptied}` +
+        (dropped ? `（另有 ${dropped} 个只记了数、没留明细）` : '')
+    );
+    for (const p of top) {
+      lines.push(`${p.agent}  ${p.file}  [${p.kind === 'parse' ? '解析失败' : '解析为空'}] ${p.reason}`);
+    }
+    if (total > top.length) lines.push(`…其余 ${total - top.length} 个未列出`);
+  }
+
+  return { total, byKind, dropped, top, lines };
 }
 
 /**
@@ -422,6 +487,17 @@ export function detectGaps() {
       name: 'ZCode',
       agent: 'zcode',
       paths: [{ p: homePath('.zcode/cli/db'), kind: 'dir' }],
+    },
+    {
+      name: 'WorkBuddy',
+      agent: 'workbuddy',
+      // 会话在 projects/<工作区>/<id>.jsonl（与 Claude Code 同构）。
+      // 另有一个 `.workbuddy-ai` 变体，布局相同、多数机器上是空壳，
+      // 也一起探——它不装作"已接入"，只是不再落进"未适配"。
+      paths: [
+        { p: homePath('.workbuddy/projects'), kind: 'dir' },
+        { p: homePath('.workbuddy-ai/projects'), kind: 'dir' },
+      ],
     },
   ];
 

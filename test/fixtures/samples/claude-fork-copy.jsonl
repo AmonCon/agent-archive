@@ -1,0 +1,2 @@
+{"sessionId":"fork-cccc-3333","cwd":"E:\\demo-project","type":"user","uuid":"11111111-0000-4000-8000-000000000001","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":[{"type":"text","text":"演示问题：这个项目怎么跑"}]}}
+{"sessionId":"fork-cccc-3333","cwd":"E:\\demo-project","type":"assistant","uuid":"11111111-0000-4000-8000-000000000002","timestamp":"2026-01-01T00:01:00Z","message":{"role":"assistant","content":[{"type":"text","text":"先装依赖"}]}}

@@ -4,7 +4,7 @@ import os from 'node:os';
 import zlib from 'node:zlib';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '../messages.js';
-import { envOverrides } from '../platform.js';
+import { envOverrides, pathKey } from '../platform.js';
 import { isDirEntry, isFileEntry } from '../fsentry.js';
 import { extraRoots } from '../config.js';
 
@@ -54,6 +54,21 @@ function isDir(p) {
  * DSH_HOME 是官方覆盖；`~/.dsh` 是 CLI 默认；`~/DeepSeekHarness` 是
  * Windows 桌面版的默认数据目录；后两个是 macOS/Linux 桌面版的常见位置。
  */
+/**
+ * 数据根候选：环境变量与配置优先，再退到各平台的默认位置。
+ *
+ * **必须按路径键去重，不能按字符串比。** 同一个目录可以有两种拼写：
+ * `DSH_HOME` 写成全小写（Git Bash / 手抄路径 / CI 变量常见），或者
+ * `~/DeepSeekHarness` 与配置里写的 `roots.dsh` 只差大小写。裸字符串比较
+ * 会让同一个目录进两次，后果不是"多扫一遍"而是**正文读不出来**：
+ *
+ *   discover() 从两个根各产出一次同一文件 → mergeByKey 把两条 source
+ *   用 `|` 拼起来 → readMessages 把整串当一个路径 → readFileSync ENOENT
+ *
+ * 而 timeline / 索引看起来完全正常（列表里字段都对），只有 cat、网页会话页、
+ * MCP read_session 挂。这是最难查的一类失败，所以这里用 pathKey（与
+ * platform.js 同一套规则，大小写跟随文件系统）去重。
+ */
 function dshDirs() {
   const home = os.homedir();
   const roots = [
@@ -66,8 +81,13 @@ function dshDirs() {
     path.join(home, '.config', 'deepseek-harness'),
   ];
   const out = [];
+  const seen = new Set();
   for (const r of roots) {
-    if (isDir(path.join(r, 'sessions')) && !out.includes(r)) out.push(r);
+    if (!isDir(path.join(r, 'sessions'))) continue;
+    const k = pathKey(r);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
   }
   return out;
 }
@@ -162,6 +182,16 @@ export function candidateRoots() {
 
 export function discover() {
   const out = [];
+  // 文件级去重：即使两个候选根没被上面的 dshDirs() 合并掉（例如 junction、
+  // 软链接、8.3 短名——它们 pathKey 不同但指向同一个文件），同一场会话
+  // 也不能出现两次。规则与 qoder.js 一致：别在这里另写一份路径身份。
+  const seen = new Set();
+  const add = (file) => {
+    const k = pathKey(file);
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(file);
+  };
   for (const root of dshDirs()) {
     const sessions = path.join(root, 'sessions');
     let workspaces;
@@ -183,7 +213,7 @@ export function discover() {
         const sd = path.join(wd, s.name);
         if (!isDirEntry(s, sd)) continue;
         const file = pickSessionFile(sd);
-        if (file) out.push(file);
+        if (file) add(file);
       }
     }
   }

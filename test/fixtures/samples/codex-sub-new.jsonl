@@ -1,0 +1,2 @@
+{"timestamp":"2026-01-01T00:02:00Z","type":"session_meta","payload":{"id":"33333333-aaaa-4bbb-8ccc-dddddddddddd","session_id":"33333333-aaaa-4bbb-8ccc-dddddddddddd","cwd":"E:/demo-project","parent_thread_id":"22222222-aaaa-4bbb-8ccc-dddddddddddd","source":{"subagent":{"other":"guardian"}},"timestamp":"2026-01-01T00:02:00Z"}}
+{"timestamp":"2026-01-01T00:02:30Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"子代理的任务（新写法：parent_thread_id）"}]}}

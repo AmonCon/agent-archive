@@ -137,3 +137,36 @@ test('cli: timeline 在会话很多时只给最近一段，并说明怎么看全
     box.cleanup();
   }
 });
+
+test('cli: doctor 的采集失败要说出是哪一家、哪个文件、为什么', async () => {
+  const box = sandbox();
+  try {
+    // 造一个「发现了文件但解析必抛」的用户扫描器。
+    // 这条测的是入口：诊断在 doctor.js 里算得再细，CLI 不渲染出来，
+    // 用户看到的仍然只是一个计数——那正是改造前的状态。
+    box.write('.fakeagent/a.jsonl', '{"x":1}\n');
+    box.mkdir('../state/scanners');
+    const scannerPath = box.path('..', 'state', 'scanners', 'fakeagent.js');
+    const fs = await import('node:fs');
+    fs.writeFileSync(
+      scannerPath,
+      [
+        "export const name = 'fakeagent';",
+        "export function discover() { return [process.env.USERPROFILE + '/.fakeagent/a.jsonl']; }",
+        "export function parse() { throw new Error('格式变了，解析必抛'); }",
+        'export function readMessages() { return []; }',
+        '',
+      ].join('\n'),
+      'utf8'
+    );
+
+    const { code, out } = runCli(box, ['doctor']);
+    assert.equal(code, 0, out);
+    assert.match(out, /采集问题 1 个/, '要报出总数');
+    assert.match(out, /fakeagent/, '要说清是哪一家');
+    assert.match(out, /a\.jsonl/, '要说清是哪个文件');
+    assert.match(out, /格式变了，解析必抛/, '要说清为什么');
+  } finally {
+    box.cleanup();
+  }
+});

@@ -83,8 +83,9 @@ function remoteHead(repo) {
  */
 function ensureMirror(src) {
   const dir = cacheDir(src.id);
+  let depth = 200;
   if (fs.existsSync(path.join(dir, '.git'))) {
-    const f = git(dir, ['fetch', '--depth', '200', 'origin', 'HEAD']);
+    const f = git(dir, ['fetch', '--depth', String(depth), 'origin', 'HEAD']);
     if (!f.ok) return { dir: null, error: f.err || 'fetch 失败' };
   } else {
     // 上一次克隆可能中断，留下一个没有 .git 的目录。先清掉再克隆，
@@ -110,13 +111,40 @@ function ensureMirror(src) {
     }
   }
 
-  // 浅克隆里可能没有我们 pin 的那个提交（上游做过 force-push 或压缩历史）。
-  // 显式按 SHA 补取一次，diff 才有旧端可以对比。GitHub 允许 fetch 任意 SHA。
+  // 浅克隆里可能没有我们 pin 的那个提交，或者有提交对象但两条浅边界之间
+  // 的历史是断的（"有对象 ≠ 能连起来"）。判定方式很直接：**试一次真正的
+  // diff**。git diff 只要求两棵树的对象都在本地，不要求它们有祖先关系——
+  // 断掉的是 rev-list / merge-base，不是 diff。所以别用 merge-base 去判，
+  // 那会把"能 diff"误判成"走不通"，每轮都白加深一次历史。
+  //
+  // 比的是 **FETCH_HEAD**，不是本地 HEAD：`git fetch` 只移动 FETCH_HEAD /
+  // 远端跟踪引用，本地 HEAD 仍停在旧 pin。
+  const fetchHead = () => git(dir, ['rev-parse', '--verify', 'FETCH_HEAD']).out;
+  const canDiff = () => {
+    const to = fetchHead();
+    if (!to) return false;
+    return git(dir, ['diff', '--name-only', `${src.commit}..${to}`]).ok;
+  };
+
   const has = git(dir, ['cat-file', '-e', `${src.commit}^{commit}`]);
   if (!has.ok) {
     const bySha = git(dir, ['fetch', '--depth', '1', 'origin', src.commit]);
     if (!bySha.ok) {
       return { dir, error: `取不到 pin 的提交 ${src.commit.slice(0, 8)}（上游可能重写过历史）` };
+    }
+  }
+  if (!canDiff()) {
+    for (const d of [800, 3000, 12000]) {
+      depth = d;
+      if (!git(dir, ['fetch', `--depth=${d}`, 'origin', 'HEAD']).ok) break;
+      if (canDiff()) break;
+    }
+    if (!canDiff()) {
+      // 最后手段：完整历史。blob:none 的 partial clone 只补提交图，代价可控。
+      const un = git(dir, ['fetch', '--unshallow', 'origin', 'HEAD'], { timeout: 600000 });
+      if (!un.ok || !canDiff()) {
+        return { dir, error: `浅克隆里 diff 不了 pin ${src.commit.slice(0, 8)}，建议手动 git fetch --unshallow` };
+      }
     }
   }
   return { dir };
