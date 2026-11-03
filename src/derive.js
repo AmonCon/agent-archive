@@ -27,7 +27,41 @@ import { statePath } from './paths.js';
 
 const DERIVE_VERSION = 1;
 
+/**
+ * DERIVE_VERSION 为什么够用，而索引库还需要 meta.schema_version：
+ *
+ * 这边的库**文件名带版本**（derived-v<N>.sqlite）——改 schema 就换新文件，
+ * 旧文件留在原地不碰，天然按版本隔离；缓存丢了也只是重新花钱算。
+ * 索引库不行：同一个文件名沿用到底，靠打开时幂等 ALTER 往前挪，
+ * 所以那边需要一个存进库里的版本号来回答「这是哪版建的」。
+ *
+ * 这里的版本号只防一件事：改了 SCHEMA 却忘了 bump DERIVE_VERSION——
+ * 同名文件里写进了新结构，旧缓存按旧结构读，查询不报错但值是错的。
+ * 打开时核对一遍，不一致就退出并说明，升级路径（换文件名）由人来走。
+ */
+function verifyDeriveVersion(db) {
+  let stored = null;
+  try {
+    const row = db.prepare("select v from meta where k = 'derive_version'").get();
+    stored = row ? Number(row.v) : null;
+  } catch {
+    stored = null;
+  }
+  if (stored !== null && stored !== DERIVE_VERSION) {
+    throw new Error(
+      `衍生库是 DERIVE_VERSION ${stored} 写的，当前代码是 ${DERIVE_VERSION}。\n` +
+        `   两者不一致说明改了 schema 却没 bump 版本号：请把 DERIVE_VERSION 加一\n` +
+        `   （新库会换文件名，旧缓存原样保留，不会丢数据）。\n` +
+        `   （库文件：${derivePath()}）`
+    );
+  }
+  db.prepare("insert or replace into meta (k, v) values ('derive_version', ?)").run(
+    String(DERIVE_VERSION)
+  );
+}
+
 const SCHEMA = [
+  `create table if not exists meta (k text primary key, v text)`,
   `create table if not exists artifact (
      kind text not null,
      subject text not null,
@@ -68,6 +102,7 @@ function open({ create = true } = {}) {
     /* 老版本不支持 */
   }
   for (const stmt of SCHEMA) db.prepare(stmt).run();
+  verifyDeriveVersion(db);
   return db;
 }
 

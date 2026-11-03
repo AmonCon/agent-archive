@@ -70,6 +70,23 @@ const SCHEMA_STATEMENTS = [
 const BATCH = 50;
 
 /**
+ * 索引库的 schema 版本，存在 meta.schema_version 里。
+ *
+ * 版本史（只有加列级别的改动，每一版都能从上一版幂等迁上来）：
+ *   v1  最老的库：没有 kind、没有 body_z，meta 里也没有版本号
+ *   v2  加了 body_z（正文压缩）与 body_z_done 迁移标记
+ *   v3  加了 kind（主会话/子代理）列；即当前这版
+ *
+ * 为什么要版本号：`create table if not exists` + 每次打开跑幂等 ALTER 只能
+ * **往前补**，回答不了另外两个问题——
+ *   这个库是哪一版建的（坏了不知道从哪儿查）；
+ *   旧代码打开新库（用户把工具降级了）会不会读出错的数据。
+ * 后者最危险：列在但语义变了，查询不报错，只是结果悄悄不对。
+ * 所以版本比当前高就直接退出并说人话，不猜。
+ */
+const SCHEMA_VERSION = 3;
+
+/**
  * 从 doc 的一行取回原始正文。
  *
  * 正文按 zlib deflate 存在 body_z（实测压缩率约 23%），老数据仍是明文 body。
@@ -354,7 +371,45 @@ function openIndex({ create = true } = {}) {
   migrate(db);
   // 老库在这里补齐触发器；新库也在这里建。之后 doc 的增删改自动同步到 FTS。
   ensureTriggers(db);
+  stampSchemaVersion(db);
   return db;
+}
+
+/**
+ * 校验并落 schema 版本号。必须在 migrate 之后调用——迁移跑完，库才是当前这版。
+ *
+ * 三种情况：
+ *   新库（meta 里没有版本号）                  → migrate 已建齐，写当前版本
+ *   旧库（版本号低于当前，或没有版本号的老库）  → migrate 已补齐，写当前版本
+ *   未来库（版本号高于当前）                    → 报错退出
+ *
+ * 最后一种来自「用户降级了工具」：旧代码读新库，列在但语义可能已经变了，
+ * 查询不报错、结果悄悄不对。宁可在这里说清楚，也不产出看起来合理的错数据。
+ */
+function stampSchemaVersion(db) {
+  let stored = null;
+  try {
+    const row = db.prepare("select v from meta where k = 'schema_version'").get();
+    stored = row ? Number(row.v) : null;
+  } catch {
+    stored = null;
+  }
+
+  if (stored !== null && stored > SCHEMA_VERSION) {
+    throw new Error(
+      `索引库是 schema 版本 ${stored} 建的，当前这个构建只认到版本 ${SCHEMA_VERSION}。\n` +
+        `   这个库是用更新版本的 agent-archive 建的，请升级回来再打开：\n` +
+        `   npm install -g github:AmonCon/agent-archive\n` +
+        `   （库文件：${indexFile()}）`
+    );
+  }
+
+  // 没有版本号的老库（v1/v2 时代）迁移到这里都已经是当前结构了
+  if (stored !== SCHEMA_VERSION) {
+    db.prepare("insert or replace into meta (k, v) values ('schema_version', ?)").run(
+      String(SCHEMA_VERSION)
+    );
+  }
 }
 
 /**
