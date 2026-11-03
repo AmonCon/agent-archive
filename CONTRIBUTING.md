@@ -248,7 +248,7 @@ node research/probes/remote-verify.mjs --host user@192.168.1.10 \
 
 - 不用 `git clone`：仓库可能是私有的，远端不一定有你的凭据；而且这样测的
   就是你本地这个 commit
-- 不用 `npm install`：零依赖，只要求远端 Node ≥ 22.15
+- 不用 `npm install`：零依赖，只要求远端 Node ≥ 22.16
 - 不碰远端任何 Agent 的真实数据（测试自己造假数据）
 
 远端没装 Node 时，用官方 tarball 解到 `/tmp` 即可，不要动系统环境：

@@ -3,10 +3,16 @@
  *
  * ## 为什么需要
  *
- * 这个工具依赖两个**较新且仍在演进**的 Node 内建能力：
+ * 这个工具依赖三个**较新且仍在演进**的 Node 内建能力：
  *
  *   `node:sqlite` 的 DatabaseSync       Node 22.5 起（实验特性）
  *   `zlib.zstdDecompressSync`           Node 22.15 起
+ *   SQLite 的 FTS5 全文检索扩展         Node 22.16 起（23.x 整条线没有）
+ *
+ * 最后一条是最容易漏的：`node:sqlite` 在 22.15 就能用，但它带的 SQLite
+ * 没编译 FTS5，于是 `search` 和 `secrets` 会在建索引时抛
+ * `no such module: fts5`——一个看不出「你的 Node 太旧」的错误。
+ * 最低版本因此定在 22.16.0，而不是 `node:sqlite` 首次出现的 22.5。
  *
  * `package.json` 的 `engines` 只在 `npm install` 时提示一句，用户装完再跑
  * 照样会崩——而且崩的位置很深（某个 scanner 里一行 TypeError），
@@ -20,7 +26,7 @@
 
 import { createRequire } from 'node:module';
 
-const MIN_NODE = '22.15.0';
+const MIN_NODE = '22.16.0';
 
 /** 解析 "v22.15.1" / "v24.12.0" → 可比较的数字数组。 */
 function versionParts(v) {
@@ -52,7 +58,8 @@ export function checkEnvironment({ nodeVersion = process.version, features } = {
     problems.push(
       `Node 版本太低：当前 ${nodeVersion}，需要 ${MIN_NODE} 或更高。\n` +
         `   为什么：读取 .zst 压缩会话要用 zlib 的 zstd 支持（22.15 起），\n` +
-        `   读取各家 SQLite 会话库要用 node:sqlite（22.5 起）。`
+        `   读取各家 SQLite 会话库要用 node:sqlite（22.5 起），\n` +
+        `   全文搜索要用 node:sqlite 里的 FTS5 扩展（22.16 起）。`
     );
   }
 
@@ -63,6 +70,15 @@ export function checkEnvironment({ nodeVersion = process.version, features } = {
   }
   if (!f.sqlite) {
     problems.push('当前 Node 没有 node:sqlite 的 DatabaseSync：无法读取 Hermes / ZCode / OpenCode / Cursor 的会话库。');
+  }
+  // 单独查 FTS5：`node:sqlite` 存在不等于它带的 SQLite 编译了 FTS5 扩展。
+  // 22.15 就是这种状态——模块能加载，建全文索引时才炸。
+  // 只在 `node:sqlite` 本身存在时才报：缺模块的情况下再抱怨 fts5 只是噪音。
+  if (f.sqlite && !f.fts5) {
+    problems.push(
+      '当前 Node 的 SQLite 没有 FTS5 全文检索扩展：全文搜索与凭证扫描用不了（`no such module: fts5`）。\n' +
+        '   Node 22.16 起才有；23.x 整条线都没有，请用 22.16+ 或 24+。'
+    );
   }
 
   return { ok: problems.length === 0, problems };
@@ -75,11 +91,12 @@ function detectFeatures() {
   try {
     req = createRequire(import.meta.url);
   } catch {
-    return { zstd: false, sqlite: false };
+    return { zstd: false, sqlite: false, fts5: false };
   }
 
   let zstd = false;
   let sqlite = false;
+  let fts5 = false;
   try {
     zstd = typeof req('node:zlib').zstdDecompressSync === 'function';
   } catch {
@@ -90,7 +107,26 @@ function detectFeatures() {
   } catch {
     sqlite = false;
   }
-  return { zstd, sqlite };
+  if (sqlite) {
+    // 真的去建一张 fts5 虚拟表：这是「能不能搜」的唯一可靠判据。
+    // 版本号查不出来——22.15 有 node:sqlite 却没有 FTS5。
+    let db;
+    try {
+      const { DatabaseSync } = req('node:sqlite');
+      db = new DatabaseSync(':memory:');
+      db.exec('create virtual table probe using fts5(x)');
+      fts5 = true;
+    } catch {
+      fts5 = false;
+    } finally {
+      try {
+        db?.close();
+      } catch {
+        /* 已关闭 */
+      }
+    }
+  }
+  return { zstd, sqlite, fts5 };
 }
 
 /**

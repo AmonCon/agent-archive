@@ -19,7 +19,7 @@
  * ## 为什么不装依赖
  *
  * 这个项目零依赖，`npm test` 不需要 `npm install`。所以整条链路只要求远端有
- * Node ≥ 22.15 —— 版本不对会由入口的能力自检直接说清楚。
+ * Node ≥ 22.16 —— 版本不对会由入口的能力自检直接说清楚。
  *
  * ## 用法
  *
@@ -53,7 +53,7 @@ const usage = () => {
   --dry-run   只打印将要执行的命令，不真的连
   --keep      跑完保留远端临时目录（默认删掉，方便看现场时用）
 
-远端需要：Node >= 22.15、能免密 ssh 登录。`);
+远端需要：Node >= 22.16、能免密 ssh 登录。`);
 };
 
 const host = opt('host');
@@ -107,7 +107,7 @@ cd ${remoteDir}
 tar -xf /tmp/aa-verify.tar
 echo "=== 环境 ==="
 node -v
-node -e "const z=require('node:zlib');const s=require('node:sqlite');if(typeof z.zstdDecompressSync!=='function'||typeof s.DatabaseSync!=='function'){console.error('缺 zstd 或 node:sqlite（Node 需要 >= 22.15）');process.exit(1)}console.log('能力自检通过', process.platform, process.arch)"
+node -e "const z=require('node:zlib');const s=require('node:sqlite');let f=false;try{const d=new s.DatabaseSync(':memory:');d.exec('create virtual table t using fts5(x)');f=true;d.close()}catch{}if(typeof z.zstdDecompressSync!=='function'||typeof s.DatabaseSync!=='function'||!f){console.error('缺 zstd / node:sqlite / fts5（Node 需要 >= 22.16，23.x 没有 fts5）');process.exit(1)}console.log('能力自检通过', process.platform, process.arch)"
 echo "=== 测试 ==="
 npm test
 echo "=== 打包检查 ==="

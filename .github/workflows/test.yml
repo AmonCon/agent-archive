@@ -2,8 +2,10 @@ name: test
 
 # 这个项目要装到所有人的机器上，所以"在我这台机器上能跑"不算验证。
 # 每次推送跑 ubuntu + windows 两个平台 × 两个 Node 版本——
-# 其中 22.15.0 是 package.json 里声明的最低版本，等于顺带验证
-# "engines 那句话是不是真的"。
+# 其中 22.16.0 是 package.json 里声明的最低版本，等于顺带验证
+# "engines 那句话是不是真的"。定在 22.16 而不是 22.15，是因为 FTS5 全文检索
+# 扩展 22.16 才进 node:sqlite——22.15 有 DatabaseSync 却没有 fts5，
+# 建索引时才炸 `no such module: fts5`。这条就是那时候 CI 红出来的。
 #
 # macOS 只在手动触发（workflow_dispatch）时跑，原因不是省事：
 # 私有仓库拿不到 macOS runner——实测每个 macOS job 都在排队 901 秒
@@ -23,7 +25,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest","windows-latest"]') }}
-        node: ['22.15.0', '24']
+        node: ['22.16.0', '24']
     steps:
       - uses: actions/checkout@v4
 
