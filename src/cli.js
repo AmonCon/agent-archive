@@ -877,6 +877,18 @@ async function cmdDoctor(opts) {
         '  桌面端自动触发/定时任务，标题退化为来源名，属正常'
     )
   );
+  // 比率口径：百分比旁边必须跟着分母和下界，否则读不出信号。
+  // "99.9%" 在 n=3 和 n=1452 时是两回事；下界才是两份报告对比时的可比值。
+  if (r.metrics) {
+    for (const m of r.metrics) {
+      if (!m.n) continue;
+      let s = `${m.name}  n=${m.n}  下界 ${(m.wilsonLower * 100).toFixed(1)}%`;
+      if (m.baseline && m.baseline.n) {
+        s += `  朴素基线 ${(m.baseline.rate * 100).toFixed(1)}%`;
+      }
+      console.log(c(C.dim, '  · ' + s));
+    }
+  }
   console.log('');
 
   // 按 Agent 细看
@@ -921,9 +933,24 @@ async function cmdDoctor(opts) {
       c(
         C.dim,
         `  ${sa.total} 场 · 归属 ${sa.attached} · 孤儿 ${sa.orphan} · 无父id ${sa.noParent}` +
-          ` · 归属率 ${(sa.attachRate * 100).toFixed(1)}%`
+          ` · 归属率 ${(sa.attachRate * 100).toFixed(1)}%` +
+          (sa.baseline && sa.baseline.n
+            ? ` · 朴素基线 ${(sa.baseline.rate * 100).toFixed(1)}%`
+            : '')
       )
     );
+    if (sa.baseline && sa.baseline.n && sa.baseline.rate > sa.attachRate) {
+      // 真实归属率低于朴素基线：这些孤儿不是"没有 main 可挂"，而是链断了
+      // （父会话被删或跨项目）。注意朴素基线会把它们挂到**错的父**上——
+      // 挂错父比孤儿更糟，所以低于基线不一定是缺陷，但值得看明细再判断。
+      console.log(
+        c(
+          C.when,
+          `  归属率低于朴素基线 ${(100 * (sa.baseline.rate - sa.attachRate)).toFixed(1)} 个百分点：` +
+            `孤儿不是"无家可归"，是链断了。挂到错的父比孤儿更糟，先看明细再判断。`
+        )
+      );
+    }
     for (const a of sa.byAgent) {
       const notes = [];
       if (a.orphan) notes.push(`孤儿 ${a.orphan}`);

@@ -136,6 +136,39 @@ export async function auditCollection({ samplePerAgent = 3, noCache = false } = 
     bodyErrors: readable.get(e.agent) ? readable.get(e.agent).errors : [],
   }));
 
+  const covTime = ratio(sessions, (s) => s.start && s.end);
+  const covTitle = ratio(sessions, (s) => {
+    const t = String(s.title || '');
+    return t && t !== '(untitled)' && !/^\(.*\)$/.test(t) && !/^<[a-z][\w-]*[\s>]/i.test(t);
+  });
+  const covNoUser = ratio(sessions, (s) => !/^\(.*\)$/.test(String(s.title || '')));
+  const project = projectRatio(sessions, agents);
+
+  // 正文可读性聚合：各家的抽样数不同时（每家上限相同，但有的家会话总数
+  // 少于样本数），聚合时把每家的 tried/ok 都加总，而不是对比率再平均。
+  const sumTried = agents.reduce((a, x) => a + x.bodyTried, 0);
+  const sumOk = agents.reduce((a, x) => a + x.bodyOk, 0);
+
+  const metrics = [
+    metricRow('time', '时间覆盖率', covTime, sessions.length, Math.round(covTime * sessions.length), '有开始与结束时间'),
+    metricRow('project', '项目覆盖率', project.rate, project.n, project.ok, '有路径的会话里能归到真实项目'),
+    metricRow('cleanTitle', '标题覆盖率', covTitle, sessions.length, Math.round(covTitle * sessions.length), '不是占位符或注入标签'),
+    metricRow('bodyReadable', '正文可读率（抽样）', sumTried ? sumOk / sumTried : 0, sumTried, sumOk, `每家抽 ${samplePerAgent} 场，样本小，看下界`),
+  ];
+  if (subagentAudit.total) {
+    metrics.push(
+      metricRow(
+        'attach',
+        '子代理归属率',
+        subagentAudit.attachRate,
+        subagentAudit.baseline.n,
+        subagentAudit.attached,
+        '沿 parent 链能走到 main',
+        subagentAudit.baseline
+      )
+    );
+  }
+
   return {
     total: sessions.length,
     // 子会话单列。它们被采集但不参与上面的质量指标。
@@ -159,17 +192,21 @@ export async function auditCollection({ samplePerAgent = 3, noCache = false } = 
       //
       // 项目覆盖率的分母要排掉"本来就没有项目"的会话：Hermes 是接飞书
       // 渠道的助手，不绑定工作目录，让它拉低覆盖率是错的指标。
-      time: ratio(sessions, (s) => s.start && s.end),
-      project: projectRatio(sessions, agents),
-      cleanTitle: ratio(sessions, (s) => {
-        const t = String(s.title || '');
-        return t && t !== '(untitled)' && !/^\(.*\)$/.test(t) && !/^<[a-z][\w-]*[\s>]/i.test(t);
-      }),
+      time: covTime,
+      project: project.rate,
+      cleanTitle: covTitle,
       // 没有真人输入的会话（桌面端自动触发、定时任务）单独算一个比例。
       // 它们用 "(Codex Desktop)" 这类来源做标题是合理降级，不算缺陷，
       // 但数量多说明这类自动化会话占比高，值得知道。
-      withoutUserInput: ratio(sessions, (s) => !/^\(.*\)$/.test(String(s.title || ''))),
+      withoutUserInput: covNoUser,
     },
+    // 比率口径：每个比率都和它的分母、Wilson 下界、（可 sometimes 有的）
+    // 朴素基线待在一起。单独一个百分比读不出信号——"99.9%"在 n=3 和
+    // n=1452 时是两回事。
+    metrics,
+    // 本轮扫描的输入快照：哪一版工具、哪个 Node、扫了哪些文件（聚合哈希）。
+    // 两份 doctor 报告比 manifestHash 就知道是不是同一批数据。
+    snapshot: stats.snapshot,
   };
 }
 
@@ -247,9 +284,19 @@ function auditSubagents(allSessions) {
   const byKey = new Map(allSessions.map((s) => [`${s.agent}|${s.id}`, s]));
   const subs = allSessions.filter(isSubagent);
 
+  // 朴素基线用的：每个 Agent 有多少场 main 会话。
+  // 「同 Agent 存在任意一场 main」是归属能做到的最宽松判据——连它都
+  // 挂不上的子代理，才是链上溯逻辑无论如何救不回来的。
+  const mainsByAgent = new Map();
+  for (const s of allSessions) {
+    if (isSubagent(s)) continue;
+    mainsByAgent.set(s.agent, (mainsByAgent.get(s.agent) || 0) + 1);
+  }
+
   let attached = 0;
   let orphan = 0;
   let noParent = 0;
+  let baselineOk = 0;
   const byAgent = new Map();
 
   /** 沿 parent 链上溯，返回是否到达 main。最多 64 跳，防环。 */
@@ -275,22 +322,37 @@ function auditSubagents(allSessions) {
     if (!s.parent) {
       noParent++;
       e.noParent++;
-    } else if (reachesMain(s)) {
-      attached++;
-      e.attached++;
     } else {
-      orphan++;
-      e.orphan++;
+      // 朴素基线：同 Agent 只要有任意一场 main 就算「朴素策略也能挂上」。
+      // 它是归属率的天花板参照——真实归属率低于它，说明链上溯在丢。
+      if ((mainsByAgent.get(s.agent) || 0) > 0) baselineOk++;
+      if (reachesMain(s)) {
+        attached++;
+        e.attached++;
+      } else {
+        orphan++;
+        e.orphan++;
+      }
     }
   }
 
+  const n = attached + orphan;
   return {
     total: subs.length,
     attached,
     orphan,
     noParent,
     // 归属率的分母排掉 noParent：那不是"挂不上"，是压根没取到父 id
-    attachRate: attached + orphan > 0 ? attached / (attached + orphan) : 1,
+    attachRate: n > 0 ? attached / n : 1,
+    // 朴素基线：回答"归属率这个数字值多少"。不做链上溯、闭着眼挂同
+    // Agent 最近一场 main 能到的比例。真实归属率低于它 = 链上溯在丢；
+    // 等于它 = 链上溯没加分也没减分；高于它不可能（朴素是最宽松判据）。
+    baseline: {
+      why: '朴素策略：同 Agent 存在任意一场 main 会话即算「可挂」',
+      n,
+      ok: baselineOk,
+      rate: n > 0 ? baselineOk / n : 1,
+    },
     byAgent: [...byAgent.values()].sort((a, b) => b.total - a.total),
   };
 }
@@ -346,7 +408,8 @@ function projectRatio(sessions, agents) {
     agents.filter((a) => a.total > 0 && a.noProject === a.total).map((a) => a.agent)
   );
   const withPath = sessions.filter((s) => !neverHasProject.has(s.agent) && s.project);
-  return ratio(withPath, (s) => isProjectPath(s.project));
+  const ok = withPath.filter((s) => isProjectPath(s.project)).length;
+  return { rate: withPath.length ? ok / withPath.length : 0, n: withPath.length, ok };
 }
 
 function ratio(list, pred) {
@@ -354,6 +417,37 @@ function ratio(list, pred) {
   let n = 0;
   for (const x of list) if (pred(x)) n++;
   return n / list.length;
+}
+
+/**
+ * 比率的 Wilson 95% 下界。
+ *
+ * 为什么每个比率旁都要有它：「99.9%」读不出信号——n=3 时的 99.9% 和
+ * n=1452 时的 99.9% 是两回事。下界回答的是"按最坏情况，这个比率至少
+ * 是多少"，两份报告对比时看下界就知道差异是不是抽样噪声。
+ * 公式与 Elysian bench/metrics.py 同一个（标准 Wilson score 下界）。
+ */
+function wilsonLower(ok, n, z = 1.96) {
+  if (!n) return 0;
+  const p = ok / n;
+  const denom = 1 + (z * z) / n;
+  const center = p + (z * z) / (2 * n);
+  const spread = z * Math.sqrt((p * (1 - p) + (z * z) / (4 * n)) / n);
+  return Math.max(0, (center - spread) / denom);
+}
+
+/** 把一个比率整理成 metrics 表的一行：比率永远和它的分母、下界待在一起。 */
+function metricRow(key, name, rate, n, ok, note, baseline) {
+  return {
+    key,
+    name,
+    rate,
+    n,
+    ok,
+    wilsonLower: wilsonLower(ok, n),
+    note: note || '',
+    ...(baseline ? { baseline } : {}),
+  };
 }
 
 /**
