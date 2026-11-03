@@ -8,6 +8,18 @@ import { disabledAgents } from './config.js';
 import { pathKey } from './platform.js';
 import { makeSession } from './model.js';
 
+/** 工具自身版本：快照要记"这份结果是用哪一版工具扫的"。读不到就 unknown。 */
+function toolVersion() {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+    );
+    return pkg.version || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 import * as claudeCode from './scanners/claude-code.js';
 import * as codex from './scanners/codex.js';
 import * as zcode from './scanners/zcode.js';
@@ -67,7 +79,7 @@ export const scanners = [
  * 只丢这一家的条目，其余家照常命中。
  *
  * 为什么必须分开：折叠成一个值时，改一行注释就要把全部会话重新解析。
- * 本机 2579 个文件：热扫 1.0–1.2 秒，全量重扫 37–66 秒，而逐家成本极不均
+ * 实测 2579 个文件：热扫 1.0–1.2 秒，全量重扫 37–66 秒，而逐家成本极不均
  * （qoder 447 文件 25.9 秒、codex 2039 文件 15.2 秒、claude-code 2 文件
  * 39 毫秒）。分开之后「改哪家只付哪家的钱」。
  *
@@ -95,7 +107,7 @@ export const scanners = [
  *   - 等长原地改写（比如把会话里的一个 id 换成另一个）size 完全不变
  *
  * 所以缓存命中不能只信 (mtime, size)。cc-switch / MAGPIE 的做法是再比文件头
- * 256B 的哈希；我们照做过，代价是每个未变文件一次 open+read，本机 2500 个
+ * 256B 的哈希；我们照做过，代价是每个未变文件一次 open+read，实测 2500 个
  * 文件约 0.7 秒（整个热扫才 1.4 秒）。
  *
  * 现在加了 **ctime**：它是 inode 状态变更时间，内容被改写、哪怕 mtime 被
@@ -154,7 +166,7 @@ function cacheFile() {
  * ## 为什么要**按扫描器分开**，而不是折叠成一个值
  *
  * 折叠成一个值的后果是：改一行注释也要把 2579 个文件全部重新解析。
- * 本机实测：热扫 1.0–1.2 秒，全量重扫 37–66 秒。而逐家的成本极不均衡——
+ * 实测：热扫 1.0–1.2 秒，全量重扫 37–66 秒。而逐家的成本极不均衡——
  * qoder 447 个文件要 25.9 秒、codex 2039 个文件 15.2 秒、claude-code
  * 2 个文件 39 毫秒。也就是说「改哪家只付哪家的钱」能省下 900 倍量级的
  * 无效工作，代价只是一次按名字的映射查询。
@@ -269,7 +281,7 @@ export function loadCache() {
  *
  * 不能直接 writeFileSync：这份缓存有 1 MB 量级，写一半崩了会留下一个
  * 截断的 JSON。下次 loadCache 解析失败会返回 `{}`——看起来"优雅降级"，
- * 实际是整机全量重扫一次（本机实测 50 秒），而用户不知道发生了什么。
+ * 实际是整机全量重扫一次（实测 50 秒），而用户不知道发生了什么。
  *
  * 做法照 MAGPIE 的 steady.WriteFile / cc-switch 的 stage_write：
  * 同目录临时文件 → fsync → rename 覆盖。rename 在 POSIX 和 Windows 上
@@ -318,7 +330,7 @@ export function saveCache(entries) {
  *
  * 附属文件（`-wal`）**只看 size**。原因是从实测里学到的：SQLite 的 wal 在
  * 没有新数据写入时，mtime 也会被读标记、checkpoint 元数据更新反复推动。
- * 本机实测两个库的 wal 连续三次采样 size 一模一样、mtime 却一直在走。
+ * 实测两个库的 wal 连续三次采样 size 一模一样、mtime 却一直在走。
  * 按 mtime 判，等于每次扫描都认定"变了"，Hermes 和 ZCode 会被无条件整库
  * 重解析——把真正该省的力气全花掉了。
  *
@@ -470,7 +482,7 @@ export function scanAll({ noCache = false, only = null } = {}) {
   const disabled = disabledAgents();
   // 只扫一部分时，必须**保留**其余 Agent 的缓存条目。
   // 否则保存时会把整份缓存覆盖成子集，下一次全量扫描等于全部重解析
-  // （本机实测 50 秒），而且用户完全看不出发生了什么。
+  // （实测 50 秒），而且用户完全看不出发生了什么。
   // 这里复制的是**已通过指纹校验**的那份；指纹只是元数据，
   // 复制过来无妨，保存时会用当前值覆盖。
   const nextCache = wanted ? { ...cache } : {};
@@ -488,6 +500,27 @@ export function scanAll({ noCache = false, only = null } = {}) {
     problems: [],
   };
 
+  /**
+   * 本轮扫描的输入快照（manifest）。
+   *
+   * 为什么挂在 stats 上而不是另写一份文件：README 卖的是"确定性的、
+   * 可复现的"，但三个月前那份 doctor 报告没法复现——不知道当时扫的是
+   * 哪些文件、哪一版工具。stats 本来就流经 doctor / CLI / MCP 三个出口，
+   * 快照跟着它走，每个出口天然都拿得到，也不引入"每次扫描多写一个文件"
+   * 的持续代价（cacheFile 已经每轮都写，输入指纹就在那里面）。
+   *
+   * manifestHash 是全部输入指纹的聚合：同一次输入算出同一个值，
+   * 两份报告想比"是不是同一批数据"，比这一个值就够。
+   */
+  const manifest = {
+    scannedAt: new Date().toISOString(),
+    toolVersion: toolVersion(),
+    nodeVersion: process.version,
+    platform: `${os.platform()}-${os.arch()}`,
+    byAgent: {},
+  };
+  const manifestParts = [];
+
   for (const scanner of scanners) {
     if (wanted && !wanted.has(scanner.name)) continue;
     if (disabled.has(scanner.name)) continue;
@@ -497,6 +530,8 @@ export function scanAll({ noCache = false, only = null } = {}) {
     } catch {
       files = [];
     }
+    const agentStat = { files: 0, sessions: 0, cacheHits: 0, failures: 0 };
+    manifest.byAgent[scanner.name] = agentStat;
 
     // 这一家的解析代码变了吗？没变才允许它的条目命中缓存。
     //
@@ -512,6 +547,7 @@ export function scanAll({ noCache = false, only = null } = {}) {
 
     for (const file of files) {
       stats.files++;
+      agentStat.files++;
       const key = file;
       const prev = cache[key];
 
@@ -529,7 +565,7 @@ export function scanAll({ noCache = false, only = null } = {}) {
         // 第二层只在 ctime 不可用时才做头部哈希。
         //
         // 以前这里是"stat 相同就再算头哈希"，代价是每个未变文件一次
-        // open+read，本机 2500 个文件约 0.7 秒。而 ctime 已经能识别
+        // open+read，实测 2500 个文件约 0.7 秒。而 ctime 已经能识别
         // "等长改写 + 回填 mtime"这一类伪装（实测三平台都会更新），
         // 只有极少数文件系统不提供 ctime 时才需要退回头哈希。
         if (statStamp.files[0].ctimeMs == null) {
@@ -546,6 +582,7 @@ export function scanAll({ noCache = false, only = null } = {}) {
       if (hit) {
         got = prev.sessions;
         stats.cached++;
+        agentStat.cacheHits++;
       } else {
         const res = parseFile(scanner, file);
         // 两种"这次没解析出东西"要分开处理：
@@ -558,7 +595,10 @@ export function scanAll({ noCache = false, only = null } = {}) {
         const emptied = res.ok && res.sessions.length === 0 && prev && prev.sessions.length > 0;
         if (!res.ok || emptied) {
           if (emptied) stats.emptied = (stats.emptied || 0) + 1;
-          else stats.failures++;
+          else {
+            stats.failures++;
+            agentStat.failures++;
+          }
           // 两个分支都要留身份，但 kind 必须分开：解析抛错是"我做不到"，
           // 解析为空是"文件还在、但里面没有我认识的东西"（多半正写到一半）。
           // 合成一类的话，用户看到一个永远修不好的计数，会开始无视它。
@@ -594,6 +634,9 @@ export function scanAll({ noCache = false, only = null } = {}) {
       nextCache[key] = { scanner: scanner.name, stamp: stampToStore, sessions: normalized };
       for (const s of normalized) sessions.push(deserialize(s));
       stats.byAgent[scanner.name] = (stats.byAgent[scanner.name] || 0) + normalized.length;
+      agentStat.sessions += normalized.length;
+      // 输入指纹进快照：同一批文件（含 size）算同一个 manifestHash
+      manifestParts.push(`${scanner.name}\t${pathKey(file)}\t${stampToStore.files[0].size}`);
     }
   }
 
@@ -616,6 +659,13 @@ export function scanAll({ noCache = false, only = null } = {}) {
   const grouped = applyPostProcessors(merged, stats, wanted);
   const enriched = applyEnrichers(grouped, stats, wanted);
   enriched.sort((a, b) => (b.end || b.start || 0) - (a.end || a.start || 0));
+  // 快照收尾：聚合哈希 + 去掉空家的占位（没扫到文件的保持零值，看得见"扫了但什么都没有"）
+  manifest.manifestHash = crypto
+    .createHash('sha256')
+    .update(manifestParts.sort().join('\n'))
+    .digest('hex')
+    .slice(0, 16);
+  stats.snapshot = manifest;
   return { sessions: enriched, stats };
 }
 
@@ -810,7 +860,7 @@ function isPlaceholder(title) {
  *
  * 为什么不用"返回空"当失败信号：我们的扫描器里，返回 null 有正当含义。
  * Copilot 的 16 个会话文件里 14 个 `requests` 是空数组（文件在但没有对话），
- * Codex 有 2 个 rollout 没有时间戳，这些都不是故障。本机实测把它们算成
+ * Codex 有 2 个 rollout 没有时间戳，这些都不是故障。实测把它们算成
  * 失败会凭空报出 15 个"解析失败"，正是这个项目一直在避免的那种假警报。
  *
  * "曾经能解析出会话、现在解析为空"是另一回事，交给调用方判断（见 scanAll）：
@@ -845,7 +895,7 @@ const PROBLEM_CAP = 50;
  * 记一条"失败的身份"。
  *
  * 只给计数的话，doctor 只能说"解析失败 3"，用户无法判断该不该修——
- * 是本机的某一个坏文件（可以删掉不管），还是整个 Agent 的适配坏了
+ * 是实测的某一个坏文件（可以删掉不管），还是整个 Agent 的适配坏了
  * （必须修）。这两种情况的处置完全不同，靠计数区分不出来。
  */
 function recordProblem(stats, problem) {
