@@ -399,7 +399,9 @@ const TOOLS = [
     title: '采集统计',
     description:
       '报告采集质量：多少会话、各 Agent 分布、索引规模、已生成的摘要数量。' +
-      '用它判断数据是否可信，或排查"为什么搜不到"。',
+      '用它判断数据是否可信，或排查"为什么搜不到"。' +
+      '返回里的 snapshot 是本轮扫描的输入凭据（工具版本、Node 版本、' +
+      'manifestHash）——两份报告比 manifestHash 就知道是不是同一批数据。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     handler: async () => {
       const { projects, totalSessions, stats, unbound } = listProjects({});
@@ -434,6 +436,10 @@ const TOOLS = [
         byAgent: mainByAgent,
         byAgentWithSubagents: stats.byAgent,
         withoutProject: unbound ? unbound.count : 0,
+        // 本轮扫描的输入快照：哪一版工具、哪个 Node、扫了哪些文件（聚合哈希）。
+        // 调用方拿两份报告比 manifestHash，就知道数据是不是同一批——
+        // 这是"可复现"承诺在 MCP 出口上的兑现，不加任何 IO。
+        snapshot: stats.snapshot,
         index: idx.exists
           ? {
               documents: idx.docs,
