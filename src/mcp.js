@@ -718,9 +718,10 @@ const TOOLS = [
     title: '各家 Agent 自己记的 token',
     description:
       '读各家 Agent 自己的用量账本（ZCode 的 model_usage、Hermes 的 session_model_usage、' +
-      'OpenCode 的 session、Claude Code 的 jsonl、Codex 的 threads.tokens_used），' +
-      '不需要本地网关。和 model_calls 互补：那个看的是经过网关的请求，这个看的是 Agent 自己记的账。' +
-      '重要：各家 input_tokens 含义不同（ZCode 含缓存读，OpenCode/Hermes 不含），' +
+      'OpenCode 的 session、Claude Code 的 jsonl、Codex 的 threads.tokens_used、' +
+      'DSH 会话事件里的 assistant/message.usage），不需要本地网关。' +
+      '和 model_calls 互补：那个看的是经过网关的请求，这个看的是 Agent 自己记的账。' +
+      '重要：各家 input_tokens 含义不同（ZCode 含缓存读，OpenCode/Hermes/DSH 不含），' +
       '这里统一换算成 fresh（不含缓存）后返回，semantics 标出每条的口径。' +
       '只有 Agent 自报过费用才有 cost；cost 为 null 表示"算不出来"，不是 0 元。',
     inputSchema: {

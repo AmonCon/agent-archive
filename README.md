@@ -91,7 +91,7 @@ codex       → claude-code     +17.6h 接续
 | ZCode | `~/.zcode/cli/db/db.sqlite` | `semantics.origin` 区分注入 |
 | OpenCode | `~/.local/share/opencode/opencode.db` | 与 ZCode 同源结构 |
 | Qoder | `~/.qoder[-cn]/projects/<工作区>/<uuid>.jsonl`（新）· `cache/projects/...`（旧） | 新格式带时间戳和 cwd；旧格式只能靠 mtime |
-| DeepSeek Harness | `$DSH_HOME/sessions/<cwd>/<session>/session.v<N>.jsonl[.zstd]` | 多帧 zstd；子代理跳过 |
+| DeepSeek Harness | `$DSH_HOME/sessions/<cwd>/<session>/session.v<N>.jsonl[.zstd]` | 多帧 zstd；子代理标 `kind=subagent`；用量层读 `assistant/message.usage` |
 | Hermes | **`~/.hermes/state.db`**（SQLite） | 多数无 cwd；`sessions/*.jsonl` 已废弃 |
 | Cursor | `%APPDATA%/Cursor/User/globalStorage/state.vscdb` | VSCode 键值库 |
 | Antigravity | `~/.gemini/antigravity/conversation_summaries.db` | 部分会话是加密 .pb |
@@ -1131,7 +1131,13 @@ node src/cli.js usage --by project     # 按项目（要先扫归档，把会话
 | Claude Code | 每条消息 | 44 | 82 万 | 332 万 | 80% |
 | Codex | 每场会话（只有总量） | 1,779 | 200.37 亿 | — | 口径未知 |
 
-### 同一列 `input_tokens`，四家有三种含义
+DSH 也走同一条路，只是它的 token 不在单独的账本表里，而是散在会话事件的
+`assistant/message.data.usage` 上：每个 `assistant/message` 就是一次模型请求，
+所以是请求级、可以按模型和日期拆开。它不报钱，`cost` 一律 `null`。
+DSH 的会话文件是多帧 zstd，读法和其他源的 SQLite / JSONL 不同（见
+`scanners/dsh.js` 的 `decompressFrames`）。
+
+### 同一列 `input_tokens`，五家有三种含义
 
 这是这一层唯一真正难的地方。字段名一样，含义不一样：
 
@@ -1140,10 +1146,11 @@ node src/cli.js usage --by project     # 按项目（要先扫归档，把会话
 | ZCode | `provider_total_tokens = input + output`，而 `cache_read` 是 `input` 的子集 | input **含**缓存 |
 | OpenCode | 某场 `cache_read` 6,600 万、`input` 310 万 | input **不含**缓存 |
 | Hermes | `cache_read` 2.2 亿 > `input` 7,500 万 | input **不含**缓存 |
+| DSH | `totalTokens` 恒等于 `input + output + cacheRead + cacheWrite` | input **不含**缓存 |
 | Codex | 只有 `threads.tokens_used` 一个会话级总量 | 看不出来 |
 
 所以每条记录都带 `semantic`，统一换算成 `fresh`（不含缓存的输入）之后再比。
-按字面把四家相加，ZCode 那 26 亿缓存读会被按全价算进去，结论差一个数量级。
+按字面把这几家相加，ZCode 那 26 亿缓存读会被按全价算进去，结论差一个数量级。
 
 Codex 这类"只有总量、口径未知"的来源单独列表，也不进缓存命中率——它和按请求
 记的数放在同一张表里排名，会让人以为它真的比别人贵三百倍。命中率的分母同样

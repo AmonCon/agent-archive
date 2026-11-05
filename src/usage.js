@@ -4,6 +4,7 @@ import path from 'node:path';
 import { openReadOnly, findVersionedDb } from './sqlite-read.js';
 import { priceFor, estimateCost } from './pricing.js';
 import { dayKey } from './model.js';
+import { statePath } from './paths.js';
 
 /**
  * 用量层：各家 Agent 自己记下的 token 消耗。
@@ -13,13 +14,15 @@ import { dayKey } from './model.js';
  *
  * ## 为什么不能把几个数直接相加
  *
- * 同一列 `input_tokens`，四家的含义不一样（实测，不是猜的）：
+ * 同一列 `input_tokens`，几家的含义不一样（实测，不是猜的）：
  *
  *   ZCode      input 含缓存。`provider_total_tokens = input + output`，
  *              而 cache_read 是 input 的子集 → 缓存读会被算成全价输入。
  *   OpenCode   input 不含缓存。实测某场 cache_read 6600 万、input 310 万，
  *              缓存读不可能大于总输入 → 只能是分开记的。
  *   Hermes     input 不含缓存。同样实测 cache_read(2.2 亿) > input(7500 万)。
+ *   DSH        input 不含缓存。`totalTokens` 恒等于 input + output +
+ *              cacheRead + cacheWrite，所以 input 是未缓存部分。
  *   Codex      只有 `threads.tokens_used` 一个会话级总量，没有缓存拆分，
  *              连它是哪种语义都看不出来。
  *
@@ -426,6 +429,212 @@ async function readCodex({ dbPath } = {}) {
   }
 }
 
+/* ------------------------------ DSH ------------------------------ */
+
+/**
+ * DSH（DeepSeek Harness）的会话日志：每个 `assistant/message` 事件就是一次
+ * 模型请求，`data.usage` 直接写在事件里，所以这一源是**请求级**的。
+ *
+ * ## 口径是算出来的，不是猜的
+ *
+ * 实测 8400+ 条真实 usage：`totalTokens === inputTokens + outputTokens +
+ * cacheReadTokens + cacheWriteTokens` 全部成立，说明 `inputTokens` 是
+ * **不含缓存**的输入（和 OpenCode / Hermes 同一种语义）。
+ *
+ * 但上游可能变。所以每条记录都拿 totalTokens 反推一次口径：
+ *   total == input+output+cacheRead+cacheWrite  → fresh（input 不含缓存）
+ *   total == input+output                        → total（input 含缓存，要减）
+ *   其他不一致                                     → unknown（不进命中率）
+ *   没有 total（实测 63 条，只多了 reasoningTokens）→ fresh
+ * 这样 DSH 哪天换了记账方式，这里不会静默算错——只会变成 unknown，被排除出
+ * 缓存命中率（与各家同一套处理）。
+ *
+ * ## 成本
+ *
+ * DSH 不报钱，所以 `cost` 一律 null：没有价就是没有价，不写 0。
+ *
+ * ## 性能
+ *
+ * 多帧 zstd 只能逐帧解，实测 106 个会话约 3 秒。按 `size:mtimeMs:ctimeMs`
+ * 落盘缓存，只重读变化的文件；缓存写失败只影响下次启动速度，不影响正确性。
+ */
+const DSH_CACHE_VERSION = 1;
+
+function dshCacheFile() {
+  return statePath('cache', `dsh-usage-v${DSH_CACHE_VERSION}.json`);
+}
+
+function loadDshCache() {
+  try {
+    const o = JSON.parse(fs.readFileSync(dshCacheFile(), 'utf8'));
+    if (o && o.version === DSH_CACHE_VERSION && o.entries && typeof o.entries === 'object') return o.entries;
+  } catch {
+    /* 没有或坏了，重读 */
+  }
+  return {};
+}
+
+function saveDshCache(entries) {
+  const file = dshCacheFile();
+  const tmp = `${file}.tmp-${process.pid}`;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify({ version: DSH_CACHE_VERSION, entries }), 'utf8');
+    fs.renameSync(tmp, file);
+  } catch {
+    /* 缓存写不进去只影响下次启动速度，不影响正确性 */
+  }
+}
+
+const dshNum = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/**
+ * 从 totalTokens 反推这一条的 input 口径。
+ * @returns {'fresh'|'total'|'unknown'}
+ */
+function dshSemantic(u, input, output, cacheRead, cacheWrite) {
+  const total = Number(u.totalTokens);
+  if (u.totalTokens == null || !Number.isFinite(total)) return 'fresh';
+  if (total === input + output + cacheRead + cacheWrite) return 'fresh';
+  if (total === input + output) return 'total';
+  return 'unknown';
+}
+
+/** 解析一个 DSH 会话文件；返回 { id, rows }，rows 用紧凑数组，便于落盘。 */
+function readDshFile(mod, file) {
+  let buf;
+  try {
+    buf = mod.decompressFrames(fs.readFileSync(file));
+  } catch {
+    return null;
+  }
+  let id = null;
+  let headerDone = false;
+  const rows = [];
+  for (const text of buf.toString('utf8').split('\n')) {
+    if (!text.trim()) continue;
+    if (!headerDone) {
+      headerDone = true;
+      try {
+        const h = JSON.parse(text);
+        if (h && h.type === 'session' && typeof h.id === 'string') id = h.id;
+      } catch {
+        /* header 坏了就退回目录名 */
+      }
+      continue;
+    }
+    // 廉价预筛：绝大多数行是 tool/result 等运行时事件，解析它们只是浪费。
+    if (!text.includes('"assistant/message"')) continue;
+    let o;
+    try {
+      o = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    if (!o || o.type !== 'assistant/message') continue;
+    const d = o.data || {};
+    const u = d.usage;
+    if (!u || typeof u !== 'object') continue;
+    const at = typeof o.time === 'number' ? o.time : null;
+    if (at == null) continue;
+    const input = dshNum(u.inputTokens);
+    const output = dshNum(u.outputTokens);
+    const cacheRead = dshNum(u.cacheReadTokens);
+    const cacheWrite = dshNum(u.cacheWriteTokens);
+    const reasoning = dshNum(u.reasoningTokens);
+    const model = (d.message && d.message.source && d.message.source.model) || null;
+    rows.push([
+      input,
+      output,
+      cacheRead,
+      cacheWrite,
+      reasoning,
+      at,
+      model,
+      dshSemantic(u, input, output, cacheRead, cacheWrite),
+    ]);
+  }
+  return { id: id || path.basename(path.dirname(file)), rows };
+}
+
+/** DSH：读所有会话文件里的 assistant/message.usage。 */
+async function readDsh({ files: filesOverride } = {}) {
+  let mod;
+  try {
+    mod = await import('./scanners/dsh.js');
+  } catch {
+    return { ready: false, reason: 'DSH 扫描器不可用' };
+  }
+
+  let files = Array.isArray(filesOverride) && filesOverride.length ? filesOverride : null;
+  if (!files) {
+    try {
+      files = mod.discover();
+    } catch {
+      files = [];
+    }
+  }
+  if (!files.length) return { ready: false, reason: '没有找到 DSH 的会话目录' };
+
+  const cached = loadDshCache();
+  const next = {};
+  const rows = [];
+  const fileSet = new Set(files);
+  let changed = false;
+
+  for (const file of files) {
+    let st;
+    try {
+      st = fs.statSync(file);
+    } catch {
+      // 暂时 stat 不到（被占用 / 正在删）：保留旧缓存，别把它当成"内容变了"。
+      if (cached[file]) next[file] = cached[file];
+      continue;
+    }
+    const stamp = `${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
+    const hit = cached[file];
+    let entry = hit && hit.stamp === stamp && Array.isArray(hit.rows) ? hit : null;
+    if (!entry) {
+      entry = readDshFile(mod, file);
+      changed = true;
+      if (entry) entry.stamp = stamp;
+    }
+    if (!entry) continue;
+    next[file] = entry;
+    for (const r of entry.rows) {
+      rows.push(
+        makeRow({
+          agent: 'dsh',
+          source: 'dsh',
+          fidelity: 'request',
+          at: r[5],
+          session: entry.id,
+          model: r[6],
+          calls: 1,
+          input: r[0],
+          output: r[1],
+          cacheRead: r[2],
+          cacheWrite: r[3],
+          reasoning: r[4],
+          semantic: r[7] || 'fresh',
+          cost: null,
+          costStatus: 'unknown',
+        })
+      );
+    }
+  }
+
+  // 会话文件被删掉时要顺手把缓存条目也删掉，否则缓存会一直长。
+  let pruned = false;
+  for (const key of Object.keys(cached)) if (!fileSet.has(key)) pruned = true;
+  if (changed || pruned) saveDshCache(next);
+  if (!rows.length) return { ready: false, reason: '有 DSH 会话但没有找到 token 记录' };
+  return { ready: true, fidelity: 'request', rows };
+}
+
 /* ------------------------------ 工具 ------------------------------ */
 
 /** 时间可能是毫秒数、秒数或 ISO 字符串，三种都见过。 */
@@ -456,6 +665,7 @@ export const SOURCES = [
   { id: 'opencode', display: 'OpenCode', read: readOpencode },
   { id: 'claude-code', display: 'Claude Code', read: readClaudeCode },
   { id: 'codex', display: 'Codex', read: readCodex },
+  { id: 'dsh', display: 'DSH', read: readDsh },
 ];
 
 /**
