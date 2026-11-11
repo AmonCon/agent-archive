@@ -1069,6 +1069,22 @@ node src/cli.js brief E:\my-app
 边界：它只陈列事实，不判断「做完没做完」。任务状态来自 `TodoWrite` / `TaskCreate`，
 没有可靠 id 对齐时不猜——宁可少说，不说错。
 
+## 配方：让 Agent 自己用
+
+档案馆本身不调模型。总结、周报、主题回顾交给**你正在用的 Agent**——
+它通过 MCP 来读事实，用你的模型写结论。
+
+三条可以直接复制的提示词：
+
+| 配方 | 场景 |
+|---|---|
+| [接手前速读](./docs/recipes/handoff-quickread.md) | 刚接手别人做过的项目，先搞清楚上一段做到哪 |
+| [项目周报](./docs/recipes/weekly-report.md) | 每周回顾这个项目发生了什么 |
+| [主题洞察](./docs/recipes/topic-insight.md) | 某个主题在多次对话里是怎么演变的 |
+
+每条配方都写了推荐的 MCP 工具调用顺序和输出格式。入口见
+[`docs/recipes/`](./docs/recipes/)。
+
 ## 导出：三种粒度
 
 | 命令 | 内容 | 用途 |
