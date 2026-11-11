@@ -41,8 +41,9 @@ function absProject(p) {
  * 数字虚高（实测 Codex 有 1322 场子代理，是主会话的两倍）。
  * `includeSubagents: true` 可以看全量，用于核对采集完整性。
  */
-export function listProjects({ noCache = false, showAll = false, includeSubagents = false } = {}) {
-  const scanned = scanCached({ noCache });
+export function listProjects({ noCache = false, showAll = false, includeSubagents = false, source = null } = {}) {
+  // P0：把 --source 显式透传给 scanCached；缺省 null 时严格走老本机路径（零全局状态）。
+  const scanned = scanCached({ noCache, source });
   const stats = scanned.stats;
   // 子会话数与主会话数分开报，两个数字都有意义
   const subagentCount = scanned.sessions.filter(isSubagent).length;

@@ -7,6 +7,7 @@ import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '
 import { envOverrides, pathKey } from '../platform.js';
 import { isDirEntry, isFileEntry } from '../fsentry.js';
 import { extraRoots } from '../config.js';
+import { rootsFor } from './kit.js';
 
 /**
  * DeepSeek Harness（dsh）会话扫描。
@@ -33,6 +34,25 @@ import { extraRoots } from '../config.js';
  */
 
 export const name = 'dsh';
+
+/**
+ * 结构声明（数据源解耦 P1）。应用根是 `.dsh` / `DeepSeekHarness` 那一层，
+ * 会话在 sessions 下各 cwd 目录的 session.vN.jsonl（可带 .zstd）。
+ * rootAnchor 从 sessions 上溯 1 层回到应用根。
+ */
+export const structureSpec = {
+  agent: name,
+  probes: [
+    { glob: 'sessions/*/*/session*.jsonl', kind: 'file', weight: 4 },
+    { glob: 'sessions/*/*/session*.jsonl.zstd', kind: 'file', weight: 3, optional: true },
+    { path: 'sessions', kind: 'dir', weight: 1 },
+  ],
+  rootAnchor: { from: 'sessions', up: 1 },
+  dataPaths: ['sessions'],
+  format: 'dsh-session-jsonl-zstd',
+  minScore: 4,
+  dirHints: ['.dsh', 'DeepSeekHarness', 'deepseek-harness'],
+};
 
 /** zstd 帧魔数。多帧文件里每帧都以它开头。 */
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
@@ -180,7 +200,7 @@ export function candidateRoots() {
   return dshDirs();
 }
 
-export function discover() {
+export function discoverWithin(roots, ctx = {}) {
   const out = [];
   // 文件级去重：即使两个候选根没被上面的 dshDirs() 合并掉（例如 junction、
   // 软链接、8.3 短名——它们 pathKey 不同但指向同一个文件），同一场会话
@@ -192,7 +212,7 @@ export function discover() {
     seen.add(k);
     out.push(file);
   };
-  for (const root of dshDirs()) {
+  for (const root of roots || []) {
     const sessions = path.join(root, 'sessions');
     let workspaces;
     try {
@@ -218,6 +238,11 @@ export function discover() {
     }
   }
   return out;
+}
+
+/** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
+export function discover() {
+  return discoverWithin(dshDirs(), {});
 }
 
 export function parse(file) {
@@ -290,8 +315,9 @@ export function parse(file) {
   });
 }
 
-export function readMessages(session) {
-  const roots = dshDirs().map((d) => path.join(d, 'sessions'));
+export function readMessages(session, ctx = {}) {
+  // 显式数据源：外部备份不在本机默认根下，用 ctx.roots 做越界校验才不会被误杀
+  const roots = rootsFor(name, ctx, () => dshDirs().map((d) => path.join(d, 'sessions')));
   if (!roots.length) throw new Error('没有找到 DeepSeek Harness 数据目录');
 
   const file = assertUnderAny(roots, session.source);

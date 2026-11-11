@@ -16,6 +16,7 @@ import {
 import { search, indexStats } from '../search.js';
 import { latestProjectDigest, latestSessionSummary } from '../digest.js';
 import { projectHandoffs, pickHandoffs } from '../handoff.js';
+import { projectBrief, briefMarkdown } from '../brief.js';
 import { quickFreshness } from '../refresh.js';
 import { durationMs, tildify } from '../model.js';
 import { buildTurns } from '../turns.js';
@@ -247,6 +248,7 @@ export async function pageTimeline(target, openAll) {
     h = null;
   }
   const mem = await projectMemoryInfo(r.target).catch(() => null);
+  const brief = h ? await projectBrief(r.target, { handoffs: h }).catch(() => null) : null;
 
   const dg = (() => {
     try {
@@ -326,6 +328,7 @@ export async function pageTimeline(target, openAll) {
     { label: '累计时长', value: fmtDur(summary.totalMs) || '—', sub: '各会话时长之和', icon: 'clock' },
   ])}
   ${handoffCard(h, mem, r.target)}
+  ${brief ? briefSection(brief) : ''}
   ${usage}
   ${dg ? digestCard({ dg, sessions: r.sessions, kind: 'project' }) : digestMissing(r.target)}
   <section class="card">
@@ -361,6 +364,7 @@ export async function pageTimeline(target, openAll) {
   </section>
   ${apiBlock([
     `GET /api/timeline?path=${encodeURIComponent(title)}`,
+    `GET /api/brief?path=${encodeURIComponent(title)}`,
     `GET /api/handoff?path=${encodeURIComponent(title)}`,
     `GET /api/agents?path=${encodeURIComponent(title)}`,
     `GET /api/digest?path=${encodeURIComponent(title)}`,
@@ -425,6 +429,96 @@ function handoffCard(h, mem, target) {
       <div class="handoff-v">${esc(memValue)}</div>
       <div class="handoff-sub">${memSub}</div>
     </div>
+  </section>`;
+}
+
+/**
+ * 交接单：项目页上给「下一个接手的人」看的一页事实。
+ *
+ * 与 handoffCard 的分工：handoffCard 只给三个指标（最后停在谁手上、换手断点、
+ * 项目记忆）；这里补的是「上一段具体干了什么」——摘录、文件、任务、最近会话。
+ * 全部来自记录，不调模型；渲染时也不做任何推断。
+ */
+function briefSection(b) {
+  if (!b || !b.lastRun) return '';
+  const asDate = (v) => (v ? new Date(v) : null);
+  const run = b.lastRun;
+  const projectFiles = b.files.filter((f) => f.inProject);
+  const shownFiles = (projectFiles.length ? projectFiles : b.files).slice(0, 12);
+  const fileRows = shownFiles.map(
+    (f) => `<tr><td><code>${esc(f.path)}</code></td><td class="num">${f.count}</td></tr>`
+  );
+  const openTasks = b.tasks.filter((t) => t.status !== 'done');
+  const shownTasks = openTasks.length ? openTasks : b.tasks;
+  const taskItems = shownTasks.map((t) => {
+    const box = t.status === 'done' ? '☑' : t.status === 'doing' ? '◐' : '☐';
+    return `<li><span class="brief-box">${box}</span>${esc(t.subject)}</li>`;
+  });
+  const doneTaskCount = b.tasks.length - openTasks.length;
+  const sessionRows = b.recentSessions.slice(0, 6).map((s) => {
+    const href = `/s?agent=${encodeURIComponent(s.agent)}&id=${encodeURIComponent(s.id)}`;
+    return `<tr>
+      <td class="nowrap">${esc(fmtDate(asDate(s.start)))}</td>
+      <td>${agentChip(s.agent)}</td>
+      <td><a class="row-link" href="${esc(href)}">${esc(oneLine(s.title || '(untitled)', 64))}</a></td>
+    </tr>`;
+  });
+
+  return `<section class="section" id="brief">
+    ${sectionHead({
+      title: '交接单',
+      desc: '给下一个接手的 Agent 看的一页事实：上一段做到哪、动过哪些文件、留下哪些任务。全部为记录摘录，未做模型推断。',
+      actions: `<a class="btn ghost sm" href="/api/brief?path=${encodeURIComponent(
+        b.project
+      )}" target="_blank" rel="noopener">${icon('terminal', 14)} JSON</a>
+      ${copyButton(briefMarkdown(b), '复制交接单 Markdown')}`,
+    })}
+    <div class="handoff-grid">
+      <div class="handoff-cell">
+        <div class="handoff-k">${icon('gitPull', 13)} 上一位接手</div>
+        <div class="handoff-v">${agentChip(run.agent)}</div>
+        <div class="handoff-sub">${run.count} 场 · ${esc(fmtDate(asDate(run.start)))} → ${esc(fmtDate(asDate(run.end)))}</div>
+      </div>
+      <div class="handoff-cell">
+        <div class="handoff-k">${icon('message', 13)} 最后停在</div>
+        <div class="handoff-v">${esc(oneLine(run.lastSession.title || '(untitled)', 28))}</div>
+        <div class="handoff-sub">${esc(fmtDate(asDate(run.lastSession.end)))} · <a href="/s?agent=${encodeURIComponent(
+          run.lastSession.agent
+        )}&id=${encodeURIComponent(run.lastSession.id)}">读这一场 →</a></div>
+      </div>
+      <div class="handoff-cell">
+        <div class="handoff-k">${icon('file', 13)} 这一段动过</div>
+        <div class="handoff-v">${b.files.length} 个文件 · ${openTasks.length} 项待办</div>
+        <div class="handoff-sub">${b.readErrors.length ? `${b.readErrors.length} 场正文读取失败` : '全部为记录摘录'}</div>
+      </div>
+    </div>
+    <div class="brief-quotes">
+      <div class="brief-quote">
+        <div class="brief-k">最后一句用户说</div>
+        <div class="brief-q">${esc(oneLine(run.lastUserText || '（无）', 400))}</div>
+      </div>
+      <div class="brief-quote">
+        <div class="brief-k">最后一条回复（截断）</div>
+        <div class="brief-q">${esc(oneLine(run.lastAssistantText || '（无）', 500))}</div>
+      </div>
+    </div>
+    ${
+      fileRows.length
+        ? `<div class="brief-block"><h3 class="brief-h">动过的文件</h3>${table({
+            head: ['文件', { label: 'Write/Edit', num: true }],
+            rows: fileRows,
+          })}</div>`
+        : ''
+    }
+    ${taskItems.length ? `<div class="brief-block"><h3 class="brief-h">留下的任务</h3><ul class="brief-tasks">${taskItems.join('')}</ul>${doneTaskCount && openTasks.length ? `<p class="brief-note">另有 ${doneTaskCount} 项已完成，未列出。</p>` : ''}</div>` : ''}
+    ${
+      sessionRows.length
+        ? `<div class="brief-block"><h3 class="brief-h">这一段最近几场</h3>${table({
+            head: ['开始时间', 'Agent', '标题'],
+            rows: sessionRows,
+          })}</div>`
+        : ''
+    }
   </section>`;
 }
 

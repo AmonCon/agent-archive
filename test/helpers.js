@@ -157,6 +157,51 @@ export async function withEnv(vars, fn) {
   }
 }
 
+/**
+ * 数据源（source）测试用的隔离盒子。
+ *
+ * 与 sandbox() 的关键区别：**只重定向工具自己的状态目录 AGENT_ARCHIVE_HOME，
+ * 绝不改 HOME/USERPROFILE/APPDATA 去把本机伪装成另一台机器**。数据来自
+ * tempDir 里的一份合成目录，正是要证明的「不靠伪装本机也能解出别处的数据」。
+ * 所有缓存/索引/配置都落进盒内的 state，不污染真实家目录。
+ *
+ * run(fn) 只注入 AGENT_ARCHIVE_HOME，其余环境（含真实 home）保持原样；
+ * 需要额外的官方覆盖变量（如 CODEX_HOME 毒丸）由用例自己用 withEnv 叠加。
+ */
+export function sourceBox(prefix = 'aa-source-') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const state = path.join(dir, 'state');
+  fs.mkdirSync(state, { recursive: true });
+
+  return {
+    dir,
+    state,
+    path: (...p) => path.join(dir, ...p),
+    write(rel, content) {
+      const full = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, content);
+      return full;
+    },
+    mkdir(rel) {
+      const full = path.join(dir, rel);
+      fs.mkdirSync(full, { recursive: true });
+      return full;
+    },
+    /** 在隔离的状态目录下跑 fn（不动 HOME） */
+    async run(fn) {
+      return withEnv({ AGENT_ARCHIVE_HOME: state }, fn);
+    },
+    cleanup() {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* Windows 上偶发占用，忽略 */
+      }
+    },
+  };
+}
+
 /** 造一条 Codex rollout 行。 */
 export function codexLine(type, payload, timestamp) {
   return JSON.stringify({ timestamp, type, payload }) + '\n';

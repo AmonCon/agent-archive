@@ -1,0 +1,8 @@
+{
+  "messages": [
+    { "role": "user", "ts": 1793836801000, "content": [{ "type": "text", "text": "演示：帮我重构这个函数" }] },
+    { "role": "assistant", "ts": 1793836802000, "content": [{ "type": "text", "text": "好的，我看一下" }], "modelInfo": { "id": "demo-model" }, "metrics": { "inputTokens": 10, "outputTokens": 5, "cacheReadTokens": 0, "cacheWriteTokens": 0 } },
+    { "role": "user", "ts": 1793836803000, "content": "再改一版" },
+    { "role": "assistant", "ts": 1793836804000, "content": [{ "type": "text", "text": "改好了" }], "modelInfo": { "id": "demo-model" }, "metrics": { "inputTokens": 12, "outputTokens": 6, "cacheReadTokens": 0, "cacheWriteTokens": 0 } }
+  ]
+}

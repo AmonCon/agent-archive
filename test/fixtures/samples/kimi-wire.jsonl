@@ -1,0 +1,5 @@
+{"type":"metadata","protocol_version":"1.5"}
+{"type":"agent.message.appended","time":1700000001000,"message":{"message":{"role":"user","content":[{"type":"text","text":"Fix this project"}]}}}
+{"type":"agent.message.appended","time":1700000002000,"message":{"message":{"role":"assistant","content":[{"type":"text","text":"Fixed"}],"toolCalls":[]},"meta":{"usage":{"inputOther":10,"output":20,"inputCacheRead":30,"inputCacheCreation":0}}}}
+{"type":"usage.record","agentId":"main","model":"k2","usage":{"inputOther":10,"output":20,"inputCacheRead":30,"inputCacheCreation":0},"time":1700000003000}
+{"type":"context.append_loop_event","event":{"type":"step.end"},"time":1700000004000}

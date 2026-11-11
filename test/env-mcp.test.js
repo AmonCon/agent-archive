@@ -211,3 +211,108 @@ test('mcp: 一个配置都没有时返回空，不报错', async () => {
     box.cleanup();
   }
 });
+
+test('mcp: DSH 的 MCP 在 profile patch 里，不是 mcpServers', async () => {
+  const box = sandbox();
+  try {
+    // 这是真实形状：同一个文件里还装着一堆 UI 插件，只有 name 是
+    // @deepseek-ai/dsh-mcp-client 的条目才是 MCP server。
+    box.write(
+      'DeepSeekHarness/profiles/desktop/cordis.patch.yml',
+      `- id: ui-context-menu
+  config:
+    resolutionTimeoutMs: 3000
+- insert:
+    - id: magpie-mcp-magpie-image
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: "magpie-image"
+        transport: "stdio"
+        command: "C:\\Program Files\\magpie\\magpie.exe"
+        args: [ "mcp", "image" ]
+    - id: dsh-context
+      name: dsh-context
+`
+    );
+
+    const r = await scan(box);
+    assert.equal(r.errors.length, 0, JSON.stringify(r.errors));
+    assert.equal(r.registrations.length, 1);
+    const reg = r.registrations[0];
+    assert.equal(reg.agent, 'dsh');
+    assert.equal(reg.name, 'magpie-image');
+    assert.deepEqual(reg.args, ['mcp', 'image']);
+    assert.equal(reg.transport, 'stdio');
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('mcp: 缺 command/url 的条目算"配坏了"，不静默跳过', async () => {
+  const box = sandbox();
+  try {
+    box.write(
+      '.claude/settings.json',
+      JSON.stringify({
+        mcpServers: {
+          broken: { type: 'stdio', args: ['x'] },
+          ok: { command: 'node', args: ['server.js'] },
+        },
+      })
+    );
+
+    const r = await scan(box);
+    assert.equal(r.registrations.length, 1, '坏条目不能算成服务');
+    assert.equal(r.invalid.length, 1);
+    assert.match(r.invalid[0].problem, /缺少 command/);
+    assert.equal(r.files.find((f) => f.agent === 'claude-code').invalid, 1);
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('mcp: stdio 命令不在 PATH 上会被标出来（静态检查，不执行）', async () => {
+  const box = sandbox();
+  try {
+    box.write(
+      '.claude/settings.json',
+      JSON.stringify({
+        mcpServers: {
+          ghost: { command: 'definitely-not-a-real-command-xyz', args: [] },
+        },
+      })
+    );
+    const r = await scan(box);
+    assert.equal(r.registrations.length, 1);
+    assert.equal(r.registrations[0].commandFound, false);
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('mcp: 被客户端停用的条目仍列出，但不算可用能力', async () => {
+  const box = sandbox();
+  try {
+    box.write(
+      '.claude.json',
+      JSON.stringify({
+        mcpServers: {
+          offByList: { command: 'node', args: ['a.js'] },
+          offByField: { command: 'node', args: ['b.js'], enabled: false },
+          live: { command: 'node', args: ['c.js'] },
+        },
+        disabledMcpServers: ['offByList'],
+      })
+    );
+    const r = await scan(box);
+    assert.equal(r.registrations.length, 3, '停用的也要列出来');
+    assert.equal(r.registrations.filter((x) => x.enabled === false).length, 2);
+    const { mcpSummary } = await import('../src/env/mcp.js');
+    const s = await box.run(() => mcpSummary());
+    assert.equal(s.disabled, 2);
+    assert.equal(s.list.filter((x) => x.disabled).length, 2, '两个停用条目各自成一个服务');
+    assert.equal(s.list.filter((x) => !x.disabled).length, 1, 'live 是唯一可用的');
+  } finally {
+    box.cleanup();
+  }
+});

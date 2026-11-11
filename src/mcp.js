@@ -307,6 +307,56 @@ const TOOLS = [
     },
   },
   {
+    name: 'project_brief',
+    title: '项目交接单',
+    description:
+      '把某个项目**上一位 Agent 最后一段工作**压成一页事实：停在哪个会话、最后说了什么、动过哪些文件、' +
+      '留下哪些任务、最近几场会话、上一次换手。**不调模型、不花钱**，全部是会话记录的摘录。' +
+      '**用途**：接手别人做过的项目时先调这个，再决定要不要 read_session 深挖；' +
+      '它比 read_digest 可靠（不依赖预先生成），比逐场读正文省上下文。' +
+      '注意：它只陈述事实，不判断"做完没做完"；任务状态见字段本身。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: '项目路径，如 E:/my-app 或 .' },
+        readSessions: {
+          type: 'number',
+          description: '读最近几场会话正文来抽文件和任务（默认 6，0 = 不读正文，只给元数据）',
+        },
+        recentSessions: {
+          type: 'number',
+          description: '最近会话列表条数（默认 10，上限 50）',
+        },
+      },
+      required: ['project'],
+      additionalProperties: false,
+    },
+    handler: async ({ project, readSessions = 6, recentSessions = 10 }) => {
+      const { projectBrief } = await import('./brief.js');
+      const b = await projectBrief(project, {
+        readSessions: Math.min(Math.max(Number(readSessions) || 0, 0), 20),
+        recentSessions: Math.min(Math.max(Number(recentSessions) || 10, 1), 50),
+      });
+      if (!b.sessions) return { error: `项目 ${project} 下没有找到会话` };
+
+      return {
+        project: tildify(b.project),
+        generatedAt: b.generatedAt,
+        sessions: b.sessions,
+        agents: b.agents,
+        first: b.first,
+        last: b.last,
+        lastRun: b.lastRun,
+        previous: b.previous,
+        files: b.files,
+        tasks: b.tasks,
+        recentSessions: b.recentSessions,
+        readErrors: b.readErrors,
+        deterministic: true,
+      };
+    },
+  },
+  {
     name: 'read_digest',
     title: '读项目摘要',
     description:
@@ -513,9 +563,10 @@ const TOOLS = [
       properties: {
         type: {
           type: 'string',
-          enum: ['overview', 'mcp', 'cli', 'skills', 'usage', 'memory', 'audit'],
+          enum: ['overview', 'mcp', 'providers', 'cli', 'skills', 'usage', 'memory', 'audit'],
           description:
             'overview=每个 Agent 一行的总览（默认）；mcp=MCP 服务清单，含跨 Agent 归并；' +
+            'providers=模型渠道清单（同一 base_url 的多家配置算一个渠道，只报凭证形态不读值）；' +
             'cli=命令行产品、安装位置与各 Agent 的调用；skills=技能清单；' +
             'usage=技能使用率（哪些真被调用过）；memory=记忆与指令文件；audit=体检与建议',
         },
@@ -547,6 +598,18 @@ const TOOLS = [
           registrations: inv.mcp.registrations,
           note: '同一服务在多家的注册已按启动指纹归并。环境变量只给键名，值不读取。',
           mixedForms: inv.mcp.mixedForms,
+          list: list.slice(0, cap),
+          truncated: list.length > cap,
+        };
+      }
+
+      if (type === 'providers') {
+        const list = agent ? inv.providers.list.filter((c) => c.agents.includes(agent)) : inv.providers.list;
+        return {
+          channels: inv.providers.channels,
+          registrations: inv.providers.registrations,
+          note: '同一 base_url 的多家配置归并成一个渠道。凭证只报形态（inline/env/oauth）与环境变量名，值不读取。',
+          filesUnknown: inv.providers.filesUnknown,
           list: list.slice(0, cap),
           truncated: list.length > cap,
         };
@@ -919,7 +982,8 @@ async function dispatch(msg) {
         serverInfo: { name: 'agent-archive', version: '0.1.0' },
         instructions:
           '这是本机跨 Agent 的档案馆，只读。它有四层：' +
-          '**会话层**——list_projects 看有哪些项目 → read_digest 看有没有现成的交接摘要 → ' +
+          '**会话层**——list_projects 看有哪些项目 → project_brief 看上一段做到哪、动过哪些文件（不花钱） → ' +
+          'read_digest 看有没有现成的模型摘要 → ' +
           '没有的话用 search_sessions 或 project_timeline 定位 → read_session 读正文（会截断，按需分段）。' +
           '要接手一个别人做过的项目时，先调 project_handoffs 看它是被哪些 Agent 轮流做过的、' +
           '换手间隔多长——间隔长的地方就是上下文最容易丢的地方，值得优先读那场会话。' +

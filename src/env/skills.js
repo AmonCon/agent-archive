@@ -222,7 +222,11 @@ function parseFrontmatter(text) {
     if (!kv) continue;
 
     const [, key, rawVal] = kv;
-    if (!['name', 'description', 'version', 'license', 'author'].includes(key)) continue;
+    // disable-model-invocation / enabled 是"这个技能能不能被模型主动调用"的
+    // 开关（magpie 叫 Manual）；只读元数据，不据此写任何配置。
+    if (!['name', 'description', 'version', 'license', 'author', 'disable-model-invocation', 'enabled'].includes(key)) {
+      continue;
+    }
 
     let val = rawVal.trim();
 
@@ -239,7 +243,12 @@ function parseFrontmatter(text) {
       continue;
     }
 
-    out[key] = unquoteYaml(val);
+    const unquoted = unquoteYaml(val);
+    if (key === 'disable-model-invocation' || key === 'enabled') {
+      out[key] = /^true$/i.test(unquoted) ? true : /^false$/i.test(unquoted) ? false : unquoted;
+      continue;
+    }
+    out[key] = unquoted;
   }
 
   return out;
@@ -356,6 +365,9 @@ function readSkill(dir, agent, viaSymlink = false) {
     dirName,
     description: fm.description || '',
     version: fm.version || null,
+    // 手动技能：只能用户自己 /name 调起，模型不能主动选。算"能力"时
+    // 要单独标出来——否则「我有 300 个技能」里混着 200 个模型根本用不上的。
+    manual: fm['disable-model-invocation'] === true,
     hash: crypto.createHash('sha256').update(buf).digest('hex').slice(0, 16),
     path: dir,
     realPath,
@@ -376,6 +388,7 @@ function readSkill(dir, agent, viaSymlink = false) {
 export function scanSkills() {
   const installs = [];
   const roots = [];
+  const errors = [];
   const seenPaths = new Set();
 
   for (const src of ROOTS) {
@@ -394,12 +407,18 @@ export function scanSkills() {
       try {
         st = fs.statSync(root);
         if (!st.isDirectory()) continue;
-      } catch {
+      } catch (e) {
+        // 不存在 = 这家没装技能（正常）。权限/IO 错误 = 未知，必须报出来，
+        // 否则「没权限读」会被显示成「0 个技能」。
+        if (e && e.code !== 'ENOENT') {
+          roots.push({ agent: src.agent, root, status: 'unreadable', found: 0, shared: Boolean(src.shared) });
+          errors.push({ root, agent: src.agent, error: `读不到：${e.code || e.message}` });
+        }
         continue;
       }
 
       const found = findSkillDirs(root, src.depth);
-      roots.push({ agent: src.agent, root, found: found.length, shared: Boolean(src.shared) });
+      roots.push({ agent: src.agent, root, status: 'ok', found: found.length, shared: Boolean(src.shared) });
 
       // 只保留最新版本的根（插件缓存这类按版本堆积的目录）：
       // 同一个技能名在同一插件下可能留了七八个历史版本，
@@ -427,7 +446,7 @@ export function scanSkills() {
   }
 
   saveSkillCache();
-  return { installs, roots, errors: [] };
+  return { installs, roots, errors };
 }
 
 /**
@@ -475,10 +494,98 @@ function compareVersion(a, b) {
   return 0;
 }
 
+const SKIP_TREE_DIRS = new Set([
+  'node_modules',
+  '.git',
+  '__pycache__',
+  '.venv',
+  'venv',
+  '.tox',
+  '.mypy_cache',
+  '.pytest_cache',
+  'dist',
+  'build',
+  '.next',
+  'coverage',
+]);
+const SKIP_TREE_FILES = /^(\.DS_Store|Thumbs\.db|.*\.log|.*\.pyc)$/i;
+
+/** 整树哈希缓存：key = 目录，value = {stamp, hash}。只有同哈希组需要细查时才走这里。 */
+const treeHashCache = new Map();
+
+/**
+ * 技能文件夹的**整树哈希**。
+ *
+ * 只 hash SKILL.md 会把「同名同描述、脚本不同」的两份技能合成一个能力——
+ * 这正是 magpie 的 Skill.Hash/ownHash 防的事。这里只在**两份技能的
+ * SKILL.md 完全相同**时才细查整棵树（廉价路径优先），所以平时不多付 IO。
+ *
+ * 排除安装产物（node_modules/.git/__pycache__/dist 等）：它们不是技能内容，
+ * 而且体积可能远大于技能本身。
+ */
+function treeHashOf(dir) {
+  let st0;
+  try {
+    st0 = fs.statSync(dir);
+  } catch {
+    return null;
+  }
+  const cached = treeHashCache.get(dir);
+  if (cached && cached.stamp === st0.mtimeMs) return cached.hash;
+
+  const entries = [];
+  let files = 0;
+  let bytes = 0;
+  let maxMtime = st0.mtimeMs;
+
+  const walk = (d, rel, depth) => {
+    if (depth > 6 || files > 400 || bytes > 8 * 1024 * 1024) return;
+    let list;
+    try {
+      list = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    for (const e of list) {
+      if (SKIP_TREE_DIRS.has(e.name) || SKIP_TREE_FILES.test(e.name)) continue;
+      const full = path.join(d, e.name);
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        walk(full, r, depth + 1);
+        continue;
+      }
+      if (!e.isFile()) continue;
+      let buf;
+      try {
+        buf = fs.readFileSync(full);
+      } catch {
+        continue;
+      }
+      try {
+        maxMtime = Math.max(maxMtime, fs.statSync(full).mtimeMs);
+      } catch {
+        /* 刚被删：按已读内容算 */
+      }
+      files++;
+      bytes += buf.length;
+      entries.push(`${r}\0${crypto.createHash('sha256').update(buf).digest('hex')}`);
+    }
+  };
+  walk(dir, '', 0);
+
+  const hash = crypto.createHash('sha256').update(entries.join('\n')).digest('hex').slice(0, 16);
+  treeHashCache.set(dir, { stamp: maxMtime, hash });
+  return hash;
+}
+
 /**
  * 按内容哈希聚合：同一份技能装在几个地方算一个能力。
  *
  * 哈希缺失（文件读不到 / 太大）的那些单独按名字归，标记 `hashMissing`。
+ *
+ * 同一 SKILL.md 哈希但来自不同真实路径的，会用整树哈希再分一次：
+ * 「同名同描述、脚本不同」是两份技能，不是一份。
  */
 export function groupByHash(installs) {
   const map = new Map();
@@ -499,6 +606,7 @@ export function groupByHash(installs) {
         locations: [],
         bytes: s.bytes,
         hashMissing: !s.hash,
+        members: [],
       };
       map.set(key, g);
     }
@@ -510,6 +618,7 @@ export function groupByHash(installs) {
     g.agents.add(s.agent);
     g.names.add(s.name);
     if (s.dirName) g.dirNames.add(s.dirName);
+    g.members.push(s);
     g.locations.push({
       agent: s.agent,
       path: s.path,
@@ -519,20 +628,55 @@ export function groupByHash(installs) {
     });
   }
 
-  const out = [];
+  // 同 SKILL.md 哈希、不同真实路径：整树再确认一次
+  const split = [];
   for (const g of map.values()) {
+    const realPaths = [...new Set(g.members.map((m) => m.realPath || m.path))];
+    if (!g.hash || realPaths.length < 2) {
+      split.push(g);
+      continue;
+    }
+    const byTree = new Map();
+    for (const m of g.members) {
+      const th = treeHashOf(m.realPath || m.path) || g.hash;
+      const k = `${g.hash}:${th}`;
+      let sub = byTree.get(k);
+      if (!sub) {
+        sub = {
+          ...g,
+          key: k,
+          treeHash: th,
+          versions: new Set(),
+          agents: new Set(),
+          names: new Set(),
+          dirNames: new Set(),
+          locations: [],
+          members: [],
+        };
+        byTree.set(k, sub);
+      }
+      if (m.version) sub.versions.add(m.version);
+      sub.agents.add(m.agent);
+      sub.names.add(m.name);
+      if (m.dirName) sub.dirNames.add(m.dirName);
+      sub.members.push(m);
+      sub.locations.push({ agent: m.agent, path: m.path, symlink: m.viaSymlink });
+    }
+    split.push(...byTree.values());
+  }
+
+  const out = [];
+  for (const g of split) {
     out.push({
       name: g.name,
       // 同一个技能在不同 Agent 里可能装成不同**目录名**（frontmatter 的
       // name 一样，目录却叫 alpha-copy）。这些才是真正需要展示的别名：
       // 按名字认会把它当成两个技能。
-      //
-      // 注意不是按 frontmatter 的 name 收集——哈希覆盖整份 SKILL.md，
-      // 同名不同内容必然不同哈希，所以同一个哈希组里不可能有第二个 name。
-      // 那个字段曾经是死代码。
       aliases: [...g.dirNames].filter((n) => n !== g.name).sort(),
       description: g.description,
       hash: g.hash,
+      // 整树哈希只在"同 SKILL.md 的不同副本"之间才有；没有歧义时为 undefined
+      treeHash: g.treeHash,
       hashMissing: g.hashMissing,
       versions: [...g.versions].sort(),
       agents: [...g.agents].sort(),
@@ -541,6 +685,8 @@ export function groupByHash(installs) {
       // 其中有多少是符号链接。全是链接说明只维护了一份，
       // 这是最好的状态；有真有假说明有人手工复制过，会漂。
       symlinked: g.locations.filter((l) => l.symlink).length,
+      // 整组都是手动技能才算手动（一组里有一份能被模型调起，这一组就不是纯手动的）
+      manual: g.members.length > 0 && g.members.every((m) => m.manual),
       locations: g.locations,
     });
   }
@@ -555,7 +701,7 @@ export function groupByHash(installs) {
  * 这里给的是清单，深看某个技能要显式按名字取。
  */
 export function skillSummary({ includeLocations = false } = {}) {
-  const { installs, roots } = scanSkills();
+  const { installs, roots, errors } = scanSkills();
   const groups = groupByHash(installs);
 
   return {
@@ -565,6 +711,11 @@ export function skillSummary({ includeLocations = false } = {}) {
     // 后者才是这台机器的真实能力面
     shared: groups.filter((g) => g.agents.length > 1).length,
     single: groups.filter((g) => g.agents.length === 1).length,
+    // 模型不能主动调用的技能（frontmatter disable-model-invocation）
+    manualOnly: groups.filter((g) => g.manual).length,
+    // 读不到的根：未知 ≠ 零
+    rootsUnknown: errors.length,
+    errors,
     roots: roots.filter((r) => r.found > 0),
     byAgent: countBy(installs, (s) => s.agent),
     list: groups.map((g) => ({
@@ -574,6 +725,9 @@ export function skillSummary({ includeLocations = false } = {}) {
       description: clip(g.description, 200),
       aliases: g.aliases.length ? g.aliases : undefined,
       versions: g.versions.length > 1 ? g.versions : undefined,
+      // 同名同描述但脚本不同：整树哈希把它们分开了，标出来
+      treeHash: g.treeHash,
+      manual: g.manual || undefined,
       locations: includeLocations ? g.locations : undefined,
     })),
   };

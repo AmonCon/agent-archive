@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"pi-tree-demo","timestamp":"2026-11-05T00:00:00.000Z","cwd":"/work/pi-demo"}
+{"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-05T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"演示：这个会话怎么跑"}]}}
+{"type":"message","id":"dead","parentId":"u1","timestamp":"2026-11-05T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"被撤销的回答"}],"provider":"anthropic","model":"demo-model"}}
+{"type":"message","id":"u2","parentId":"u1","timestamp":"2026-11-05T00:00:03.000Z","message":{"role":"user","content":[{"type":"text","text":"换个问法再试一次"}]}}
+{"type":"message","id":"live","parentId":"u2","timestamp":"2026-11-05T00:00:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"在用的回答"}],"provider":"anthropic","model":"demo-model"}}

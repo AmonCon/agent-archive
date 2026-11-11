@@ -36,7 +36,9 @@ import { tildify } from './model.js';
 /**
  * 会话存储的典型子目录名。命中一个就说明"这里像会话存储"。
  */
-const SESSION_DIRS = new Set([
+// 导出给 src/structure.js 复用：识别层与反向发现必须共用同一套「像会话」的判据，
+// 否则两边各写一份，迟早出现「一处认、一处不认」的漂移。
+export const SESSION_DIRS = new Set([
   'sessions',
   'session',
   'threads',
@@ -59,13 +61,13 @@ const SESSION_DIRS = new Set([
  * 和 `pgAdmin`（一个 .db）都报成"疑似会话存储"——包管理器缓存和数据库工具
  * 跟 Agent 无关，报出来只会让人不再信任这个列表。
  */
-const NAME_HINT = /session|chat|convers|thread|history|transcript|agent|assistant|prompt/i;
+export const NAME_HINT = /session|chat|convers|thread|history|transcript|agent|assistant|prompt/i;
 
 /** 会话存储的典型文件后缀。 */
-const SESSION_EXT = /\.(jsonl|jsonl\.zst|jsonl\.zstd|zst|zstd|sqlite|sqlite3|db|vscdb)$/i;
+export const SESSION_EXT = /\.(jsonl|jsonl\.zst|jsonl\.zstd|zst|zstd|sqlite|sqlite3|db|vscdb)$/i;
 
 /** 明显不是会话存储的目录名，跳过以免噪声淹没结果。 */
-const SKIP_NAMES = new Set([
+export const SKIP_NAMES = new Set([
   'node_modules',
   '.git',
   'cache',
@@ -92,7 +94,7 @@ const SKIP_NAMES = new Set([
  * 会话存储"——那是苹果自己的远程管理组件，不是 AI Agent。这类 `com.apple.*`
  * 目录一律跳过：用户不会想看到"你可能有苹果的新 AI 工具"。
  */
-const SYSTEM_PREFIXES = ['com.apple.'];
+export const SYSTEM_PREFIXES = ['com.apple.'];
 
 /**
  * 扫一遍实测，返回可疑但未适配的会话存储候选。
@@ -105,6 +107,8 @@ const SYSTEM_PREFIXES = ['com.apple.'];
  * @param {number} [opts.maxDepth] 每个候选内部向下看几层（默认 3）
  * @param {number} [opts.maxEntries] 单个候选最多看多少个目录项（默认 500）
  * @param {number} [opts.limit] 最多返回多少条（默认 12）
+ * @param {string[]} [opts.roots] 显式给定的扫描根（数据源解耦用）。给了就直接扫这些根，
+ *   不再按 home/平台约定推导；**不给时走原来的 scanRoots，输出逐字不变**。
  */
 export function scanUnknownStores(opts = {}) {
   const home = opts.home || os.homedir();
@@ -116,7 +120,11 @@ export function scanUnknownStores(opts = {}) {
   const maxEntries = opts.maxEntries ?? 300;
   const limit = opts.limit ?? 12;
 
-  const roots = scanRoots(home, platform, env);
+  // 显式数据源：根由调用方给，不再猜 home/平台约定。没给 roots 时保持原样，
+  // 连 scanRoots 的调用参数都不变——不给 roots 的输出必须逐字不变。
+  const roots = Array.isArray(opts.roots) && opts.roots.length
+    ? opts.roots
+    : scanRoots(home, platform, env);
   const candidates = [];
 
   for (const root of roots) {

@@ -523,10 +523,11 @@ export function detectGaps() {
     {
       name: 'Cline',
       agent: 'cline',
-      paths: [{ p: homePath('.cline/data/db/sessions.db'), kind: 'sqlite' }],
-      // 实测 2026-10：所有库 0 行，-wal 的几十 KB 全是建表 schema 页，
-      // 扩展本身也没装。不是"没找到"，是确实没有对话数据。
-      blocked: '本机无数据（库全空，扩展未安装）',
+      // 2026-11-05 补了 cline 扫描器后改口径：旧的 .cline/data/db/sessions.db
+      // 是加密/空库（实测 0 行），但真正的会话在 MAGPIE 描述的
+      // data/sessions/<id>/<id>.json + <id>.messages.json（整份重写的 JSON）。
+      // 已能读，去掉 blocked；留着会出现「已接入 cline」与「读不了」自相矛盾。
+      paths: [{ p: homePath('.cline/data/sessions'), kind: 'dir' }],
     },
     {
       name: 'OpenCode',
@@ -591,6 +592,59 @@ export function detectGaps() {
       paths: [
         { p: homePath('.workbuddy/projects'), kind: 'dir' },
         { p: homePath('.workbuddy-ai/projects'), kind: 'dir' },
+      ],
+    },
+    // 第四轮补覆盖面（2026-11-05）：按 CC Switch / MAGPIE 会话层对齐新增 8 家。
+    // paths 只作兜底——已接入的家由 detectGaps() 优先取 scanner.candidateRoots()（见下方循环）。
+    // 这些条目让覆盖率体检能报出它们的 present/supported，也让 knownPathsFromGaps()
+    // 排除得到它们，避免反向发现把「已适配」目录误报成「未适配」。
+    {
+      name: 'Gemini CLI',
+      agent: 'gemini',
+      paths: [{ p: homePath('.gemini/tmp'), kind: 'dir' }],
+    },
+    {
+      name: 'OpenClaw',
+      agent: 'openclaw',
+      paths: [
+        { p: homePath('.openclaw/agents'), kind: 'dir' },
+        { p: homePath('.openclaw-autoclaw/agents'), kind: 'dir' },
+      ],
+    },
+    {
+      name: 'CodeBuddy',
+      agent: 'codebuddy',
+      paths: [{ p: homePath('.codebuddy/projects'), kind: 'dir' }],
+    },
+    {
+      name: 'Pi',
+      agent: 'pi',
+      paths: [{ p: homePath('.pi/agent/sessions'), kind: 'dir' }],
+    },
+    {
+      name: 'Oh My Pi',
+      agent: 'omp',
+      paths: [{ p: homePath('.omp/agent/sessions'), kind: 'dir' }],
+    },
+    {
+      name: 'Kimi Code',
+      agent: 'kimi',
+      paths: [{ p: homePath('.kimi-code/sessions'), kind: 'dir' }],
+    },
+    {
+      name: 'Grok Build',
+      agent: 'grokbuild',
+      paths: [
+        { p: homePath('.grok/sessions'), kind: 'dir' },
+        { p: homePath('.grok/archived_sessions'), kind: 'dir' },
+      ],
+    },
+    {
+      name: 'MiniMax Code',
+      agent: 'mcode',
+      paths: [
+        { p: homePath('.minimax/v2/sqlite'), kind: 'dir' },
+        { p: homePath('.minimax/v2/sessions'), kind: 'dir' },
       ],
     },
   ];

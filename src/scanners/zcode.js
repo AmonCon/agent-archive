@@ -22,6 +22,24 @@ import { makeMessage, textPart, toolPart, reasoningPart } from '../messages.js';
 
 export const name = 'zcode';
 
+/**
+ * 结构声明（数据源解耦 P1）。应用根是 `.zcode` 那一层，主库在
+ * cli/db/db.sqlite。rootAnchor 从命中文件上溯 3 层回到应用根。
+ * 与 opencode 同源 SQLite，但库文件名与 dirHints 都不同，天然不互相命中。
+ */
+export const structureSpec = {
+  agent: name,
+  probes: [
+    { path: 'cli/db/db.sqlite', kind: 'file', weight: 5 },
+    { path: 'cli/db/db.sqlite-wal', kind: 'file', weight: 1, optional: true },
+  ],
+  rootAnchor: { from: 'cli/db/db.sqlite', up: 3 },
+  dataPaths: ['cli/db/db.sqlite'],
+  format: 'zcode-opencode-sqlite',
+  minScore: 5,
+  dirHints: ['.zcode'],
+};
+
 function dbPath() {
   // 配置文件里可以写多个 `.zcode` 根（外置盘、备份盘……），
   // 取第一个真实存在的；都没有就回默认位置，让 discover 报"没有"。
@@ -42,13 +60,31 @@ export function candidateRoots() {
   return [...extraRoots(name), path.join(os.homedir(), '.zcode')];
 }
 
+/** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
 export function discover() {
-  const p = dbPath();  try {
-    fs.accessSync(p, fs.constants.R_OK);
-  } catch {
-    return [];
+  return discoverWithin([dbPath()], {});
+}
+
+/**
+ * 契约 B：纯函数。roots 是应用根（`.zcode`）时拼出 db 文件路径；本机
+ * discover() 直接传 db 文件本身，两种都收。只 accessSync，不读文件内容。
+ */
+export function discoverWithin(roots, ctx = {}) {
+  const out = [];
+  for (const root of roots || []) {
+    const p = dbFileUnder(root);
+    try {
+      fs.accessSync(p, fs.constants.R_OK);
+    } catch {
+      continue;
+    }
+    if (!out.includes(p)) out.push(p);
   }
-  return [p];
+  return out;
+}
+
+function dbFileUnder(root) {
+  return /\.(db|sqlite)$/i.test(root) ? root : path.join(root, 'cli', 'db', 'db.sqlite');
 }
 
 /** WAL 必须参与缓存判据：新消息先落 wal，主库 mtime 可以长时间不动。 */
@@ -68,16 +104,33 @@ export function openStore(file) {
 let cachedDb = null;
 let cachedDbPath = null;
 
-function getDb() {
-  const p = dbPath();
+function getDb(file) {
+  // 连接按传入的 file 缓存：显式数据源下 file 是外部备份的库，绝不能
+  // 退回本机 dbPath()，否则会静默读到本机数据（能识别、能列文件、解析却错）。
+  const p = file || dbPath();
   if (cachedDb && cachedDbPath === p) return cachedDb;
+  if (cachedDb) {
+    try {
+      cachedDb.close();
+    } catch {
+      /* 已关闭 */
+    }
+    cachedDb = null;
+  }
   cachedDb = openStore(p);
   cachedDbPath = p;
   return cachedDb;
 }
 
-export function parseAll(file) {
-  const db = getDb();
+/** source 形如 `<db 文件>#<会话 id>`，从中取回库文件路径。 */
+function dbFileFromSource(source) {
+  const s = String(source || '');
+  const i = s.indexOf('#');
+  return i > 0 ? s.slice(0, i) : dbPath();
+}
+
+export function parseAll(file, ctx = {}) {
+  const db = getDb(file);
   if (!db) return [];
 
   let rows;
@@ -169,8 +222,8 @@ export function closeStore() {
  * part 按 sequence 展开，只取三类：text / reasoning / tool。
  * step-start、step-finish 是流控标记，不是内容。
  */
-export function readMessages(session) {
-  const db = getDb();
+export function readMessages(session, ctx = {}) {
+  const db = getDb(dbFileFromSource(session.source));
   if (!db) throw new Error('打不开 ZCode 数据库');
 
   const rows = db

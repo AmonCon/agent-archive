@@ -1,0 +1,7 @@
+{
+  "session_id": "cline-demo",
+  "started_at": "2026-11-05T00:00:00.000Z",
+  "cwd": "/work/cline-demo",
+  "prompt": "<user_input mode=\"act\">演示：帮我重构这个函数</user_input>",
+  "metadata": { "title": "Cline 演示会话" }
+}

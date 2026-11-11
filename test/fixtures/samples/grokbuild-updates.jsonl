@@ -1,0 +1,4 @@
+{"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"clean"}}},"timestamp":1774599070}
+{"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":" journal"}}},"timestamp":1774599070}
+{"params":{"update":{"sessionUpdate":"hook_execution"}},"timestamp":1774599071}
+{"params":{"update":{"sessionUpdate":"turn_completed","usage":{"modelUsage":{"grok-3":{"inputTokens":10,"outputTokens":5,"cachedReadTokens":2,"cacheCreationTokens":1}}}}},"timestamp":1774599072}

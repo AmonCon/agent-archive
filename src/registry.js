@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { statePath } from './paths.js';
 import { disabledAgents } from './config.js';
 import { pathKey } from './platform.js';
-import { makeSession } from './model.js';
+import { makeSession, tildify } from './model.js';
+import { plan, createSource, sourceId } from './source.js';
 
 /** 工具自身版本：快照要记"这份结果是用哪一版工具扫的"。读不到就 unknown。 */
 function toolVersion() {
@@ -32,6 +33,17 @@ import * as antigravity from './scanners/antigravity.js';
 import * as kiro from './scanners/kiro.js';
 import * as copilot from './scanners/copilot.js';
 import * as workbuddy from './scanners/workbuddy.js';
+// 第四轮补覆盖面（2026-11-05）：按 CC Switch 会话层 13 家 / MAGPIE 会话层 25 家对齐。
+// 逐家规格见 research/upstream/findings/{cc-switch,magpie}-coverage-2026-11-05.md。
+import * as gemini from './scanners/gemini.js';
+import * as openclaw from './scanners/openclaw.js';
+import * as codebuddy from './scanners/codebuddy.js';
+import * as pi from './scanners/pi.js';
+import * as omp from './scanners/omp.js';
+import * as cline from './scanners/cline.js';
+import * as kimi from './scanners/kimi.js';
+import * as grokbuild from './scanners/grokbuild.js';
+import * as mcode from './scanners/mcode.js';
 
 /**
  * 扫描器注册表。
@@ -44,6 +56,10 @@ import * as workbuddy from './scanners/workbuddy.js';
  * 新增一个 Agent 就是加一个文件、在这里加一行。这正是 MAGPIE 的
  * callSources() 和 CC Switch 的 scan_sessions() 的组织方式——非协议
  * 集成只能靠逐家适配，把它集中成注册表是唯一可维护的做法。
+ *
+ * 指定数据源（--source / config.sources）时，带 `structureSpec` + `discoverWithin()`
+ * 的扫描器才会参与识别；没有的会被记 `source-unsupported` 并跳过，绝不静默扫本机。
+ * 见 src/source.js / src/structure.js 与研究台账 source-decoupling-2026-11-05.md。
  */
 export const scanners = [
   claudeCode,
@@ -58,6 +74,15 @@ export const scanners = [
   kiro,
   copilot,
   workbuddy,
+  gemini,
+  openclaw,
+  codebuddy,
+  pi,
+  omp,
+  cline,
+  kimi,
+  grokbuild,
+  mcode,
 ];
 
 /**
@@ -143,8 +168,23 @@ function cacheDir() {
   return statePath('cache');
 }
 
-function cacheFile() {
-  return path.join(cacheDir(), `scan-v${CACHE_VERSION}.json`);
+/**
+ * 缓存文件按 sourceId 分命名空间。
+ * - 'local' 时文件名保持 scan-v5.json 不变 → 老缓存继续命中，source===null 行为逐字不变；
+ * - 显式 source 时用 scan-v5-<id>.json → 两份不同内容的数据绝不互相命中（防串数据）。
+ */
+function cacheFile(sid = 'local') {
+  const name = sid === 'local'
+    ? `scan-v${CACHE_VERSION}.json`
+    : `scan-v${CACHE_VERSION}-${sid}.json`;
+  return path.join(cacheDir(), name);
+}
+
+/** 把一个 source 参数规整成「显式 Source 或 null」；localSource() 也视为无 source。 */
+function explicitSource(source) {
+  if (!source) return null;
+  const s = typeof source === 'string' ? createSource({ paths: [source] }) : source;
+  return s && s.kind === 'local' ? null : s;
 }
 
 /**
@@ -268,9 +308,9 @@ function fileHash(p) {
   }
 }
 
-export function loadCache() {
+export function loadCache(sid = 'local') {
   try {
-    return JSON.parse(fs.readFileSync(cacheFile(), 'utf8'));
+    return JSON.parse(fs.readFileSync(cacheFile(sid), 'utf8'));
   } catch {
     return {};
   }
@@ -290,8 +330,8 @@ export function loadCache() {
  * CLI、serve、MCP 可能同时写这份缓存，原子替换也让并发写不会互相截断
  * ——最后写完的那个赢，而不是两败俱伤。
  */
-export function saveCache(entries) {
-  const target = cacheFile();
+export function saveCache(entries, sid = 'local') {
+  const target = cacheFile(sid);
   let tmp = null;
   try {
     fs.mkdirSync(cacheDir(), { recursive: true });
@@ -459,11 +499,18 @@ function sameStatOnly(a, b) {
  * @param {boolean} opts.noCache 忽略磁盘缓存，全量重解析
  * @param {string[]} [opts.only] 只扫这些 Agent（按 scanner 的 name）；
  *   给测试用，也给"只想看某一家的采集情况"这种排查场景用
+ * @param {object|string|null} [opts.source] 显式数据源（Source 对象或路径字符串）；
+ *   为 null 时严格等价于改造前（扫本机、老缓存/manifest 不变）
  * @returns {{sessions: Array, stats: object}}
  */
-export function scanAll({ noCache = false, only = null } = {}) {
+export function scanAll({ noCache = false, only = null, source = null } = {}) {
+  // 显式 source 才做识别/绑定；null 时 p=src=null，下面严格走老 discover() 链路，
+  // 缓存名、manifest、TTL 全部保持原样（source===null 行为逐字不变）。
+  const src = explicitSource(source);
+  const p = src ? plan(src) : null;
+  const sid = p ? p.sourceId : 'local';
   const fingerprints = scannerFingerprints();
-  const loaded = noCache ? {} : loadCache();
+  const loaded = noCache ? {} : loadCache(sid);
   // 老缓存（单值 `__fingerprint`）与新缓存（映射 `__fingerprints`）都要能读。
   //
   // 迁移规则照 MAGPIE 的 `cache_decode.go:39-47` + `sessions.go:1332-1338`：
@@ -520,15 +567,50 @@ export function scanAll({ noCache = false, only = null } = {}) {
     byAgent: {},
   };
   const manifestParts = [];
+  // 仅显式 source 时记「这批数据从哪来」，兑现可复现承诺；不给 source 时
+  // 一个字段都不加，否则 manifestHash 漂移，违背「source===null 行为完全等于现在」。
+  if (p) {
+    manifest.source = {
+      kind: src.kind,
+      id: sid,
+      label: src.label,
+      roots: (src.roots || []).map(tildify),
+    };
+  }
 
   for (const scanner of scanners) {
     if (wanted && !wanted.has(scanner.name)) continue;
     if (disabled.has(scanner.name)) continue;
     let files;
-    try {
-      files = scanner.discover();
-    } catch {
-      files = [];
+    let scannerCtx = null; // 显式 source 时带生效根，透传给 normalizeAll/postProcess/enrich
+    if (!p) {
+      // 没给 source：严格走原来的 discover()，一个字不改（265 用例的向后兼容基线）
+      try {
+        files = scanner.discover();
+      } catch {
+        files = [];
+      }
+    } else {
+      const roots = p.bindings.filter((b) => b.agent === scanner.name).map((b) => b.root);
+      // 该家在这批数据里没有绑定就完全跳过：显式 source 下绝不静默退回扫本机
+      if (!roots.length) continue;
+      scannerCtx = { sourceId: sid, origin: src.origin || null, roots, source: src };
+      if (typeof scanner.discoverWithin === 'function') {
+        try {
+          files = scanner.discoverWithin(roots, scannerCtx);
+        } catch {
+          files = [];
+        }
+      } else {
+        // 有绑定却没实现 discoverWithin：记 problem 并跳过，绝不退回扫本机
+        recordProblem(stats, {
+          agent: scanner.name,
+          file: roots[0],
+          kind: 'source-unsupported',
+          reason: '该扫描器未实现 discoverWithin(roots)，显式数据源下无法参与',
+        });
+        files = [];
+      }
     }
     const agentStat = { files: 0, sessions: 0, cacheHits: 0, failures: 0 };
     manifest.byAgent[scanner.name] = agentStat;
@@ -584,7 +666,7 @@ export function scanAll({ noCache = false, only = null } = {}) {
         stats.cached++;
         agentStat.cacheHits++;
       } else {
-        const res = parseFile(scanner, file);
+        const res = parseFile(scanner, file, scannerCtx);
         // 两种"这次没解析出东西"要分开处理：
         //   !ok              解析抛异常——明确失败
         //   emptied          以前有会话，这次一个都没有——对会话文件来说
@@ -635,8 +717,14 @@ export function scanAll({ noCache = false, only = null } = {}) {
       for (const s of normalized) sessions.push(deserialize(s));
       stats.byAgent[scanner.name] = (stats.byAgent[scanner.name] || 0) + normalized.length;
       agentStat.sessions += normalized.length;
-      // 输入指纹进快照：同一批文件（含 size）算同一个 manifestHash
-      manifestParts.push(`${scanner.name}\t${pathKey(file)}\t${stampToStore.files[0].size}`);
+      // 输入指纹进快照：同一批文件（含 size）算同一个 manifestHash。
+      // 不给 source 时这一行必须与改造前逐字一致（连 sourceId='local' 都不能加），
+      // 否则哈希值会变；仅显式 source 时追加 sourceId 以区分命名空间。
+      if (p) {
+        manifestParts.push(`${scanner.name}\t${pathKey(file)}\t${stampToStore.files[0].size}\t${sid}`);
+      } else {
+        manifestParts.push(`${scanner.name}\t${pathKey(file)}\t${stampToStore.files[0].size}`);
+      }
     }
   }
 
@@ -649,15 +737,18 @@ export function scanAll({ noCache = false, only = null } = {}) {
   // 老键（单值）不再写，读的时候兼容即可。
   nextCache[FINGERPRINT_KEY] = fingerprints;
   delete nextCache[LEGACY_FINGERPRINT_KEY];
-  saveCache(nextCache);
+  saveCache(nextCache, sid);
 
-// 同一场会话可能散在多个文件里（Codex 续接会话就是如此：
+  // postProcess/enrich 的 ctx 只带 source 级信息（claude 的 postProcess 按 uuid 聚组，
+  // 显式 source 时需要 sourceId 区分不同备份里同 uuid 的会话，避免误判复制/分叉）。
+  const postCtx = p ? { sourceId: sid, origin: src.origin || null, source: src } : null;
+  // 同一场会话可能散在多个文件里（Codex 续接会话就是如此：
   // 一个 rollout 写满后另起一个文件，两者 session id 相同、时间相接）。
   // 合并成一个条目，时间取包络，source 记成用「|」连接的多段路径，
   // 正文读取时再逐个展开。不合并会让时间线把这场对话显示好几次。
   const merged = mergeByKey(sessions);
-  const grouped = applyPostProcessors(merged, stats, wanted);
-  const enriched = applyEnrichers(grouped, stats, wanted);
+  const grouped = applyPostProcessors(merged, stats, wanted, postCtx);
+  const enriched = applyEnrichers(grouped, stats, wanted, postCtx);
   enriched.sort((a, b) => (b.end || b.start || 0) - (a.end || a.start || 0));
   // 快照收尾：聚合哈希 + 去掉空家的占位（没扫到文件的保持零值，看得见"扫了但什么都没有"）
   manifest.manifestHash = crypto
@@ -682,13 +773,14 @@ export function scanAll({ noCache = false, only = null } = {}) {
  * 约定：只在扫描器导出 postProcess 时调用；返回非空数组才替换结果，
  * 抛错不影响采集（记进 stats.postProcessErrors）。
  */
-function applyPostProcessors(sessions, stats, wanted) {
+function applyPostProcessors(sessions, stats, wanted, ctx) {
   let out = sessions;
   for (const scanner of scanners) {
     if (typeof scanner.postProcess !== 'function') continue;
     if (wanted && !wanted.has(scanner.name)) continue;
     try {
-      const next = scanner.postProcess(out);
+      // 多传一个 ctx（可选）；老扫描器忽略多余参数，新扫描器可用 ctx.sourceId 区分数据源
+      const next = scanner.postProcess(out, ctx);
       if (Array.isArray(next) && next.length) out = next;
     } catch (e) {
       stats.postProcessErrors = stats.postProcessErrors || {};
@@ -718,14 +810,15 @@ function applyPostProcessors(sessions, stats, wanted) {
  * 约定：enrich 是纯函数，只改自己认得的字段，不改 id/agent/source 这些身份字段；
  * 抛错就把原始列表交回去，不能因为旁路数据坏了就让整个扫描失败。
  */
-function applyEnrichers(sessions, stats, wanted) {
+function applyEnrichers(sessions, stats, wanted, ctx) {
   let out = sessions;
   for (const scanner of scanners) {
     if (typeof scanner.enrich !== 'function') continue;
     // 只扫了一部分就只富化那一部分——否则会去读没扫的 Agent 的旁路库
     if (wanted && !wanted.has(scanner.name)) continue;
     try {
-      const next = scanner.enrich(out);
+      // 同 postProcess：ctx 可选，老签名忽略它，行为不变
+      const next = scanner.enrich(out, ctx);
       if (Array.isArray(next) && next.length) out = next;
     } catch (e) {
       // 旁路数据读不到不该影响事实采集——记一笔，继续
@@ -761,25 +854,31 @@ function applyEnrichers(sessions, stats, wanted) {
  *
  * @param {object} opts
  * @param {boolean} opts.noCache 忽略**磁盘**缓存，全量重解析；同时也绕过 TTL
+ * @param {object|string|null} [opts.source] 显式数据源；缺省/null 时严格走老路径（'local' 命名空间）
  * @returns {{sessions: Array, stats: object}}
  */
-export function scanCached({ noCache = false } = {}) {
+export function scanCached({ noCache = false, source = null } = {}) {
+  // 命名空间只由参数决定、零模块级全局：serve/MCP 常驻进程里两个不同 source
+  // 的请求交错也不会串数据。source 为 null 时 sid='local'，行为与改造前一致。
+  const s = explicitSource(source);
+  const sid = s ? sourceId(s) : 'local';
   if (noCache) {
-    scanMemo = null;
-    return scanAll({ noCache: true });
+    scanMemo.delete(sid);
+    return scanAll({ noCache: true, source });
   }
   const now = Date.now();
-  if (scanMemo && now - scanMemo.at < SCAN_TTL_MS) {
-    return { sessions: structuredClone(scanMemo.sessions), stats: structuredClone(scanMemo.stats) };
+  const memo = scanMemo.get(sid);
+  if (memo && now - memo.at < SCAN_TTL_MS) {
+    return { sessions: structuredClone(memo.sessions), stats: structuredClone(memo.stats) };
   }
-  const value = scanAll({});
-  scanMemo = { at: now, sessions: value.sessions, stats: value.stats };
+  const value = scanAll({ source });
+  scanMemo.set(sid, { at: now, sessions: value.sessions, stats: value.stats });
   return { sessions: structuredClone(value.sessions), stats: structuredClone(value.stats) };
 }
 
-/** 清掉进程内扫描缓存（显式刷新时用）。 */
+/** 清掉进程内扫描缓存（清全部 sourceId 命名空间，显式刷新时用）。 */
 export function clearScanCache() {
-  scanMemo = null;
+  scanMemo.clear();
 }
 
 /**
@@ -790,7 +889,8 @@ export function clearScanCache() {
  * 10 分钟的数据延迟可以接受；CLI 每次是独立进程，不受这个 TTL 影响。
  */
 const SCAN_TTL_MS = 600_000;
-let scanMemo = null;
+/** 进程内扫描缓存：key=sourceId，替代单例，避免两份不同内容的数据互相命中。 */
+const scanMemo = new Map();
 
 /**
  * 按 agent|id 合并会话。
@@ -866,13 +966,16 @@ function isPlaceholder(title) {
  * "曾经能解析出会话、现在解析为空"是另一回事，交给调用方判断（见 scanAll）：
  * 对会话文件来说，那种情况几乎总是被写到一半或格式变了。
  */
-function parseFile(scanner, file) {
+function parseFile(scanner, file, ctx) {
   try {
+    // 把 ctx 透传给解析器：显式数据源下，SQLite 类扫描器需要用它开「传入的那个库」
+    // 而不是模块级本机 dbPath()。旧扫描器忽略多余参数，行为逐字不变。
+    // ctx = { sourceId, roots, origin, ... }（见 scanAll 里 scannerCtx 的构造）。
     if (typeof scanner.parseAll === 'function') {
-      return { sessions: normalizeAll(scanner, scanner.parseAll(file)), ok: true };
+      return { sessions: normalizeAll(scanner, scanner.parseAll(file, ctx), ctx), ok: true };
     }
-    const one = scanner.parse(file);
-    return { sessions: normalizeAll(scanner, one ? [one] : []), ok: true };
+    const one = scanner.parse(file, ctx);
+    return { sessions: normalizeAll(scanner, one ? [one] : [], ctx), ok: true };
   } catch (e) {
     // e.message 可能是空串（`throw {}`、`throw ''` 这类），那时退回 String(e)；
     // 两者都空的极少，但 reason 绝不能是 "undefined"——doctor 会原样打出来。
@@ -919,9 +1022,9 @@ function recordProblem(stats, problem) {
  *
  * 对内置扫描器是幂等的：它们本来就用 makeSession 造，再过一遍结果不变。
  */
-function normalizeAll(scanner, list) {
+function normalizeAll(scanner, list, ctx) {
   if (!Array.isArray(list) || !list.length) return [];
-  const roots = agentRootsOf(scanner);
+  const roots = agentRootsOf(scanner, ctx);
   const out = [];
   for (const raw of list) {
     if (!raw || raw.id === undefined || raw.id === null || raw.id === '') continue;
@@ -950,7 +1053,12 @@ function normalizeAll(scanner, list) {
 
 /** 某个扫描器声明过的根（缓存，扫描时会被反复问）。 */
 const rootCache = new WeakMap();
-function agentRootsOf(scanner) {
+function agentRootsOf(scanner, ctx) {
+  // 显式数据源：用绑定根覆盖本机 candidateRoots()，否则「cwd 落在 Agent 内部目录」
+  // 的判断会拿本机根去套外部路径，把别机的项目路径误置成 null。不缓存（每个 source 不同）。
+  if (ctx && Array.isArray(ctx.roots) && ctx.roots.length) {
+    return ctx.roots.map((p) => path.resolve(p).toLowerCase().replace(/\\/g, '/'));
+  }
   if (rootCache.has(scanner)) return rootCache.get(scanner);
   let roots = [];
   try {

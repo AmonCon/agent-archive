@@ -31,6 +31,24 @@ import { extraRoots } from '../config.js';
 export const name = 'opencode';
 
 /**
+ * 结构声明（数据源解耦 P1）。应用根是 `opencode`（`~/.local/share/opencode`）
+ * 那一层，库在 opencode.db。与 zcode 同源 SQLite，但库文件名与 dirHints
+ * 都不同，天然不互相命中。
+ */
+export const structureSpec = {
+  agent: name,
+  probes: [
+    { path: 'opencode.db', kind: 'file', weight: 5 },
+    { path: 'opencode.db-wal', kind: 'file', weight: 1, optional: true },
+  ],
+  rootAnchor: { from: 'opencode.db', up: 1 },
+  dataPaths: ['opencode.db'],
+  format: 'opencode-sqlite',
+  minScore: 5,
+  dirHints: ['opencode'],
+};
+
+/**
  * OpenCode 的 db 路径候选。
  *
  * **macOS 上也用 `~/.local/share/opencode`**，不是
@@ -119,15 +137,30 @@ export function candidateRoots() {
   return [...new Set(dbPaths().map((p) => path.dirname(p)))];
 }
 
-export function discover() {
+export function discoverWithin(roots, ctx = {}) {
   const out = [];
-  for (const p of dbPaths()) {
+  for (const p of dbFilesUnder(roots)) {
     try {
       fs.accessSync(p, fs.constants.R_OK);
       out.push(p);
     } catch {
       /* 不存在 */
     }
+  }
+  return out;
+}
+
+/** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
+export function discover() {
+  return discoverWithin(dbPaths(), {});
+}
+
+/** 应用根 → 拼出 opencode.db；本机 discover() 传的 db 文件本身原样。只做路径拼接。 */
+function dbFilesUnder(roots) {
+  const out = [];
+  for (const r of roots || []) {
+    const p = /\.(db|sqlite)$/i.test(r) ? r : path.join(r, 'opencode.db');
+    if (!out.includes(p)) out.push(p);
   }
   return out;
 }
@@ -151,13 +184,21 @@ export function openStore(file) {
   }
 }
 
-function getDb() {
-  const p = dbPath();
+function getDb(file) {
+  // 连接按传入的 file 缓存：显式数据源下 file 是外部备份的库，不能退回本机 dbPath()
+  const p = file || dbPath();
   if (cachedDb && cachedPath === p) return cachedDb;
   closeStore();
   cachedDb = openStore(p);
   cachedPath = p;
   return cachedDb;
+}
+
+/** source 形如 `<db 文件>#<会话 id>`，从中取回库文件路径。 */
+function dbFileFromSource(source) {
+  const s = String(source || '');
+  const i = s.indexOf('#');
+  return i > 0 ? s.slice(0, i) : dbPath();
 }
 
 export function closeStore() {
@@ -172,8 +213,8 @@ export function closeStore() {
   }
 }
 
-export function parseAll(file) {
-  const db = getDb();
+export function parseAll(file, ctx = {}) {
+  const db = getDb(file);
   if (!db) return [];
 
   let rows;
@@ -217,8 +258,8 @@ export function parseAll(file) {
  * part 按 sequence 展开，只取 text / reasoning / tool。
  * step-start、step-finish、patch、file、compaction 是流控或元信息，不是内容。
  */
-export function readMessages(session) {
-  const db = getDb();
+export function readMessages(session, ctx = {}) {
+  const db = getDb(dbFileFromSource(session.source));
   if (!db) throw new Error('打不开 OpenCode 数据库');
 
   let rows;

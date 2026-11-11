@@ -5,6 +5,7 @@ import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
 import { extraRoots } from '../config.js';
+import { rootsFor } from './kit.js';
 
 /**
  * Hermes 会话扫描。
@@ -44,6 +45,24 @@ import { extraRoots } from '../config.js';
  */
 
 export const name = 'hermes';
+
+/**
+ * 结构声明（数据源解耦 P1）。应用根是 `.hermes` 那一层，主库 state.db；
+ * 旧格式 sessions 下的 .jsonl 已废弃，只作可选旁路。
+ */
+export const structureSpec = {
+  agent: name,
+  probes: [
+    { path: 'state.db', kind: 'file', weight: 5 },
+    { path: 'state.db-wal', kind: 'file', weight: 1, optional: true },
+    { glob: 'sessions/*.jsonl', kind: 'file', weight: 1, optional: true },
+  ],
+  rootAnchor: { from: 'state.db', up: 1 },
+  dataPaths: ['state.db', 'sessions'],
+  format: 'hermes-sqlite',
+  minScore: 5,
+  dirHints: ['.hermes'],
+};
 
 function hermesDir() {
   // HERMES_HOME 是官方支持的重定向（源码里优先级最高）。
@@ -95,8 +114,9 @@ export function openStore(file) {
   }
 }
 
-function getStore() {
-  const p = dbPath();
+function getStore(file) {
+  // 连接按传入的 file 缓存：显式数据源下 file 是外部备份的库，不能退回本机 dbPath()
+  const p = file || dbPath();
   if (store && storePath === p) return store;
   if (store) {
     try {
@@ -150,15 +170,31 @@ export function candidateRoots() {
   ].filter(Boolean);
 }
 
+/** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
 export function discover() {
-  // registry 的缓存键是文件路径，这里用 db 路径本身。
-  // 时间/大小从 db 文件与 wal 取，任何一边变了都要重扫。
-  const p = dbPath();  try {
-    fs.accessSync(p, fs.constants.R_OK);
-  } catch {
-    return [];
+  return discoverWithin([dbPath()], {});
+}
+
+/**
+ * 契约 B：纯函数。roots 是应用根（`.hermes`）时拼出 state.db；
+ * 本机 discover() 直接传 db 文件本身，两种都收。只 accessSync，不读内容。
+ */
+export function discoverWithin(roots, ctx = {}) {
+  const out = [];
+  for (const root of roots || []) {
+    const p = dbFileUnder(root);
+    try {
+      fs.accessSync(p, fs.constants.R_OK);
+    } catch {
+      continue;
+    }
+    if (!out.includes(p)) out.push(p);
   }
-  return [p];
+  return out;
+}
+
+function dbFileUnder(root) {
+  return /\.(db|sqlite)$/i.test(root) ? root : path.join(root, 'state.db');
 }
 
 /**
@@ -195,8 +231,8 @@ export function extraFiles(file) {
  * 刻意**不**用 total(length(content))：它要解压每行正文，实测 203 ms，
  * 把省下来的力气全吃回去，还比原方案更慢。
  */
-export function parseAll(file) {
-  const db = getStore();
+export function parseAll(file, ctx = {}) {
+  const db = getStore(file);
   if (!db) return [];
 
   let rows;
@@ -371,18 +407,35 @@ function cleanText(s) {
  * 一句话：**重复不代表冗余**。宁可原样显示，也不能把"重试了 85 次"这个
  * 事实抹成一次。
  */
-export function readMessages(session) {
+export function readMessages(session, ctx = {}) {
   const src = String(session.source || '');
 
   if (src.startsWith('db:')) {
-    return readFromDb(src.slice(3), session);
+    return readFromDb(src.slice(3), session, dbFileFor(ctx));
   }
 
-  return readFromJsonl(session);
+  return readFromJsonl(session, rootsFor(name, ctx, () => [sessionsDir()]));
 }
 
-function readFromDb(id, session) {
-  const db = getStore();
+/**
+ * 显式数据源下从 ctx.roots（应用根）定位 state.db；没给 ctx 时退回本机 dbPath()。
+ * session.source 是 `db:<id>`（不含库路径），所以只能靠生效根补出来。
+ */
+function dbFileFor(ctx) {
+  const roots = ctx && Array.isArray(ctx.roots) && ctx.roots.length ? ctx.roots : [path.dirname(dbPath())];
+  for (const r of roots) {
+    const p = path.join(r, 'state.db');
+    try {
+      if (fs.statSync(p).isFile()) return p;
+    } catch {
+      /* 试下一个 */
+    }
+  }
+  return dbPath();
+}
+
+function readFromDb(id, session, file) {
+  const db = getStore(file);
   if (!db) throw new Error('Hermes state.db 打不开');
 
   let rows;
@@ -446,8 +499,18 @@ function readFromDb(id, session) {
   return out;
 }
 
-function readFromJsonl(session) {
-  const real = assertUnder(sessionsDir(), session.source);
+function readFromJsonl(session, roots) {
+  let real = null;
+  let lastErr = null;
+  for (const r of roots) {
+    try {
+      real = assertUnder(r, session.source);
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!real) throw lastErr || new Error(`拒绝读取根目录之外的路径: ${session.source}`);
   const text = fs.readFileSync(real, 'utf8');
   const out = [];
 

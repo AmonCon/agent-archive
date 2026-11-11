@@ -5,6 +5,7 @@ import { makeMessage, textPart, toolPart, assertUnder } from '../messages.js';
 import { userDataCandidates, findUnder } from '../platform.js';
 import { isDirEntry } from '../fsentry.js';
 import { extraRoots } from '../config.js';
+import { rootsFor } from './kit.js';
 
 /**
  * Kiro 会话扫描。
@@ -30,6 +31,24 @@ import { extraRoots } from '../config.js';
 
 export const name = 'kiro';
 
+/**
+ * 结构声明（数据源解耦 P1）。应用根是 AppData/Roaming 下的 `Kiro` 目录
+ * 那一层，数据在 User/globalStorage/kiro.kiroagent 下。rootAnchor 从
+ * kiro.kiroagent 上溯 3 层回到应用根。
+ */
+export const structureSpec = {
+  agent: name,
+  probes: [
+    { glob: 'User/globalStorage/kiro.kiroagent/sessions/*.json', kind: 'file', weight: 4 },
+    { path: 'User/globalStorage/kiro.kiroagent/workspace-sessions', kind: 'dir', weight: 1 },
+  ],
+  rootAnchor: { from: 'User/globalStorage/kiro.kiroagent', up: 3 },
+  dataPaths: ['User/globalStorage/kiro.kiroagent'],
+  format: 'kiro-session-json',
+  minScore: 4,
+  dirHints: ['Kiro'],
+};
+
 const AGENT_REL = 'User/globalStorage/kiro.kiroagent';
 
 function agentRoot() {
@@ -45,9 +64,9 @@ export function candidateRoots() {
   return [...extraRoots(name), ...userDataCandidates('Kiro')];
 }
 
-export function discover() {
-  const root = agentRoot();
+export function discoverWithin(roots, ctx = {}) {
   const out = [];
+  for (const root of dataLayers(roots)) {
 
   // 全局会话
   for (const f of listJson(path.join(root, 'sessions'))) out.push(f);
@@ -60,10 +79,36 @@ export function discover() {
       .readdirSync(wsRoot, { withFileTypes: true })
       .filter((d) => isDirEntry(d, path.join(wsRoot, d.name)));
   } catch {
-    return out;
+    continue;
   }
   for (const d of dirs) {
     for (const f of listJson(path.join(wsRoot, d.name))) out.push(f);
+  }
+  }
+  return out;
+}
+
+/** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
+export function discover() {
+  return discoverWithin([agentRoot()], {});
+}
+
+/**
+ * 把传入根归一到 kiro.kiroagent 层：应用根（Kiro 目录）拼上
+ * User/globalStorage/kiro.kiroagent；本机 agentRoot() 本身就是该层，原样。
+ * 只做 stat，不读文件内容。
+ */
+function dataLayers(roots) {
+  const out = [];
+  for (const r of roots || []) {
+    let base = r;
+    const deep = path.join(r, 'User', 'globalStorage', 'kiro.kiroagent');
+    try {
+      if (fs.statSync(deep).isDirectory()) base = deep;
+    } catch {
+      /* 已是 kiro.kiroagent 层 */
+    }
+    if (!out.includes(base)) out.push(base);
   }
   return out;
 }
@@ -165,8 +210,19 @@ function extractText(content) {
   return parts.join('\n').trim();
 }
 
-export function readMessages(session) {
-  const real = assertUnder(agentRoot(), session.source);
+export function readMessages(session, ctx = {}) {
+  const roots = rootsFor(name, ctx, () => [agentRoot()]);
+  let real = null;
+  let lastErr = null;
+  for (const r of roots) {
+    try {
+      real = assertUnder(r, session.source);
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!real) throw lastErr || new Error(`拒绝读取根目录之外的路径: ${session.source}`);
   let data;
   try {
     data = JSON.parse(fs.readFileSync(real, 'utf8'));

@@ -1,0 +1,9 @@
+{"type":"session-meta","id":"m1","sessionId":"cccc1111-2222-4333-8444-555555555555","timestamp":1787903311000,"meta":{},"cwd":"E:\\proj"}
+{"id":"u1","timestamp":1787903311471,"type":"message","role":"user","content":[{"type":"input_text","text":"<system-reminder data-role=\"user-context\">\n<user_info>\nOS Version: win32\nShell: bash\n</user_info>\n</system-reminder>\n<user_query>第一版问题</user_query>"}],"sessionId":"cccc1111-2222-4333-8444-555555555555","cwd":"E:\\proj"}
+{"type":"resend-fork-notice","id":"n1","timestamp":1787903312000,"editedUserItemId":"u1"}
+{"id":"u2","timestamp":1787903312100,"type":"message","role":"user","content":[{"type":"input_text","text":"<user_query>第二版问题</user_query>"}],"sessionId":"cccc1111-2222-4333-8444-555555555555","cwd":"E:\\proj"}
+{"type":"reasoning","id":"r1","timestamp":1787903312200,"rawContent":[{"type":"reasoning_text","text":"想一想"}]}
+{"type":"function_call","id":"call-msg-id-1","callId":"call_abc","name":"search","arguments":"{\"q\":\"x\"}","timestamp":1787903312300}
+{"type":"function_call_result","id":"res-1","callId":"call_abc","name":"search","status":"completed","output":{"type":"text","text":"搜索结果"},"timestamp":1787903312400}
+{"id":"a1","timestamp":1787903312500,"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"这是回答"}],"sessionId":"cccc1111-2222-4333-8444-555555555555","cwd":"E:\\proj"}
+{"id":"a2","timestamp":1787903312600,"type":"message","role":"assistant","status":"incomplete","content":[{"type":"output_text","text":"429 queue.full.title"}],"providerData":{"error":{"code":6021,"message":"429 queue.full.title"}},"sessionId":"cccc1111-2222-4333-8444-555555555555","cwd":"E:\\proj"}

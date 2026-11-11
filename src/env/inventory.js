@@ -16,6 +16,7 @@ import { mcpSummary } from './mcp.js';
 import { skillSummary } from './skills.js';
 import { memorySummary } from './memory.js';
 import { cliSummary } from './cli.js';
+import { providerSummary } from './providers.js';
 import { statePath } from '../paths.js';
 
 /**
@@ -116,7 +117,9 @@ let cachedAt = 0;
  * 进程有效；serve 每次重启后第一次点能力面又会重算。落盘后新进程读 JSON
  * 约几十毫秒。内存 5 分钟、磁盘 30 分钟：内存过期后先读盘，不会重新扫目录。
  */
-const INVENTORY_CACHE_VERSION = 1;
+// 缓存结构变过就 bump：老缓存里没有 providers 字段，直接读会把渠道显示成
+// undefined（实测踩过一次）。版本号进文件名，老缓存自然失效。
+const INVENTORY_CACHE_VERSION = 2;
 // 磁盘缓存比内存（5 分钟）留得久：内存过期后先读盘，不重新扫 295 个目录。
 // 环境层的数据是"装了哪些技能/MCP"，半小时内变化很小。
 const INVENTORY_DISK_TTL_MS = 30 * 60_000;
@@ -186,6 +189,7 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
   const mcp = mcpSummary();
   const skills = skillSummary({ includeLocations: includeDetails });
   const memory = memorySummary();
+  const providers = providerSummary();
 
   // 以真实存在的 Agent 为准（不是三家全集的并集）
   const present = presence.filter((p) => p.level !== 'none');
@@ -196,16 +200,46 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
   const agents = present.map((p) => {
     const a = p.agent;
     const cliFor = cli.byAgent[a] || { visible: [], used: [] };
+    const mcpAll = mcp.list.filter((s) => s.agents.includes(a));
+    // 可用能力不含"已被用户停用"的服务；停用的单列出来，不能假装没有
+    const mcpList = mcpAll.filter((s) => !s.disabled);
+    const mcpDisabled = mcpAll.filter((s) => s.disabled);
+    const mcpFilesFor = (mcp.fileStates || []).filter((f) => f.agent === a);
+    const skillsCount = skills.byAgent[a] || 0;
+    const channelsFor = providers.list.filter((c) => c.agents.includes(a));
+
+    // 能力快照：每一项都带状态 + 证据，而不是一个裸数字。
+    // 状态词汇：provided（有且读到了）/ empty（文件在但没条目）/ none（这家没配）
+    //           partial（有文件读不到或解析不了——未知，不能当 0）
+    const mcpState =
+      mcpFilesFor.some((f) => f.status !== 'ok')
+        ? 'partial'
+        : mcpFilesFor.length === 0
+          ? 'none'
+          : mcpList.length > 0
+            ? 'provided'
+            : 'empty';
+    const skillsState = skills.errors.some((e) => e.agent === a)
+      ? 'partial'
+      : skillsCount > 0
+        ? 'provided'
+        : 'none';
+    const channelsState = providers.errors.some((e) => e.agent === a)
+      ? 'partial'
+      : channelsFor.length > 0
+        ? 'provided'
+        : 'none';
+
     return {
       agent: a,
       display: p.display,
       level: p.level,
       // 这个 Agent 配了哪些 MCP 服务（按服务身份，不是按注册名）
-      mcp: mcp.list.filter((s) => s.agents.includes(a)).map((s) => s.service),
+      mcp: mcpList.map((s) => s.service),
       // 这个 Agent 能用的技能数。注意 shared-agents 是共享目录，
       // 这里如实分开算——Kiro 的 28 个是符号链接到共享目录的，
       // 算在 Kiro 名下但也算在共享名下，这是事实，不该去重掉
-      skills: skills.byAgent[a] || 0,
+      skills: skillsCount,
       // CLI 可见数按安装位置推断；used 是会话里真的跑过的
       cli: {
         visible: cliFor.visible.length,
@@ -215,6 +249,20 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
       },
       memory: memory.byAgent[a] ? memory.byAgent[a].entries || memory.byAgent[a].files : 0,
       memoryLocations: memory.byAgent[a] ? memory.byAgent[a].files : 0,
+      // 这家 Agent 配了哪些模型渠道（按渠道身份，不是按配置条目）
+      channels: channelsFor.map((c) => c.display),
+      // 结构化能力快照：给 MCP 工具/网页直接消费，避免它们各自拼
+      capabilities: {
+        status: [mcpState, skillsState, channelsState].includes('partial') ? 'partial' : 'ok',
+        mcp: { state: mcpState, count: mcpList.length, services: mcpList.map((s) => s.service), disabled: mcpDisabled.map((s) => s.service) },
+        skills: {
+          state: skillsState,
+          count: skillsCount,
+          manualOnly: skills.list.filter((s) => s.manual && s.agents.includes(a)).length,
+        },
+        channels: { state: channelsState, count: channelsFor.length, names: channelsFor.map((c) => c.display) },
+        cli: { state: cliFor.visible.length > 0 ? 'provided' : 'none', visible: cliFor.visible.length, used: cliFor.used.length },
+      },
     };
   });
 
@@ -235,10 +283,16 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
       cliUsed: cli.summary.used,
       cliCalls: cli.summary.calls,
       cliPrivateOnly: cli.summary.privateOnly,
+      // 渠道层：几个模型渠道、几条注册
+      channels: providers.channels,
+      channelRegistrations: providers.registrations,
+      // 有"读不到"来源的 Agent 数：这些 Agent 的能力面是"部分未知"
+      agentsPartial: agents.filter((a) => a.capabilities && a.capabilities.status === 'partial').length,
     },
     mcp,
     skills,
     memory,
+    providers,
     cli,
   };
 
@@ -361,6 +415,21 @@ export function auditEnvironment() {
       area: 'cli',
       title: `CLI「${p.display}」有用过记录，但没找到可执行文件`,
       detail: `调用来自 ${users}。可能是项目本地依赖、WSL 里的安装，或者已经卸载。`,
+    });
+  }
+
+  // 11. 读不到 ≠ 零。环境层任何一处"未知"都要单独报出来。
+  const unknown =
+    (inv.mcp.filesUnknown || 0) + (inv.skills.rootsUnknown || 0) + (inv.providers.filesUnknown || 0);
+  if (unknown > 0) {
+    findings.push({
+      level: 'warn',
+      area: 'unknown',
+      title: `${unknown} 处配置读不到/解析不了`,
+      detail:
+        '这些来源被当作"未知"处理，没有算成"没有配置"。' +
+        `详情：MCP ${inv.mcp.filesUnknown || 0} 处、技能 ${inv.skills.rootsUnknown || 0} 处、渠道 ${inv.providers.filesUnknown || 0} 处。` +
+        '常见原因是权限不足或文件正被写入；修好后重跑即可。',
     });
   }
 

@@ -33,6 +33,24 @@ import { extraRoots } from '../config.js';
 
 export const name = 'cursor';
 
+/**
+ * 结构声明（数据源解耦 P1）。应用根是 AppData/Roaming 下的 `Cursor` 目录
+ * 那一层，库在 User/globalStorage/state.vscdb。rootAnchor 从命中文件
+ * 上溯 3 层回到应用根。
+ */
+export const structureSpec = {
+  agent: name,
+  probes: [
+    { path: 'User/globalStorage/state.vscdb', kind: 'file', weight: 5 },
+    { path: 'User/globalStorage', kind: 'dir', weight: 1 },
+  ],
+  rootAnchor: { from: 'User/globalStorage/state.vscdb', up: 3 },
+  dataPaths: ['User/globalStorage/state.vscdb'],
+  format: 'cursor-vscdb-sqlite',
+  minScore: 5,
+  dirHints: ['Cursor'],
+};
+
 const DB_REL = 'User/globalStorage/state.vscdb';
 
 /**
@@ -59,21 +77,46 @@ export function candidateRoots() {
   return cursorRoots();
 }
 
+/** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
 export function discover() {
-  const p = dbPath();
-  try {
-    fs.accessSync(p, fs.constants.R_OK);
-  } catch {
-    return [];
+  return discoverWithin([dbPath()], {});
+}
+
+/**
+ * 契约 B：纯函数。roots 是应用根（Cursor 目录）时拼出 state.vscdb；
+ * 本机 discover() 直接传 db 文件本身，两种都收。只 accessSync，不读内容。
+ */
+export function discoverWithin(roots, ctx = {}) {
+  const out = [];
+  for (const root of roots || []) {
+    const p = dbFileUnder(root);
+    try {
+      fs.accessSync(p, fs.constants.R_OK);
+    } catch {
+      continue;
+    }
+    if (!out.includes(p)) out.push(p);
   }
-  return [p];
+  return out;
+}
+
+function dbFileUnder(root) {
+  return /\.(vscdb|db|sqlite)$/i.test(root) ? root : path.join(root, 'User', 'globalStorage', 'state.vscdb');
+}
+
+/** source 形如 `<db 文件>#<会话 id>`，从中取回库文件路径。 */
+function dbFileFromSource(source) {
+  const s = String(source || '');
+  const i = s.indexOf('#');
+  return i > 0 ? s.slice(0, i) : dbPath();
 }
 
 let cachedDb = null;
 let cachedPath = null;
 
-function getDb() {
-  const p = dbPath();
+function getDb(file) {
+  // 连接按传入的 file 缓存：显式数据源下 file 是外部备份的库，不能退回本机 dbPath()
+  const p = file || dbPath();
   if (cachedDb && cachedPath === p) return cachedDb;
   closeStore();
   try {
@@ -109,8 +152,8 @@ export function closeStore() {
  * 会话由 composerHeaders 逐行给出。用 parseAll 一次产出全部，
  * 避免每个会话都重新打开 3.8 MB 的库。
  */
-export function parseAll(file) {
-  const db = getDb();
+export function parseAll(file, ctx = {}) {
+  const db = getDb(file);
   if (!db) return [];
 
   let rows;
@@ -355,8 +398,8 @@ function parseTime(v) {
  * 顺序必须走 fullConversationHeadersOnly——bubble 在 KV 表里是无序的，
  * 按 key 排序会得到一段乱序的对话。
  */
-export function readMessages(session) {
-  const db = getDb();
+export function readMessages(session, ctx = {}) {
+  const db = getDb(dbFileFromSource(session.source));
   if (!db) throw new Error('打不开 Cursor 数据库');
 
   const id = String(session.source).split('#')[1] || session.id;

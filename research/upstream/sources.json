@@ -10,26 +10,26 @@
       "repo": "https://github.com/yetone/magpie",
       "why": "个人版模型网关；会话读取、增量校验、零副作用只读打开、旁路表修正",
       "license": "MIT",
-      "commit": "a3768cdd1113118998863ed36bd6dd77c8e9e2cc",
-      "fetchedAt": "2026-11-03",
-      "notes": "2026-11-03 第三轮增量深读（2668 文件 / +158k 行）：per-agent parseVersions（改一家只重扫一家，已采用）、cache_decode 老条目迁移不丢、call_cache 的「未知≠已变更」、callsAlong（一趟读两用，我们已做到）、revision_cache 窗口 5min→1h（反证 tail 增量要付窗口过期税）。mcp-hub→mcp-router 是改名+扩写不是换代，只采失败答复纪律"
+      "commit": "de13afbf6f1eb652264fc40b3d56731df02728d4",
+      "fetchedAt": "2026-11-11",
+      "notes": "2026-11-11 第五轮：环境/资产层。MCP 25 种格式（Target{mcpFile{Path,Format,Also,Extra}}）；技能整树 Hash/Manual/Copies/Others/Shared；skill-router 只按技能文件夹路由、mcp-router 按 agent+项目；能力快照=AgentView+Problems 三层计算。采纳：三态读取、per-agent 状态+原因、DSH MCP 源、整树 hash、manual/enabled。详见 findings/magpie-env-2026-11-11.md。"
     },
     {
       "id": "cc-switch",
       "repo": "https://github.com/farion1231/cc-switch",
       "why": "供应商切换器；会话解析的逐家模块、两级缓存、契约式测试体系",
       "license": "MIT",
-      "commit": "7afceec14b977ecc2f4373e8ffb40e7223b435ac",
-      "fetchedAt": "2026-11-03",
-      "notes": "2026-11-03 第三轮增量深读（219 文件 / 76 提交，v4.0.25）：Grok 逐行读+单行上限+字节游标（上限加在记录粒度）、路径别名按 realpath(父目录)+文件名取身份（已采用 pathKey 版）、旁路库「只填不清」+读完复验 stamp、MCP 连通性失败故意不可见是凭据取舍。核出 FTS5 归因是错的：全仓无 FTS5，检索是前端 FlexSearch 只索引元数据。ContentRef 因 zstd 单帧无随机访问改为已否决"
+      "commit": "abf50589ed0ff60900ead3a83cfda9ff009cd6ef",
+      "fetchedAt": "2026-11-11",
+      "notes": "2026-11-11 第五轮：环境层。14 个 MCP 适配器（含 DSH 的 profiles/*/cordis.patch.yml）；mcp_connectivity 三态 Connected/AuthRequired/Failed、30s 超时不计排队、并发 3、无缓存；Provider.settings_config + category(official/cn_official/aggregator/third_party) + AuthBinding；写入用 staged tmp+fsync+ReplaceFileW+内容哈希 revision 检测外部改动。采纳：补 MCP 源、校验计数上报、静态 PATH 检查、渠道模型；不抄真连通性探测与写入。详见 findings/cc-switch-env-2026-11-11.md。"
     },
     {
       "id": "autoswarm",
       "repo": "https://github.com/HKUDS/AutoSwarm",
       "why": "多 Agent 编排；状态由事实推导、原子发布、可编程假 CLI 测试",
       "license": "MIT",
-      "commit": "72f7083e640aa7a7825d3d559327c9b53e96ca95",
-      "fetchedAt": "2026-10-28",
+      "commit": "96f0b026300186f7a51bff787b204ecc7ce1db03",
+      "fetchedAt": "2026-11-11",
       "notes": "测试方法论（fixtures/provider.py）是重点"
     },
     {

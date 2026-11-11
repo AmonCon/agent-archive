@@ -49,6 +49,25 @@ import { readHeadTail, headLines, tailLines, allLines, jsonLines } from './headt
 
 export const name = 'workbuddy';
 
+/**
+ * 结构声明（数据源解耦 P1）。应用根是 `.workbuddy` / `.workbuddy-ai` 那一层。
+ * 会话在 projects 下各工作区目录里的 .jsonl，子代理在 <id>/subagents 下。
+ * 与 claude-code / qoder / codebuddy 同构，靠 dirHints 区分，绝不猜。
+ */
+export const structureSpec = {
+  agent: name,
+  probes: [
+    { glob: 'projects/*/*.jsonl', kind: 'file', weight: 4 },
+    { path: 'projects', kind: 'dir', weight: 1 },
+    { glob: 'projects/*/*/subagents/*.jsonl', kind: 'file', weight: 1, optional: true },
+  ],
+  rootAnchor: { from: 'projects', up: 1, allowSelf: true },
+  dataPaths: ['projects'],
+  format: 'workbuddy-jsonl',
+  minScore: 4,
+  dirHints: ['.workbuddy', '.workbuddy-ai'],
+};
+
 /** 数据根候选：环境变量覆盖 + 配置覆盖 + 默认位置（含 `.workbuddy-ai` 变体）。 */
 function roots() {
   const list = [
@@ -82,9 +101,9 @@ export function candidateRoots() {
  *
  * 子代理放在 `<id>/subagents/agent-*.jsonl`，属于主会话那一棵树。
  */
-export function discover() {
+export function discoverWithin(roots, ctx = {}) {
   const out = [];
-  for (const root of roots()) {
+  for (const root of roots || []) {
     const projects = path.join(root, 'projects');
     let workspaces;
     try {
@@ -126,6 +145,11 @@ export function discover() {
 }
 
 /** `<session-id>.jsonl` 才算会话；`*.file-rollback.ndjson`、`*.meta.json` 都不算。 */
+/** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
+export function discover() {
+  return discoverWithin(roots(), {});
+}
+
 function isSessionFile(name) {
   if (!name.endsWith('.jsonl')) return false;
   if (name.includes('.file-rollback')) return false;

@@ -5,6 +5,7 @@ import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnder } from '../messages.js';
 import { extraRoots } from '../config.js';
+import { rootsFor } from './kit.js';
 
 /**
  * Gemini / Antigravity 会话扫描。
@@ -32,6 +33,25 @@ import { extraRoots } from '../config.js';
  */
 
 export const name = 'antigravity';
+
+/**
+ * 结构声明（数据源解耦 P1）。应用根是 `.gemini/antigravity` 那一层，
+ * 索引库 conversation_summaries.db，明文转录在 brain 下各会话的 logs 里。
+ * rootAnchor 从索引库上溯 1 层回到应用根。
+ */
+export const structureSpec = {
+  agent: name,
+  probes: [
+    { path: 'conversation_summaries.db', kind: 'file', weight: 5 },
+    { glob: 'brain/*/.system_generated/logs/transcript_full.jsonl', kind: 'file', weight: 2, optional: true },
+    { glob: 'conversations/*.db', kind: 'file', weight: 1, optional: true },
+  ],
+  rootAnchor: { from: 'conversation_summaries.db', up: 1 },
+  dataPaths: ['conversation_summaries.db', 'brain'],
+  format: 'antigravity-sqlite-jsonl',
+  minScore: 5,
+  dirHints: ['antigravity'],
+};
 
 /**
  * 所有可能的 Antigravity 数据根。
@@ -92,9 +112,9 @@ export function candidateRoots() {
   return [geminiDir()];
 }
 
-export function discover() {
+export function discoverWithin(roots, ctx = {}) {
   const out = [];
-  for (const r of roots()) {
+  for (const r of roots || []) {
     const db = summaryDbIn(r);
     try {
       fs.accessSync(db, fs.constants.R_OK);
@@ -104,6 +124,11 @@ export function discover() {
     }
   }
   return out;
+}
+
+/** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
+export function discover() {
+  return discoverWithin(roots(), {});
 }
 
 let cachedDb = null;
@@ -317,10 +342,12 @@ function parseTime(v) {
  * 只支持有 transcript_full.jsonl 的那几场。没有的抛错——不假装成功，
  * 也不从加密的 .pb 里硬抠（那是不可靠的启发式，会产出错误内容）。
  */
-export function readMessages(session) {
+export function readMessages(session, ctx = {}) {
   const id = session.id;
 
-  const candidates = roots().map((r) =>
+  // 显式数据源：正文转录要在生效根（外部备份）里找，不能用本机 roots()
+  const activeRoots = rootsFor(name, ctx, roots);
+  const candidates = activeRoots.map((r) =>
     path.join(r, 'brain', id, '.system_generated', 'logs', 'transcript_full.jsonl')
   );
 

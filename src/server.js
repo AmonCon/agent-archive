@@ -10,6 +10,7 @@ import { search } from './search.js';
 import { timelineMarkdown, sessionMarkdown, bundleMarkdown } from './export.js';
 import { latestProjectDigest } from './digest.js';
 import { projectHandoffs } from './handoff.js';
+import { projectBrief } from './brief.js';
 import { quickFreshness } from './refresh.js';
 import { projectKey, durationMs, tildify } from './model.js';
 import { buildTurns } from './turns.js';
@@ -255,6 +256,18 @@ async function handle(req, res) {
           toFirst: x.toFirstSession && { id: x.toFirstSession.id, title: x.toFirstSession.title },
         })),
       });
+    }
+
+    if (pathname === '/api/brief') {
+      const target = url.searchParams.get('path');
+      if (!target) return sendJson(res, { error: '缺少 path 参数' }, 400);
+      const readSessions = url.searchParams.get('readSessions');
+      const recentSessions = url.searchParams.get('recentSessions');
+      const b = await projectBrief(target, {
+        readSessions: readSessions == null ? undefined : Number(readSessions),
+        recentSessions: recentSessions == null ? undefined : Number(recentSessions),
+      });
+      return sendJson(res, b);
     }
 
     if (pathname === '/api/usage') {

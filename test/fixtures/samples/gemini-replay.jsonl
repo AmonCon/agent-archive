@@ -1,0 +1,8 @@
+{"sessionId":"ses-gemini-1","startTime":"2026-11-05T02:00:00.000Z","lastUpdated":"2026-11-05T02:05:00.000Z","messages":[]}
+{"id":"m1","type":"user","content":"/help"}
+{"id":"m2","type":"user","content":"<session_context>\nOS: win32\nShell: bash\n</session_context>\n"}
+{"id":"m3","type":"user","content":"帮我把这个仓库的测试跑起来","timestamp":"2026-11-05T02:01:00.000Z"}
+{"id":"m4","type":"gemini","content":"好的，先看 package.json","timestamp":"2026-11-05T02:02:00.000Z"}
+{"id":"m5","type":"user","content":"被编辑撤销的追问"}
+{"id":"m6","type":"gemini","content":"被撤销的回答"}
+{"$rewindTo":"m5"}

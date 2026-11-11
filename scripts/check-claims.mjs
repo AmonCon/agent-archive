@@ -38,6 +38,10 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const ALIASES = {
   deepseekharness: 'dsh',
   copilotchat: 'copilot',
+  // 展示名带品牌全称，slug 是简称
+  ohmypiomp: 'omp',
+  omp: 'omp',
+  minimaxcodemcode: 'mcode',
 };
 
 const README = path.join(repoRoot, 'README.md');

@@ -14,7 +14,7 @@ import { TOOLS, dispatch } from '../src/mcp.js';
  *   2. 每个工具都带 title / description / inputSchema / annotations——
  *      模型只能靠这些决定该调哪个、传什么，缺一样它就只能猜。
  *   3. **只读声明不会静默变质。** `tools/list` 里那句 readOnlyHint 是
- *      一刀切写给全部工具的（对，因为这 12 个确实都只读）。将来有人加一个
+ *      一刀切写给全部工具的（对，因为现在这些工具确实都只读）。将来有人加一个
  *      会写盘的工具，这句话就变成了假声明——客户端可能据此自动放行一个写操作。
  *      第三个用例就是那道闸：mcp.js 里一旦出现写盘/子进程 API，测试先红，
  *      逼着改的人把注解变成按工具声明，而不是让 blanket 继续撒谎。
@@ -29,6 +29,7 @@ const EXPECTED = {
   search_sessions: 'read',
   read_session: 'read',
   project_handoffs: 'read',
+  project_brief: 'read',
   read_digest: 'read',
   read_session_summary: 'read',
   session_stats: 'read',

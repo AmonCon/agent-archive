@@ -105,6 +105,125 @@ export const FIXTURES = {
       userTexts: ['旧格式里的问题'],
     },
   },
+
+  // 第四轮补覆盖面（2026-11-05）：9 家新 Agent 的静态样本。
+  // expect 全部由 research/probes/inspect-new-fixtures.mjs 在 sandbox() 里实测得到，
+  // 不靠猜。每份样本都按各家 discover 的真实形状落到假家目录。
+  gemini: {
+    scanner: 'gemini',
+    files: {
+      '.gemini/tmp/h1/chats/session-replay.jsonl': 'gemini-replay.jsonl',
+      // 旧 .json 单对象形态：放在另一个 hash 目录，避免与 replay「同名共存只认 .jsonl」冲突
+      '.gemini/tmp/h2/chats/session-legacy.json': 'gemini-legacy.json',
+    },
+    expect: {
+      sessions: 2,
+      userTexts: ['帮我把这个仓库的测试跑起来', '好的，先看 package.json'],
+    },
+  },
+  openclaw: {
+    scanner: 'openclaw',
+    files: {
+      '.openclaw/agents/main/sessions/s1.jsonl': 'openclaw-session.jsonl',
+      '.openclaw/agents/main/sessions/sessions.json': 'openclaw-sessions.json',
+    },
+    expect: {
+      sessions: 1,
+      title: '网关里起的标题',
+      project: 'E:/demo-project',
+      userTexts: ['第一句真人输入', '好的，我来跑'],
+    },
+  },
+  codebuddy: {
+    scanner: 'codebuddy',
+    files: {
+      '.codebuddy/projects/E--demo-project/aaaaaaaa-1111-4222-8333-444444444444.jsonl':
+        'codebuddy-session.jsonl',
+    },
+    expect: {
+      sessions: 1,
+      title: '第一版问题', // 标题取第一句，正文里编辑重发只留最后一版
+      project: 'E:/proj',
+      userTexts: ['第二版问题', '这是回答'],
+    },
+  },
+  pi: {
+    scanner: 'pi',
+    files: {
+      '.pi/agent/sessions/pi-demo/20261105_pi-tree.jsonl': 'pi-tree.jsonl',
+    },
+    expect: {
+      sessions: 1,
+      title: '演示：这个会话怎么跑',
+      project: '/work/pi-demo',
+      // 被撤销分支的轮次不该出现在活动分支正文里（树投影的形状）
+      userTexts: ['演示：这个会话怎么跑', '换个问法再试一次'],
+    },
+  },
+  omp: {
+    scanner: 'omp',
+    files: {
+      '.omp/agent/sessions/20261105_omp-title.jsonl': 'omp-title.jsonl',
+    },
+    expect: {
+      sessions: 1,
+      title: 'Oh My Pi 演示会话', // omp 取 type:title 槽（与 pi 的口径差异，见 LESSONS）
+      project: '/work/omp-demo',
+      userTexts: ['omp 的第一句话', 'omp 的回答'],
+    },
+  },
+  cline: {
+    scanner: 'cline',
+    files: {
+      '.cline/data/sessions/cline-demo/cline-demo.json': 'cline-manifest.json',
+      '.cline/data/sessions/cline-demo/cline-demo.messages.json': 'cline-messages.json',
+    },
+    expect: {
+      sessions: 1, // manifest 只作旁路，会话代表文件是 .messages.json
+      title: '演示：帮我重构这个函数',
+      project: '/work/cline-demo',
+      userTexts: ['演示：帮我重构这个函数', '再改一版'],
+    },
+  },
+  kimi: {
+    scanner: 'kimi',
+    files: {
+      '.kimi-code/sessions/ws/k1/state.json': 'kimi-state.json',
+      '.kimi-code/sessions/ws/k1/agents/main/wire.jsonl': 'kimi-wire.jsonl',
+    },
+    expect: {
+      sessions: 1, // state.json 只作旁路元数据，代表文件是 wire.jsonl
+      title: 'Fix this project',
+      project: 'E:/proj',
+      userTexts: ['Fix this project', 'Fixed'],
+    },
+  },
+  grokbuild: {
+    scanner: 'grokbuild',
+    files: {
+      '.grok/sessions/E--demo/g1/summary.json': 'grokbuild-summary.json',
+      '.grok/sessions/E--demo/g1/chat_history.jsonl': 'grokbuild-chat-history.jsonl',
+      '.grok/sessions/E--demo/g1/updates.jsonl': 'grokbuild-updates.jsonl',
+    },
+    expect: {
+      sessions: 1, // 元数据/正文分离，代表文件是 summary.json
+      title: 'clean journal',
+      project: 'C:/work',
+      userTexts: ['clean journal', 'freed 2.1G'],
+    },
+  },
+  mcode: {
+    scanner: 'mcode',
+    files: {
+      '.minimax/v2/sessions/2026/01/01/00-00-00-000-session_YWJj/messages.jsonl':
+        'mcode-messages.jsonl',
+    },
+    expect: {
+      sessions: 1,
+      title: '第一句真人输入',
+      userTexts: ['第一句真人输入'],
+    },
+  },
 };
 
 /** 读一份样本的原始字节（二进制样本也走这里）。 */

@@ -1,8 +1,16 @@
 # agent-archive
 
-跨 Agent 的项目级会话档案馆。
+跨 Agent 的项目级会话档案馆，也是一个**通用的跨 Agent 会话识别/归一引擎**。
 
 给定一个项目路径，把所有 Agent 在这个项目里发生过的会话，按时间合并成一条线。
+
+**核心能力是「认得出、解得开」，不是「扫本机」。** 数据可以来自当前这台机器，
+也可以来自别的机器拷来的备份、导出的会话包、任意目录——给一批数据，引擎自动
+识别里面是哪几家的会话、按各自的格式解出来（见下文「指定数据源」一节）。
+本机真实数据只是用来验证解析对不对的**测试样本**，不是立项前提；做得好不好看
+覆盖面（认得多少家），而不是看恰好扫了哪台机器。覆盖面的判断依据来自对
+CC Switch 与 MAGPIE 两款软件会话识别逻辑的持续研究，见
+[`research/upstream/LESSONS.md`](./research/upstream/LESSONS.md)。
 
 > 许可证：MIT（见 [LICENSE](./LICENSE)）。
 > `research/reference-src/` 下是第三方项目的源码副本（MIT），
@@ -12,16 +20,18 @@
 
 跨 Agent 的记忆、蒸馏、交接摘要都建立在"你首先得知道发生过什么"之上。
 而各家 Agent 的会话存储格式互不兼容、路径各不相同，这件事没有标准答案，
-只能逐家适配。
+只能逐家适配——这正是本工具的主能力所在，也是 CC Switch / MAGPIE 用
+「注册表 + 逐家适配器 + 指纹缓存」解决的同一个问题。
 
 本工具只做三件事：**扫描 → 归一 → 时间线**。不做蒸馏，不做向量检索，
-不往 Agent 里注入任何东西。它先把事实记录下来，其余都是可选视图。
+不往 Agent 里注入任何东西，也不改写 Agent 的配置文件或转发请求。它先把事实
+记录下来，其余都是可选视图。
 
 在此之上还有一层**环境层**（`env`）：识别实测每个 Agent 配了哪些 MCP 服务、
 装了哪些技能、有哪些记忆。会话层回答"聊过什么"，环境层回答"会什么"——
 两层都只提供事实与出处，不替任何 Agent 做决定。
 
-四种看法，同一份数据：终端里的 `projects`/`timeline`/`cat`，
+四种看法，同一份数据：终端里的 `projects`/`timeline`/`handoff`/`brief`/`cat`，
 浏览器里的 `serve`，导出成 Markdown 的 `export`，
 以及给其他 Agent 用的 `/api/*` 与 **MCP server**。
 
@@ -98,6 +108,21 @@ codex       → claude-code     +17.6h 接续
 | Kiro | `%APPDATA%/Kiro/.../kiro.kiroagent/` | 正文在执行包里 |
 | Copilot Chat | `%APPDATA%/Code/User/workspaceStorage/<hash>/chatSessions/` | 大量空会话 |
 | WorkBuddy | `~/.workbuddy[-ai]/projects/<工作区>/<uuid>.jsonl` | 注入上下文包着真话；编辑重发只留最后一版 |
+| Gemini CLI | `~/.gemini/tmp/<hash>/chats/session-*.jsonl` | 新版是**回放日志**（id 原位 upsert / `$set` / `$rewindTo`），不是普通 JSONL；项目从 `.project_root` 读 |
+| OpenClaw | `~/.openclaw[-autoclaw]/agents/*/sessions/*.jsonl` | 与 Pi 同构但无树形分支；`sessions.json` 的 displayName 优先；剥尾部 `[message_id: …]` |
+| CodeBuddy | `~/.codebuddy/projects/<工作区>/<uuid>.jsonl` | 与 WorkBuddy 同构，复用其解析器 |
+| Pi | `~/.pi/agent/sessions/**/<time>_<id>.jsonl` | **会话树 + 活动分支投影**：只投影 `latest_id` 沿 `parentId` 回溯的链，撤销/分叉轮次隐藏 |
+| Oh My Pi (omp) | `~/.omp/agent/sessions/**` | Pi 的同源分支，共用解析器，差异只在标题槽 / `model_change` 单串 |
+| Cline | `~/.cline/data/sessions/<id>/<id>.messages.json` | manifest + messages 双文件；`.messages.json` **整份重写**不能 tail；fork 按 `forkedAt` 截断 |
+| Kimi Code | `~/.kimi-code/sessions/<ws>/<id>/agents/*/wire.jsonl` | `state.json` 元数据 + `wire.jsonl` 正文；三种协议差异，只用 `usage.record` 自身 |
+| Grok Build | `~/.grok/{sessions,archived_sessions}/**/summary.json` | 元数据 `summary.json` 与正文分离；`chat_history.jsonl` / `updates.jsonl` 两种正文都认 |
+| MiniMax Code (mcode) | `~/.minimax/v2/sqlite/runtime-state.sqlite` 或 `v2/sessions/**/messages*.jsonl` | **两种存储形态**：SQLite 两代消息表 UNION，或 JSONL 按 4 种 base64 解 id |
+
+**21 家从哪来**：不是「这台机器上装了什么」，而是按 CC Switch 会话层（13 家）与
+MAGPIE 会话层（`Found()` 25 家）的并集对齐后逐家适配的。本机没有数据的家
+（omp/kimi/grokbuild/mcode 等）照样支持，因为识别逻辑来自对上游源码的研究与
+合成样本验证，不依赖本机真数据。逐家规格与「哪些家上游也读不了」（Windsurf/Trae
+加密库）见 [`research/upstream/findings/coverage-gap-2026-11-05.md`](./research/upstream/findings/coverage-gap-2026-11-05.md)。
 
 **格式差异就是适配成本。** 每家的坑都不一样，都在各自扫描器里写明了：
 
@@ -188,6 +213,10 @@ node src/cli.js handoff E:\my-app
 node src/cli.js handoff E:\my-app --all            # 全部换手
 node src/cli.js handoff E:\my-app --min-gap 1440   # 只看隔了一天以上的换手
 
+# 交接单：上一位 Agent 最后一段做到哪、动过哪些文件、留下哪些任务（不调模型、不花钱）
+node src/cli.js brief E:\my-app
+node src/cli.js brief E:\my-app --read 8 --out brief.md
+
 # 不分天，平铺（同样受 100 场窗口约束，--all 拿全部）
 node src/cli.js timeline . --flat
 
@@ -252,6 +281,42 @@ node src/cli.js serve --port 8000
 ```
 
 通用选项：`--json` 输出机器可读结果，`--no-cache` 强制全量重扫。
+
+## 指定数据源：把任意目录当输入
+
+**扫本机只是默认行为，不是前提。** `--source` 给一批任意目录（别的机器拷来的
+备份、导出的会话包、`zip` 解开的目录），引擎会先识别里面是哪几家的应用根，
+再按各自的格式解出会话：
+
+```bash
+# 给一个混合了多家数据的备份目录
+node src/cli.js projects --source D:\backup\old-machine --json
+
+# 目录里同时有 .claude / .codex / .gemini —— 自动识别，各归各家
+node src/cli.js projects --source D:\backup --source E:\export --json
+```
+
+几条边界，都是为了"结果能解释"：
+
+- **不给 `--source` 时行为完全等于扫本机**，缓存、manifest、输出一个字段都不变。
+- **显式来源默认不叠加本机**：两批数据混在一起没法说清哪场来自哪，要叠加得显式开。
+- **身份只由结构强匹配决定**：每家扫描器用 `structureSpec` 声明「我在应用根下认什么」
+  （`sessions/**`、`projects/*/*.jsonl`、`cli/db/db.sqlite`…），命中才算这一家。
+  有 251 个 `.jsonl` 的 `pnpm-cache`、有 `sessions/` 的 `pgAdmin` 即使长得像，
+  也不会被归给任何一家、更不会被解析——只出现在「未识别候选」里，且只陈述
+  「看到什么」，不下结论。
+- **同构歧义绝不猜**：`claude-code` / `workbuddy` / `qoder` 都认 `projects/*/*.jsonl`，
+  靠应用根名字（`.claude` / `.workbuddy` / `.qoder`）消歧；判不准就报 `ambiguous`
+  让你指定，不按分数最高者硬认。
+- **别机路径原样保留**：会话里记的 `D:\old\proj` / `/Users/alice/proj` 不会重写成
+  本机路径，也不会因为有 `~` 就缩成当前用户的主目录。
+- **缓存按来源隔离**：不同 `--source` 写不同的缓存文件、不同的 `manifestHash`，
+  两份内容不同但路径相同的备份绝不会互相命中。
+
+数据源抽象的设计与逐文件改造见
+[`research/upstream/findings/source-decoupling-2026-11-05.md`](./research/upstream/findings/source-decoupling-2026-11-05.md)；
+给自己那家 Agent 写扫描器时怎么同时满足两套契约，见
+[CONTRIBUTING.md](./CONTRIBUTING.md) 第 1 节。
 
 ## 深入：按主题看
 
@@ -498,7 +563,9 @@ enrich 自己的读取按 `(size, mtime)` 在进程内记忆，所以重算很�
 npm test          # node --no-warnings --test
 ```
 
-14 个用例，1.3 秒。零依赖——用 Node 内置的 `node:test`。
+**349 个用例**（2026-11-05 实测，约 27 秒）。零依赖——用 Node 内置的 `node:test`。
+其中包含「指定数据源」的结构识别、误报固化、缓存隔离与多源 e2e，以及 21 家
+扫描器各自的格式契约用例。
 
 ### 测试不依赖这台机器
 
@@ -512,6 +579,12 @@ npm test          # node --no-warnings --test
 全扫一遍要一分多钟；换成空家目录是毫秒级。更重要的是，**别人的机器上路径、
 版本、格式都和我们不一样**，测试如果依赖开发者的家目录，那它只证明了
 "我这台机器能跑"。
+
+**本机真实数据的定位也在这里：它是拿来验证解析对不对的样本，不是产品输入。**
+新适配一家的依据是上游源码（CC Switch / MAGPIE）里的格式契约 + 按真实形状合成的
+最小样本（`test/fixtures/samples/`），不是"恰好扫到了开发者的哪场对话"。
+`--source` 的集成测试同理：造一个含多家数据的假备份目录，验证自动识别、正文读出，
+并断言本机真数据一条都没混进结果——连 HOME 都不用改（`sourceBox()`）。
 
 ### 用例锁的是踩过的坑，不是当前实现
 | 用例 | 锁住的事实 |
@@ -971,6 +1044,31 @@ Codex。每换一次，新 Agent 都不知道前面发生了什么——**它只
 网页只在项目页给一行摘要（`N 次换手 · N 次并行`），详情在独立页面——
 项目页已经很长，再塞一张换手表会把它压垮。
 
+## 交接单：`brief`
+
+`handoff` 只回答「谁换谁、隔了多久」，不读正文。`brief` 再往前走一步：
+**上一位 Agent 最后一段具体干了什么**——停在哪个会话、最后一句用户说了什么、
+动过哪些文件、留下哪些任务、最近几场会话是什么。
+
+```
+node src/cli.js brief E:\my-app
+```
+
+它是**确定性**的：只做摘录、计数、排序，不调模型、不花钱，同一份记录每次结果一样。
+和 `digest`（模型写的摘要）是两回事：`digest` 是可选视图层，要用户显式 `--run`；
+`brief` 是事实层，网页一打开就有。
+
+三处入口读同一份数据：
+
+| 位置 | 内容 |
+|---|---|
+| `brief <项目>` | 终端，Markdown；`--out` 写文件 |
+| `project_brief` | MCP 工具，Agent 接手前先读这一页 |
+| `/p?path=` 项目页 / `/api/brief?path=` | 网页上的「交接单」区块；JSON 给其他程序 |
+
+边界：它只陈列事实，不判断「做完没做完」。任务状态来自 `TodoWrite` / `TaskCreate`，
+没有可靠 id 对齐时不猜——宁可少说，不说错。
+
 ## 导出：三种粒度
 
 | 命令 | 内容 | 用途 |
@@ -1016,13 +1114,14 @@ node src/cli.js mcp --json   # 只要配置 JSON
 **零依赖实现。** MCP 的 stdio 传输就是「stdin/stdout 上一行一条
 JSON-RPC」，手写足够，不需要引入任何 npm 包。
 
-### 十二个工具
+### 十三个工具
 
 | 工具 | 作用 |
 |---|---|
 | `list_projects` | 有哪些项目、多少会话、哪些 Agent |
 | `project_timeline` | 某项目的会话清单（只有元数据），每条带派生的子代理数 |
 | `project_handoffs` | **跨 Agent 接力**：谁在什么时候接手、间隔多久 |
+| `project_brief` | **项目交接单**：上一段做到哪、动过哪些文件、留下哪些任务（确定性、零模型） |
 | `search_sessions` | 全文搜索，返回命中处摘录（含子代理会话，带标记） |
 | `read_digest` | 读**已生成**的项目摘要；没有就提示怎么生成，不现编 |
 | `read_session_summary` | 读某场会话已有的摘要，用来判断值不值得深挖 |
@@ -1465,6 +1564,7 @@ Codex 的 `{command:["powershell.exe","-NoProfile",...]}`、ZCode 的
 ```
 node src/cli.js env              # 每个 Agent 一行
 node src/cli.js env mcp          # MCP 服务清单，跨 Agent 归并
+node src/cli.js env providers    # 模型渠道清单，跨 Agent 归并
 node src/cli.js env cli          # CLI 产品、安装位置与各 Agent 的调用
 node src/cli.js env skills       # 技能清单，按内容去重
 node src/cli.js env usage        # 技能使用率：哪些真用过
@@ -1472,7 +1572,7 @@ node src/cli.js env memory       # 记忆与指令文件
 node src/cli.js env audit        # 体检
 ```
 
-对应的 MCP 工具是 `inventory`（`type` 取 `overview` / `mcp` / `cli` / `skills` / `usage` / `memory` / `audit`）。
+对应的 MCP 工具是 `inventory`（`type` 取 `overview` / `mcp` / `providers` / `cli` / `skills` / `usage` / `memory` / `audit`）。
 **这是给新 Agent 用的入口**：它自己调一次 `inventory`，就知道这台机器上别的
 Agent 配了什么、装了什么、记得什么，再自己决定要不要跟进——本工具不替它搬。
 
@@ -1519,12 +1619,12 @@ Agent 配了什么、装了什么、记得什么，再自己决定要不要跟�
 真实数据（`env mcp` 实测）：
 
 ```
-● supabase  4 条注册 / 4 家
+● supabase  5 条注册 / 5 家
     别名    adbsupabase / supabase
     启动    local / npx
 ```
 
-一个 supabase 服务，4 条注册，**2 个名字，3 种启动形态**。如果按名字认，
+一个 supabase 服务，5 条注册，**2 个名字，2 种启动形态**。如果按名字认，
 "我到底配了几份、哪份是活的"就永远答不了。所以身份从 `command + args` 推：
 
 1. 剥掉 `cmd /c`、`sh -c` 这类包装层（Windows 上极常见）
@@ -1548,10 +1648,35 @@ Agent 配了什么、装了什么、记得什么，再自己决定要不要跟�
 | OpenCode | `~/.config/opencode/opencode.json` | `mcp`，`type: local/remote`，**`command` 是数组** |
 | Hermes | `~/.hermes/config.yaml` | `mcp_servers`，**无 `type` 字段** |
 | Gemini | `~/.gemini/settings.json` | `mcpServers` |
+| **DeepSeek Harness** | `$DSH_HOME/profiles/*/cordis.patch.yml` | **不是 mcpServers**：loader 条目 `name: "@deepseek-ai/dsh-mcp-client"`，键 `config.serverName` |
+| Kimi / Mcode / Pi / omp / Alma / Droid / Devin / CommandCode | `mcp.json`（各自数据目录） | 顶层 `mcpServers` |
+| Antigravity | `~/.gemini/config/mcp_config.json` | `mcpServers`（首次启动的 0 字节文件 = 没配置） |
+| Copilot CLI | `~/.copilot/mcp-config.json` | `mcpServers`，stdio 写 `type: local` |
+| Grok Build | `~/.grok/config.toml` | `[mcp_servers]`，与 Codex 同形 |
+| WorkBuddy / CodeBuddy | `~/.workbuddy/mcp.json`、`~/.codebuddy/mcp.json` | 顶层 `mcpServers` |
+| Claude Desktop | `%APPDATA%/Claude/claude_desktop_config.json` | 顶层 `mcpServers` |
 
 TOML 和 YAML 都是手写的最小解析器，只取 `mcp_servers` 那一段——
 为一个字段引依赖不值得，而 Codex 的多行数组用单行正则会被吃掉半行
 （第一版就是这么失败的）。
+
+### 渠道：同一个中转站，三家各配一遍，是一个渠道
+
+`env providers` 回答"模型从哪儿来"。**渠道身份是 `base_url`，不是配置条目名**：
+同一个中转站在 Claude Code、Codex、Qoder 各写一遍，用户心里是一个渠道。
+
+本机实测 3 个渠道 / 11 条配置 / 5 家 Agent：本机 `magpie` 网关（codex/dsh/hermes/qoder）、
+一个中转站（claude-code/hermes）、`magpie-anthropic`（dsh/hermes）。
+
+只报凭证**形态**（`inline` 写在配置里 / `env` 环境变量 / `oauth` 登录）和环境变量名，
+URL 去掉 query 与账号密码。**值永远不出这个模块**——这条与 MCP 的 `env` 处理同一条线。
+
+### 读不到 ≠ 没有
+
+环境层的每个文件/目录都带状态：`ok` / `unreadable` / `unparsable`。
+JSON 坏了、目录没权限，**不算成"0 个服务/技能/渠道"**，而是计入 `filesUnknown` /
+`rootsUnknown`，`env audit` 单独列一条。这是参照项目踩过事故的教训：
+magpie 的 `ErrUnreadable` 永不等于空（`#5709` 曾清空九个 Agent 的 AGENTS.md）。
 
 ### CLI：装在哪，谁能看见
 

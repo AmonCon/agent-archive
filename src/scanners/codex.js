@@ -7,6 +7,7 @@ import { isDirEntry, isFileEntry } from '../fsentry.js';
 import { extraRoots } from '../config.js';
 import { makeSession } from '../model.js';
 import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '../messages.js';
+import { rootsFor } from './kit.js';
 
 /**
  * Codex 会话扫描。
@@ -40,6 +41,29 @@ import { makeMessage, textPart, toolPart, reasoningPart, assertUnderAny } from '
  */
 
 export const name = 'codex';
+
+/**
+ * 结构声明：在「应用根」下认什么（方案 2.4 例 1）。
+ *
+ * 这是数据源解耦的关键：给一批任意目录，识别层靠它强匹配判定「这是 Codex」，
+ * 不再依赖本机路径或名字猜测。probes 全部是相对应用根（`.codex`）的路径；
+ * rootAnchor 说「命中 sessions 后上溯 1 层就是应用根」；dataPaths 交给 discoverWithin。
+ */
+export const structureSpec = {
+  agent: 'codex',
+  probes: [
+    { glob: 'sessions/**/rollout-*.jsonl', kind: 'file', weight: 3 },
+    { glob: 'sessions/**/rollout-*.jsonl.zst', kind: 'file', weight: 3 },
+    { glob: 'archived_sessions/*.jsonl', kind: 'file', weight: 2, optional: true },
+    { path: 'sessions', kind: 'dir', weight: 1 },
+    { glob: 'state_*.sqlite', kind: 'file', weight: 1, optional: true },
+  ],
+  rootAnchor: { from: 'sessions', up: 1 },
+  dataPaths: ['sessions', 'archived_sessions'],
+  format: 'codex-rollout',
+  minScore: 3,
+  dirHints: ['.codex'],
+};
 
 /** 只看开头这么多字节就够拿到 session_meta 和第一条用户消息。 */
 const HEAD_BYTES = 256 * 1024;
@@ -131,10 +155,23 @@ export function candidateRoots() {
   return codexDirs();
 }
 
+/**
+ * 旧签名、旧行为一字不改：不给 source 时本机默认根 + 空 ctx，
+ * 与改造前的 discover() 走的是同一段 walk/去重逻辑。
+ */
 export function discover() {
+  return discoverWithin(codexDirs(), {});
+}
+
+/**
+ * 显式数据源入口：roots 是 plan() 识别出的应用根（`.codex`），可能来自别的机器
+ * 拷来的备份。与 discover() 共用 walk/去重，杜绝两套解析代码。
+ * ctx 带 { sourceId, origin, roots }，当前实现不额外使用。
+ */
+export function discoverWithin(roots, ctx = {}) {
   const all = [];
 
-  for (const root of codexDirs()) {
+  for (const root of roots) {
     for (const sub of ['sessions', 'archived_sessions']) {
       walk(path.join(root, sub), all, 0);
     }
@@ -536,16 +573,19 @@ const KEEP_TAGS = new Set(['code', 'pre', 'b', 'i', 'em', 'strong', 'br', 'p', '
  * 会话几乎都是 .zst 整文件压缩，没法只读头部，只能整体解压。
  * 一个 157 KB 的会话解开约 80 行，成本可以接受；解不开就抛错，不假装成功。
  */
-export function readMessages(session) {
+export function readMessages(session, ctx = {}) {
+  // 显式数据源：外部备份里的 rollout 不在本机默认根下，用 ctx.roots 做越界校验
+  // 才不会被 assertUnderAny 误杀；没给 ctx 时 rootsFor 退回 codexDirs()，旧行为不变。
+  const roots = rootsFor(name, ctx, codexDirs);
   // 续接会话的 source 是多段路径（"a.jsonl.zst|b.jsonl"），
   // 按顺序把每一段的正文读出来再拼起来，才是完整的一场对话。
   const parts = String(session.source).split('|').filter(Boolean);
   const out = [];
   for (const src of parts) {
-    // 根可能有好几个（配置 / CODEX_HOME / ~/.codex）：只要 source 是从
+    // 根可能有好几个（配置 / CODEX_HOME / ~/.codex / 外部备份）：只要 source 是从
     // 其中一个根发现的，读它就是合法的。只校验第一个根时，第二根里的
     // 会话会被判成"越界"——rollout 明明已经在列表里，`cat` 却直接抛错。
-    const real = assertUnderAny(codexDirs(), src);
+    const real = assertUnderAny(roots, src);
     let text;
     if (real.endsWith('.zst')) {
       text = zlib.zstdDecompressSync(fs.readFileSync(real)).toString('utf8');

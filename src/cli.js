@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionContent } from './query.js';
 import { cacheLocation } from './registry.js';
+import { createSource } from './source.js';
 import { tildify, durationMs, dayKey } from './model.js';
 import { summarizeInput } from './messages.js';
 import { buildIndex, search, indexStats, indexPath } from './search.js';
@@ -52,11 +53,13 @@ function usage() {
   agent-archive projects                       列出本机所有有会话的项目
   agent-archive timeline <项目路径>            某个项目的会话时间线
   agent-archive handoff <项目路径>             跨 Agent 接力：谁在什么时候接手
+  agent-archive brief <项目路径>               交接单：上一位 Agent 干了什么、动过哪些文件
   agent-archive agents <项目路径>              某个项目里各 Agent 的分布
   agent-archive stats                          扫描统计与缓存位置
   agent-archive doctor                         采集体检（覆盖率与缺口）
   agent-archive env                            本机各 Agent 具备什么能力
   agent-archive env mcp                        MCP 服务清单（跨 Agent 归并）
+  agent-archive env providers                  模型渠道清单（跨 Agent 归并）
   agent-archive env cli                        CLI 产品、安装位置与各 Agent 的调用
   agent-archive env skills                     技能清单（按内容去重）
   agent-archive env usage                      技能使用率（哪些真用过）
@@ -88,6 +91,8 @@ cat 的会话参数:
 选项:
   --json        输出 JSON
   --no-cache    忽略缓存，全量重扫
+  --source <目录>      指定数据源目录（可重复/逗号分隔）；给一批任意备份/导出目录自动识别，不扫本机
+                      （P0 仅 projects 生效；须放在命令之后）
   --flat        时间线不按天分组
   --all         展开全部（env skills 显示所有共享技能；
                 timeline 列出全部会话，默认只给最近 100 场；
@@ -97,6 +102,8 @@ cat 的会话参数:
   --port <端口>           网页端口（serve，默认 7788）
   --limit <n>             搜索结果条数（search，默认 20）
   --min-gap <分钟>        handoff 只显示间隔超过这个值的换手
+  --read <n>              brief 读最近几场会话正文来抽文件和任务（默认 6）
+  --sessions <n>          brief 的“最近会话”列表条数（默认 10）
   --by <维度>             calls: agent / model / provider / session
                           usage: agent / model / project / session / day
   --force                 忽略增量判断，重建全部（index）
@@ -117,6 +124,7 @@ cat 的会话参数:
   agent-archive projects
   agent-archive timeline ~/code/my-app
   agent-archive handoff ~/code/my-app
+  agent-archive brief ~/code/my-app
   agent-archive cat --project .
   agent-archive cat 1d551b54 --tools
   agent-archive search 迁移
@@ -125,9 +133,12 @@ cat 的会话参数:
 }
 
 async function cmdProjects(opts) {
+  // P0 只在这一条命令透传 --source：有值造显式 Source，没有传 null（严格走老本机路径）。
+  const source = opts.source && opts.source.length ? createSource({ paths: opts.source }) : null;
   const { projects, stats, totalSessions, subagentSessions, unbound } = listProjects({
     noCache: opts.noCache,
     showAll: opts.showAll,
+    source,
   });
 
   if (opts.json) {
@@ -371,6 +382,40 @@ async function cmdHandoff(target, opts) {
   console.log(
     c(C.dim, '接续间隔越长，新 Agent 越不知道前面发生了什么。看某一场：agent-archive cat <id>')
   );
+}
+
+/**
+ * 交接单：把上一位 Agent 最后一段工作压成一页事实。
+ *
+ * 与 handoff 的分工：handoff 只算「谁换谁、隔多久」，不读正文；
+ * brief 读最后一小段正文，抽出动过的文件、留下的任务和最后停在哪里。
+ * 两者都不调模型。
+ */
+async function cmdBrief(target, opts) {
+  if (!target) {
+    console.error('需要项目路径。用 agent-archive projects 先看看有哪些。');
+    process.exit(2);
+  }
+
+  const { projectBrief, briefMarkdown } = await import('./brief.js');
+  const brief = await projectBrief(target, {
+    noCache: opts.noCache,
+    readSessions: opts.read === undefined ? undefined : Number(opts.read),
+    recentSessions: opts.sessions === undefined ? undefined : Number(opts.sessions),
+  });
+
+  if (opts.json) {
+    console.log(JSON.stringify(brief, null, 2));
+    return;
+  }
+
+  const md = briefMarkdown(brief);
+  if (opts.out) {
+    fs.writeFileSync(opts.out, md, 'utf8');
+    console.log(`已写入 ${opts.out}`);
+    return;
+  }
+  console.log(md);
 }
 
 async function cmdAgents(target, opts) {
@@ -1591,6 +1636,15 @@ async function cmdEnv(sub, opts) {
     return;
   }
 
+  if (which === 'providers' || which === 'channels' || which === 'models') {
+    if (opts.json) {
+      console.log(JSON.stringify(inv.providers, null, 2));
+      return;
+    }
+    printProviders(inv.providers);
+    return;
+  }
+
   if (which === 'cli') {
     if (opts.json) {
       console.log(JSON.stringify(inv.cli, null, 2));
@@ -1644,6 +1698,7 @@ function printEnvOverview(inv) {
     c(
       C.dim,
       `  ${s.agentsWithData} 个 Agent 有数据 · MCP ${s.mcpServices} 个服务（${s.mcpRegistrations} 条注册） · ` +
+        `渠道 ${s.channels} 个（${s.channelRegistrations} 条配置） · ` +
         `CLI ${s.cliProducts} 个（${s.cliDetected} 个有安装） · ` +
         `技能 ${s.skills} 个（${s.skillInstalls} 处安装） · 记忆 ${s.memoryLocations} 处`
     )
@@ -1678,7 +1733,53 @@ function printEnvOverview(inv) {
   console.log(c(C.dim, '  ● 多家共用   ○ 只在一家'));
   console.log('');
 
-  console.log(c(C.dim, '细看：env mcp / env cli / env skills / env memory / env audit'));
+  if (inv.providers && inv.providers.list.length) {
+    console.log(c(C.bold, '模型渠道'));
+    for (const p of inv.providers.list) {
+      const local = p.local ? c(C.dim, ' 本机') : '';
+      console.log(
+        `  ${p.display.padEnd(22)} ${String(p.agents.length)} 家  ${c(C.dim, p.agents.join(','))}  ` +
+          `${String(p.modelCount).padStart(3)} 个模型${local}`
+      );
+    }
+    console.log(c(C.dim, '  同一 base_url 的多家配置算一个渠道；只报凭证形态，不读值'));
+    console.log('');
+  }
+
+  console.log(c(C.dim, '细看：env mcp / env providers / env cli / env skills / env memory / env audit'));
+}
+
+/** `env providers`：渠道清单。 */
+function printProviders(p) {
+  console.log(c(C.bold, '模型渠道'));
+  console.log(
+    c(
+      C.dim,
+      `  ${p.channels} 个渠道 · ${p.registrations} 条配置 · ${p.agents.length} 家 Agent 在用` +
+        (p.filesUnknown ? ` · ${p.filesUnknown} 处读不到（未计入）` : '')
+    )
+  );
+  console.log('');
+
+  for (const c0 of p.list) {
+    const local = c0.local ? c(C.when, ' [本机]') : '';
+    const def = c0.defaults.length ? c(C.ok, ` 默认:${c0.defaults.join(',')}`) : '';
+    console.log(`${c0.local ? c(C.dim, '○') : c(C.ok, '●')} ${c0.display}${local}${def}`);
+    console.log(c(C.dim, `    ${c0.host}  ·  ${c0.protocols.join(' / ') || '协议未知'}`));
+    console.log(c(C.dim, `    Agent  ${c0.agents.join(', ')}`));
+    console.log(
+      c(C.dim, `    模型   ${c0.modelCount} 个${c0.models.length ? '：' + c0.models.join(', ') + (c0.modelCount > c0.models.length ? ' …' : '') : ''}`)
+    );
+    const auth =
+      c0.auth
+        .map((a) => (a === 'inline' ? '写在配置里' : a === 'env' ? '环境变量' : a === 'oauth' ? 'OAuth 登录' : '无'))
+        .join(' / ') || '未知';
+    console.log(c(C.dim, `    凭证   ${auth}${c0.apiKeyEnvs.length ? '（' + c0.apiKeyEnvs.join(', ') + '）' : ''}`));
+    if (c0.registrations.length > 1) {
+      console.log(c(C.dim, `    配置   ${c0.registrations.map((r) => `${r.agent}:${r.name}`).join('  ')}`));
+    }
+    console.log('');
+  }
 }
 
 function printCli(cli, opts) {
@@ -1868,7 +1969,7 @@ function printEnvAudit(r) {
   console.log(
     c(
       C.dim,
-      `  ${s.agentsPresent} 个 Agent · MCP ${s.mcpServices} 个服务 · CLI ${s.cliProducts} 个 · ` +
+      `  ${s.agentsPresent} 个 Agent · MCP ${s.mcpServices} 个服务 · 渠道 ${s.channels} 个 · CLI ${s.cliProducts} 个 · ` +
         `技能 ${s.skills} 个 · 记忆 ${s.memoryEntries} 条`
     )
   );
@@ -2581,14 +2682,30 @@ function parseArgs(argv) {
     '--price-out',
     '--by',
     '--min-gap',
+    '--read',
+    '--sessions',
+    '--source',
   ]);
 
   const flags = new Set();
   const values = {};
   const positionals = [];
+  const sources = []; // --source 可重复 / 逗号分隔，累积成数组
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    if (a === '--source') {
+      // 累积而非覆盖：其余 VALUE_FLAGS 仍是「最后一次生效」的老语义
+      const v = argv[i + 1];
+      if (v !== undefined && !v.startsWith('-')) {
+        for (const part of v.split(',')) {
+          const p = part.trim();
+          if (p) sources.push(p);
+        }
+        i++;
+      }
+      continue;
+    }
     if (VALUE_FLAGS.has(a)) {
       const v = argv[i + 1];
       if (v !== undefined && !v.startsWith('-')) {
@@ -2619,6 +2736,8 @@ function parseArgs(argv) {
     limit: values.limit,
     out: values.out,
     minGap: values['min-gap'],
+    read: values.read,
+    sessions: values.sessions,
     key: values.key,
     model: values.model,
     baseUrl: values['base-url'],
@@ -2626,6 +2745,7 @@ function parseArgs(argv) {
     priceIn: values['price-in'],
     priceOut: values['price-out'],
     by: values.by,
+    source: sources,
     positionals,
   };
 }
@@ -2656,6 +2776,9 @@ async function main() {
     case 'handoff':
     case 'relay':
       return cmdHandoff(first, opts);
+    case 'brief':
+    case 'handover':
+      return cmdBrief(first, opts);
     case 'agents':
       return cmdAgents(first, opts);
     case 'stats':

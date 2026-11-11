@@ -1,0 +1,9 @@
+{
+  "sessionId": "legacy-1",
+  "startTime": "2026-11-04T10:00:00.000Z",
+  "lastUpdated": "2026-11-04T10:02:00.000Z",
+  "messages": [
+    { "id": "l1", "type": "user", "content": "旧格式里的问题" },
+    { "id": "l2", "type": "gemini", "content": "旧格式的回答" }
+  ]
+}

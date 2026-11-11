@@ -8,6 +8,7 @@ import { isDirEntry, isFileEntry } from '../fsentry.js';
 import { extraRoots } from '../config.js';
 import { readHeadTail, headLines, tailLines, allLines, jsonLines } from './headtail.js';
 import { lineIterator } from './lines.js';
+import { rootsFor } from './kit.js';
 
 /**
  * Qoder 会话扫描。
@@ -33,6 +34,26 @@ import { lineIterator } from './lines.js';
  */
 
 export const name = 'qoder';
+
+/**
+ * 结构声明（数据源解耦 P1）。应用根是 `.qoder` / `.qoder-cn`（及 mac 应用数据目录）那一层。
+ * 新格式在 projects 下各工作区目录里的 .jsonl，旧格式在
+ * cache/projects/…/conversation-history/<id>/<id>.jsonl。
+ * 与 claude-code / workbuddy / codebuddy 同构，靠 dirHints 区分，绝不猜。
+ */
+export const structureSpec = {
+  agent: name,
+  probes: [
+    { glob: 'projects/*/*.jsonl', kind: 'file', weight: 4 },
+    { path: 'projects', kind: 'dir', weight: 1 },
+    { glob: 'cache/projects/*/conversation-history/*/*.jsonl', kind: 'file', weight: 2, optional: true },
+  ],
+  rootAnchor: { from: 'projects', up: 1, allowSelf: true },
+  dataPaths: ['projects', 'cache/projects'],
+  format: 'qoder-jsonl',
+  minScore: 4,
+  dirHints: ['.qoder', '.qoder-cn', 'Qoder', 'QoderCN', 'Qoder CN', 'QoderWork'],
+};
 
 /** Qoder 的配置根（可能有多套安装）。 */
 function configRoots() {
@@ -111,7 +132,7 @@ export function candidateRoots() {
   return configRoots();
 }
 
-export function discover() {
+export function discoverWithin(roots, ctx = {}) {
   const out = [];
   const seen = new Set();  const add = (file) => {
     // 同一个目录可能通过两个候选根都被看到（符号链接、大小写）。
@@ -123,7 +144,7 @@ export function discover() {
   };
 
   // 旧格式：<项目>/conversation-history/<id>/<id>.jsonl
-  for (const root of cacheRoots()) {
+  for (const root of cacheLayers(roots)) {
     let projects;
     try {
       projects = fs.readdirSync(root, { withFileTypes: true });
@@ -156,7 +177,7 @@ export function discover() {
   // 只认 UUID 文件名：工作区目录下也可能放别的 jsonl（配置、导出），
   // 靠形状区分比靠内容试读便宜。
   const uuidFile = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/i;
-  for (const root of projectRoots()) {
+  for (const root of projectLayers(roots)) {
     let workspaces;
     try {
       workspaces = fs.readdirSync(root, { withFileTypes: true });
@@ -205,6 +226,35 @@ export function discover() {
 }
 
 /** 新格式的一行是不是事件（旧格式没有顶层 type + sessionId）。 */
+/** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
+export function discover() {
+  return discoverWithin(configRoots(), {});
+}
+
+/**
+ * 把传入根归一到「cache/projects 层」与「projects 层」两组，复刻原
+ * cacheRoots()/projectRoots() 的派生（含 basename 已是 projects 的兼容），
+ * 所以显式源传应用根、本机 discover() 传 configRoots() 都能扫到同样的数据。
+ * 只做 stat，不读文件内容。
+ */
+function cacheLayers(roots) {
+  const out = [];
+  for (const r of roots || []) {
+    const c = path.basename(r) === 'projects' ? r : path.join(r, 'cache', 'projects');
+    if (isDir(c) && !out.includes(c)) out.push(c);
+  }
+  return out;
+}
+
+function projectLayers(roots) {
+  const out = [];
+  for (const r of roots || []) {
+    const p = path.basename(r) === 'projects' ? r : path.join(r, 'projects');
+    if (isDir(p) && !out.includes(p)) out.push(p);
+  }
+  return out;
+}
+
 function isProjectFormat(first) {
   return first && typeof first.type === 'string' && (first.sessionId || first.type === 'workspace-directories');
 }
@@ -604,8 +654,9 @@ function isToolEnvelope(text) {
  * .qoder-cn，可能在新格式也可能在旧格式，事先不知道是哪个。全部都不
  * 匹配才抛错——这里不做"第一个根目录"的假设，否则中国版的会话会被拒绝。
  */
-export function readMessages(session) {
-  const roots = allRoots();
+export function readMessages(session, ctx = {}) {
+  // 显式数据源：外部备份不在本机默认根下，用 ctx.roots 做越界校验才不会被误杀
+  const roots = rootsFor(name, ctx, allRoots);
   if (!roots.length) throw new Error('没有找到 Qoder 数据目录');
 
   let real = null;

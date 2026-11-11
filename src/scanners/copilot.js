@@ -5,6 +5,7 @@ import { makeMessage, textPart, toolPart, assertUnder } from '../messages.js';
 import { userDataCandidates, findUnder } from '../platform.js';
 import { isDirEntry, isFileEntry } from '../fsentry.js';
 import { extraRoots } from '../config.js';
+import { rootsFor } from './kit.js';
 
 /**
  * GitHub Copilot Chat 会话扫描。
@@ -32,6 +33,25 @@ import { extraRoots } from '../config.js';
 
 export const name = 'copilot';
 
+/**
+ * 结构声明（数据源解耦 P1）。应用根是 AppData/Roaming 下的 `Code` 目录
+ * 那一层，会话在 workspaceStorage 下各 hash 目录的 chatSessions 里。
+ * rootAnchor 从 User/workspaceStorage 上溯 2 层回到应用根。
+ */
+export const structureSpec = {
+  agent: name,
+  probes: [
+    { glob: 'User/workspaceStorage/*/chatSessions/*.json', kind: 'file', weight: 4 },
+    { glob: 'User/workspaceStorage/*/chatSessions/*.jsonl', kind: 'file', weight: 4 },
+    { path: 'User/workspaceStorage', kind: 'dir', weight: 1 },
+  ],
+  rootAnchor: { from: 'User/workspaceStorage', up: 2 },
+  dataPaths: ['User/workspaceStorage'],
+  format: 'copilot-chat-sessions-json',
+  minScore: 4,
+  dirHints: ['Code'],
+};
+
 const WS_REL = 'User/workspaceStorage';
 
 function workspaceRoot() {
@@ -47,16 +67,16 @@ export function candidateRoots() {
   return [...extraRoots(name), ...userDataCandidates('Code')];
 }
 
-export function discover() {
-  const root = workspaceRoot();
+export function discoverWithin(roots, ctx = {}) {
   const out = [];
+  for (const root of dataLayers(roots)) {
   let dirs = [];
   try {
     dirs = fs
       .readdirSync(root, { withFileTypes: true })
       .filter((d) => isDirEntry(d, path.join(root, d.name)));
   } catch {
-    return out;
+    continue;
   }
 
   for (const d of dirs) {
@@ -73,6 +93,32 @@ export function discover() {
       if (!/\.jsonl?$/.test(f.name)) continue;
       out.push(full);
     }
+  }
+  }
+  return out;
+}
+
+/** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
+export function discover() {
+  return discoverWithin([workspaceRoot()], {});
+}
+
+/**
+ * 把传入根归一到 workspaceStorage 层：应用根（Code 目录）拼上
+ * User/workspaceStorage；本机 workspaceRoot() 本身就是该层，原样。
+ * 只做 stat，不读文件内容。
+ */
+function dataLayers(roots) {
+  const out = [];
+  for (const r of roots || []) {
+    let base = r;
+    const deep = path.join(r, 'User', 'workspaceStorage');
+    try {
+      if (fs.statSync(deep).isDirectory()) base = deep;
+    } catch {
+      /* 已是 workspaceStorage 层 */
+    }
+    if (!out.includes(base)) out.push(base);
   }
   return out;
 }
@@ -223,9 +269,19 @@ function sessionId(file, data) {
  * result.metadata.toolCallResults 里，但结构松散，这里只取正文，
  * 免得把不确定的结构硬塞进统一模型。
  */
-export function readMessages(session) {
-  const root = workspaceRoot();
-  const real = assertUnder(root, session.source);
+export function readMessages(session, ctx = {}) {
+  const roots = rootsFor(name, ctx, () => [workspaceRoot()]);
+  let real = null;
+  let lastErr = null;
+  for (const r of roots) {
+    try {
+      real = assertUnder(r, session.source);
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!real) throw lastErr || new Error(`拒绝读取根目录之外的路径: ${session.source}`);
   const data = loadSession(real);
   if (!data) throw new Error('读不了 Copilot 会话');
 

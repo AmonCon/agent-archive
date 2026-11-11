@@ -154,3 +154,61 @@ test('skills: 没有 SKILL.md 的目录不算技能', async () => {
     box.cleanup();
   }
 });
+
+test('skills: disable-model-invocation 标成手动技能，不算模型能力', async () => {
+  const box = sandbox();
+  try {
+    box.write(
+      '.claude/skills/manual-one/SKILL.md',
+      `---
+name: manual-one
+description: 只能用户自己敲命令调起
+disable-model-invocation: true
+---
+正文
+`
+    );
+    box.write(
+      '.claude/skills/auto-one/SKILL.md',
+      `---
+name: auto-one
+description: 模型可以主动选
+---
+正文
+`
+    );
+    const { skillSummary } = await import('../src/env/skills.js');
+    const s = await box.run(() => skillSummary());
+    assert.equal(s.skills, 2);
+    assert.equal(s.manualOnly, 1);
+    const manual = s.list.find((x) => x.name === 'manual-one');
+    assert.equal(manual.manual, true);
+    const auto = s.list.find((x) => x.name === 'auto-one');
+    assert.equal(auto.manual, undefined);
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('skills: 同 SKILL.md 但脚本不同，是两份技能不是一份', async () => {
+  const box = sandbox();
+  try {
+    const skill = (name) => `---
+name: ${name}
+description: 同名同描述
+---
+正文
+`;
+    box.write('.claude/skills/alpha/SKILL.md', skill('shared-name'));
+    box.write('.claude/skills/alpha/run.sh', 'echo alpha');
+    box.write('.claude/skills/beta/SKILL.md', skill('shared-name'));
+    box.write('.claude/skills/beta/run.sh', 'echo beta');
+
+    const { skillSummary } = await import('../src/env/skills.js');
+    const s = await box.run(() => skillSummary());
+    assert.equal(s.skills, 2, '脚本不同必须分成两份能力');
+    assert.ok(s.list.every((x) => x.treeHash), '同 SKILL.md 的分组要带整树哈希');
+  } finally {
+    box.cleanup();
+  }
+});

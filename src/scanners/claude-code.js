@@ -7,6 +7,7 @@ import { withOverrides } from '../platform.js';
 import { isDirEntry } from '../fsentry.js';
 import { extraRoots } from '../config.js';
 import { lineIterator } from './lines.js';
+import { rootsFor } from './kit.js';
 
 /**
  * Claude Code 会话扫描。
@@ -31,6 +32,29 @@ import { lineIterator } from './lines.js';
  */
 
 export const name = 'claude-code';
+
+/**
+ * 结构声明：在「应用根」下认什么（数据源解耦 P1）。
+ *
+ * 应用根是 `.claude`（或 `.config/claude`）那一层；会话在
+ * `projects/<工作区转义>/<uuid>.jsonl`。rootAnchor 说「命中 projects 后
+ * 上溯 1 层就是应用根」。dirHints 是与 codebuddy / workbuddy / qoder
+ * 同构消歧的关键：四家都认「projects 下各工作区目录里的 .jsonl」，靠应用根目录名区分。
+ */
+export const structureSpec = {
+  agent: name,
+  probes: [
+    { glob: 'projects/*/*.jsonl', kind: 'file', weight: 4 },
+    { path: 'projects', kind: 'dir', weight: 1 },
+    // 可选旁路标志（Claude Code 的全局配置，常写在 home 层；缺失不扣分）
+    { path: '.claude.json', kind: 'file', weight: 1, optional: true },
+  ],
+  rootAnchor: { from: 'projects', up: 1, allowSelf: true },
+  dataPaths: ['projects'],
+  format: 'claude-code-jsonl',
+  minScore: 4,
+  dirHints: ['.claude', 'claude'],
+};
 
 /** 所有候选的 projects 根目录（配置 > 环境变量 > 平台默认）。 */
 function projectDirs() {
@@ -70,10 +94,10 @@ export function candidateRoots() {
   ];
 }
 
-export function discover() {
+export function discoverWithin(roots, ctx = {}) {
   const out = [];
   const seen = new Set();
-  for (const root of projectDirs()) {
+  for (const root of dataLayers(roots)) {
     let dirs;
     try {
       dirs = fs.readdirSync(root, { withFileTypes: true });
@@ -101,6 +125,34 @@ export function discover() {
         out.push(p);
       }
     }
+  }
+  return out;
+}
+
+/** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
+export function discover() {
+  return discoverWithin(projectDirs(), {});
+}
+
+/**
+ * 把每个传入根归一到「projects 层」，让 discoverWithin 同时吃得下两种传法：
+ *   - 应用根（`.claude` / `claude`，下有 projects/）→ 拼上 projects；
+ *   - 本机 discover() 传的 projects 层（basename 就是 projects）→ 原样。
+ * 只做 stat，不读文件内容。
+ */
+function dataLayers(roots) {
+  const out = [];
+  for (const root of roots || []) {
+    let base = root;
+    if (path.basename(root) !== 'projects') {
+      const asApp = path.join(root, 'projects');
+      try {
+        if (fs.statSync(asApp).isDirectory()) base = asApp;
+      } catch {
+        /* 不是应用根，按原层处理 */
+      }
+    }
+    if (!out.includes(base)) out.push(base);
   }
   return out;
 }
@@ -323,8 +375,10 @@ function isNoise(text) {
  * 按时间顺序摊平成消息。tool_result 在 Claude Code 里是 role=user 的
  * 消息，但语义上是工具输出，所以单独归成 tool，不混进用户发言。
  */
-export function readMessages(session) {
-  const file = assertUnderAny(projectDirs(), session.source);
+export function readMessages(session, ctx = {}) {
+  // 显式数据源：外部备份不在本机默认根下，用 ctx.roots 做越界校验才不会被误杀
+  const roots = rootsFor(name, ctx, projectDirs);
+  const file = assertUnderAny(roots, session.source);
   const out = [];
 
   // 逐行读，不整份读成字符串再 split：大会话文件（几十 MB）整读会同时

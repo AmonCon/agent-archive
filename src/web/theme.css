@@ -2623,6 +2623,80 @@ mark {
   text-underline-offset: 2px;
 }
 
+/* ------------------------------ 交接单 ------------------------------ */
+
+.brief-quotes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.brief-quote {
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+  min-width: 0;
+}
+
+.brief-k {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+.brief-q {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.brief-block {
+  margin: 0 0 16px;
+}
+
+.brief-h {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-default-hover);
+}
+
+.brief-tasks {
+  margin: 0;
+  padding: 12px 14px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+}
+
+.brief-tasks li {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  line-height: 1.55;
+}
+
+.brief-box {
+  flex: none;
+  color: var(--text-brand);
+}
+
+.brief-note {
+  margin: 6px 2px 0;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+}
+
 /* ------------------------------ 环境层 ------------------------------ */
 
 .tabs {
@@ -3159,6 +3233,10 @@ mark {
 
   .handoff-cell:last-child {
     border-bottom: 0;
+  }
+
+  .brief-quotes {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .day-head {

@@ -593,3 +593,212 @@ Codex 旧版子代理：`session_meta` 里 `session_id` 指向父、`id` 指向�
    没有要修的性能问题。
 3. 唯一留下的钩子：如果会话量翻几倍（比如 >100 M 字符），重看
    「fts_text 压缩 + 应用层同步」——现在明确不做。
+
+---
+
+## 2026-11-05 第四轮：方向纠偏 —— 从「扫本机」回到「通用识别引擎」
+
+用户 2026-11-05 明确纠偏，本轮所有工作围绕它展开。**这条要写在最前，因为它决定后面每一条判断的方向**：
+
+> 「本项目并不要求必须扫描本地，本地只是提供这些文件用于测试。主要能力不要搞错，
+> 还是要深度继续研究 CC Switch 和 MAGPIE 这两款软件，学习它们的逻辑。
+> 你只支持我们本地的几款，这肯定不行。」
+
+### 纠偏前错在哪（用事实锚，别再犯）
+
+| 错 | 证据 |
+|---|---|
+| 把「扫本机家目录」当成立项前提 | `registry.js:529` `discover()` 无参；12 家 scanner 各自 `os.homedir()`+平台约定+env+`config.roots` 拼路径（全 `src/` 141 处）；测试靠 `test/helpers.js` 把 `USERPROFILE/HOME` 指到临时目录造「假机器」 |
+| 把本机 4.88 GB 真数据当主战场 | 前三轮台账大半是缓存指纹、WAL、逐行读、FTS 这类围绕本机数据的工程打磨 |
+| 把「学两款软件的逻辑」降格成挑技巧 | 对 CC Switch/MAGPIE 的核心能力大量判「不适用/已否决」，理由是「我们是只读档案馆」——但覆盖面才是主能力 |
+| 覆盖面 = 本机恰好装过的 12 款 | `registry.js:48-61`；`doctor.js:483-596` 手写清单里 Windsurf/Trae/Cline 还是 `blocked` |
+
+### 本轮产出的原始取证（三份，都在 `findings/`）
+
+- [`cc-switch-coverage-2026-11-05.md`](findings/cc-switch-coverage-2026-11-05.md) — CC Switch 会话层 13 家逐家规格
+- [`coverage-gap-2026-11-05.md`](findings/coverage-gap-2026-11-05.md) — 覆盖面差距总台账 + 本机实测 + 派单模板
+- [`source-decoupling-2026-11-05.md`](findings/source-decoupling-2026-11-05.md) — 数据源解耦方案（P0~P4）
+- [`magpie-coverage-2026-11-05.md`](findings/magpie-coverage-2026-11-05.md) — MAGPIE 会话/调用识别逻辑全量规格（**已回填**）
+
+### 上游纠错（**已采用**，下次别再推错）
+
+| 事项 | 判断 | 证据 |
+|---|---|---|
+| **「19 个配置清单」不属于 CC Switch** | **纠错**：那是 MAGPIE `magpie ls` 的数（doc:102 张冠李戴）。CC Switch 配置层 `AppType::all()` = **14**（多出的 Claude Desktop 只读不了会话），会话层 = **13** | CC Switch `app_config.rs:466-560`；2026-10-21 调研 `跨Agent会话识别与记忆中间件研究.md:102` |
+| CC Switch 会话层是 **13 家**不是 10 家 | **纠错**：旧调研少算 `dsh`/`kimi`/`omp` 三家 | `session_manager/mod.rs:61-97`；`providers/` 19 个文件中 13 个 provider |
+| 注册表不是「数据驱动」 | **已查证**：5 处字符串 `match` 分派 + 一组共享件；唯一数据驱动的是 `Dialect`（Pi/omp 共用整份解析器）——**补 fork 型 Agent 时值得抄** | `mod.rs:108-136,229-259`；`pi.rs:56-76`；`omp.rs:8-15` |
+| **CC Switch 会话扫描不读 `CLAUDE_CONFIG_DIR`/`CODEX_HOME`** | **纠错（我们更强）**：它只读自己 settings 的 `*_config_dir` + `~/.claude`/`~/.codex`。我们的 `codexDirs()`/dsh 多候选是超集，别「照抄上游」把它砍掉 | `config.rs:91-97`；`codex_config.rs:270-276`；`dsh_config.rs:16-21`（且无 `~/DeepSeekHarness` 候选） |
+| CC Switch 不用 macOS Application Support | **查证**（LESSONS:116「未核对」结案）：全仓无该字样，靠 `~/.xxx` + xdg | CC Switch 全仓 grep |
+| **`callSources()` 是「调用记录」注册表，不是会话注册表** | **纠错（最重要）**：10-21 调研记反了。会话层权威清单是 `access.go:193` `Found()` 的 **25 家**；调用层 13 项 `xxxCallFiles()`/14 家，三类 reader 漏登记就永远不读（Cline 活例） | MAGPIE `calls.go:340-349`、`call_cache.go:246-296`、`access.go:193-248` |
+| MAGPIE 三集合分清 | **已查证**：A1 读会话 25 家 / A2 读调用 13 项 / B 改配置·接管流量 **74+ 内置**；A 受 `Reads()` 同意门控。「19 个」= 10-21 单机 `magpie ls` 的 `Detected()` 实测数，**不是代码上限**（与 CC Switch 报告互相印证，两处台账都别再拿它当指标） | `agents.go:237-312`；`cli/main.go:443,447` |
+| 同源复用是覆盖面第一杠杆 | **值得抄**：ZCode=OpenCode 表、Qoder=Claude 行、WorkBuddy/CodeBuddy 共用、Pi/omp/raft/cindy 共用 `piParse`。我们已有 workbuddy/qoder/zcode，握着 4+ 家免费扩展点 | `zcode.go:8-16`；`pi.go:24-26`；`workbuddy.go:41` |
+| `MergeExternal` 网关第二数据源 | **不适用（了解不抄）**：网关 ledger 里没本地文件的会话以只读方式并入，正是「跨 Agent 记忆」雏形；但我们明确不转发请求、不接管流量 | `external.go:31-42` |
+| **别照上游差距清单盲建扫描器** | **已核**：`qoder-cn`（`qoder.js:53-61` 已含全部变体）、`workbuddy-ai`（`workbuddy.js:57-60` 已含）其实我们早已覆盖，上游清单按「注册表 vs 12 款名单」推的，是误报 | 回自己 `src/scanners/` 逐条核对 |
+| Trae/Windsurf/Kiro 会话 | **不排期**：MAGPIE 11-05 核实 Trae/Windsurf 完全没适配会话读取、Kiro 只在配置层（我们反倒已有 kiro 扫描器）；`doctor.js` 已标 `blocked`，口径一致 | `agents.go` / `targets.go:830-844` |
+| 本机确实有 `.pi`/`.gemini`/`.openclaw-autoclaw`/`.commandcode` 目录 | **实测**（补覆盖面能用本机目录验证形状）：`~/.openclaw-autoclaw/agents` 167 文件、`~/.commandcode/projects`、`~/.gemini` 86 MB（主体 antigravity）、`.trae*`/`.codeium` 加密读不了 | 2026-11-05 只读列目录 |
+
+### 覆盖面差距（**待办，按价值排序**）
+
+- CC Switch 侧差 **7 家**：`gemini`（回放日志 JSONL）/ `pi`（会话树，唯一硬骨头）/ `openclaw` / `grokbuild`（元数据正文分离）/ `kimi` / `mcode` / `omp`（pi 之后用 `Dialect` 带出）。逐家缺什么见总台账 §2。
+- MAGPIE 侧待回填：`codebuddy` / `cline` / `claude-desktop`(Cowork) / `wsl` / `alma`/`cindy`/`droid` 等名字不直观的先查清是不是真会话源，**别凭名字建扫描器**。
+- 反向差集：`zcode`/`qoder`/`cursor`/`copilot`/`kiro`/`workbuddy` 是我们独有（CC Switch 会话层没有），保持不动。
+- 明确不做：Windsurf / Trae 加密库（如实报读不了，不假装有扫描器）。
+- **派单纪律**：每家一个新 `src/scanners/<agent>.js` + `test/<agent>.test.js` + 合成样本；**不改 `registry.js` 的 scanners 数组**（lead 统一注册）；必须同时满足「本机 discover()」与「显式源 structureSpec+discoverWithin」两套契约；测试用合成样本、不碰真数据。
+
+### 数据源解耦（**P0 进行中**，p0-source teammate）
+
+- 三问速答现状全「没有」：CLI 无 `--source`、config 无任意目录形态、MCP 不能传源（`source-decoupling` §0）。
+- **硬不变量**：`source===null` 时 `scanAll` 严格走原 `discover()`，缓存文件名/manifest/TTL 全不变 → 265 用例全绿；`discover()` 等旧签名一个不改，只新增可选 `structureSpec`+`discoverWithin(roots,ctx)`；零依赖；不猜 cwd/不猜 agent 归属；不改事实层/视图层分界与 MCP 只读语义。
+- **缓存隔离必须与 P0 一起做**：`cacheFile(sourceId='local')` 保持 `scan-v5.json` 不变，显式源用 `scan-v5-<id>.json`；`scanMemo` 单例改 Map。**不给 source 时连 `sourceId='local'` 都不能追加进 `manifestParts`**（否则 manifestHash 变，违背兼容不变量）——已核 `schema-version.test.js`/`mcp-snapshot.test.js` 都不是全等断言，加 `manifest.source` 不挡路。
+- 落地顺序 P0（骨架+codex 样板+缓存隔离+最小 CLI+e2e）→ P1（12 家 scanner 并行）→ P2（config/query/model/unknown）→ P3（入口）→ P4（收尾/文档）。
+
+### 本轮基线（**实测**）
+
+Node v24.12.0，`npm test` → **265 / 265 全绿**、0 fail。
+`README.md:501` 的「14 个用例」、旧记的「228」均已过时，文档收尾时要一起改。
+
+### 最终结果（2026-11-05 收尾）
+
+- **覆盖面 12 → 21 家**，且 **21 家全部具备两套契约**（本机 `discover()` + 显式源
+  `structureSpec`/`discoverWithin`），name 唯一、无缺漏。旧 11 家补齐 spec 后，
+  `.claude` 消歧在真实注册表下唯一绑定 `claude-code`（不再被 codebuddy 抢走）。
+- **`npm test` 349 / 349 全绿 / 0 fail**（265 基线 + 26 P0 + 49 补扫描器 + 9 fixture 契约）。
+- **doctor**：21 家 supported、0 条「已接入却 blocked」；windsurf/trae 如实标加密读不了。
+- **多源集成验证**（`verify-multi-source.mjs`）：含 `.claude`/`.codex`/`.gemini` 的假备份
+  → 三家自动识别、会话全解出、正文全读得出、本机毒丸零混入、decoy 只进未识别候选、
+  缓存按 source 隔离且 manifestHash 不同。`--source` 端到端可用。
+- **口径**：README 开头改为「核心能力是认得出、解得开，不是扫本机」；「当前支持」表
+  12→21 家并写明覆盖面来自 CC Switch/MAGPIE 并集；新增「指定数据源」章节；
+  测试数字 14→349；`CONTRIBUTING.md` 补两套契约；「本机=测试样本」写进测试章节。
+- README/CONTRIBUTING 里 `README.md:501`「14 个用例」等过时数字已改。
+
+### 覆盖面落地（进行中，2026-11-05）
+
+用「**零依赖并行**」化解 P0 与补扫描器的串行等待：`structureSpec`（纯数据）+ `discoverWithin(roots,ctx)`
+（纯函数）靠鸭子类型对接，scanner 不 import P0 文件；派单规范见
+[`findings/scanner-brief-2026-11-05.md`](findings/scanner-brief-2026-11-05.md)。四路 teammate 写作用域互不重叠。
+
+- 已交付 6 家（各自定向测试全绿）：
+  `gemini`（回放日志 id upsert/`$set`/`$rewindTo`）、`openclaw`（无树形分支、displayName 优先、
+  `.openclaw-autoclaw` 变体）、`codebuddy`（复用 workbuddy 解析、改 agent 名 + `ctx.roots` 越界校验）、
+  `kimi`（两种目录形态、usage.record 不与 step.end 配对）、`grokbuild`（summary 元数据 + 两种正文分离）、
+  `mcode`（SQLite 两代消息表 UNION + JSONL 两种形态按扩展名分流）。合计 **31 个新用例全绿**。
+- **两处主动偏离值得记**（都是「上游规格 vs 真实形状」冲突时的正确取舍）：
+  1. `grokbuild` 的 spec 在 `sessions/*/summary.json` 之外补 `sessions/**/summary.json`——真实布局是
+     `sessions/<URLenc cwd>/<id>/summary.json` **两层**，单 `*` 会漏识别。→ 写 glob 前先确认真实目录深度。
+  2. `mcode` 放弃 `contentProbe`（`SQLite format 3` 头）——它只适用于 SQLite 形态，会把纯 JSONL 备份误杀，
+     与「两种形态都认」冲突。→ **形态多元的家不要加单一格式的顶层内容探针**。
+- **如实留空**（别当成已完成）：kimi 的 `agent.switched` 活动分支投影、grok 的 `tool_calls` 配对形状
+  （上游自标「待核实」）、mcode 的 `history-catalog.json` 结构与 JSONL 的 cwd/title——都标了边界、没编字段。
+- **两条协作纪律**：① 否决 `setScanSource` 进程级全局 shim（async 交错会串根），改显式直传；
+  ② `test/fixtures/samples/` 用**扁平文件名**——`fixtures-contract.test.js:140-155` 的 `readdirSync` 会把
+  子目录当「未登记样本」误报；且登记 `index.js` 必须在 9 家注册进 `registry.js` **之后**（契约测试
+  `scannerOf()` 从注册表找、`scanAll` 扫全部家）。
+- **标题口径裁决（pi/omp）**：scan-tree 问「pi 取第一句真人输入、omp 取 `type:title` 槽，要不要统一成
+  都取第一句 user」→ **保持现状，不返工**。理由：① omp 的 `type:title`/`title_change` 槽是
+  CC Switch `Dialect.title_slot`（`providers_pi.rs:56-76`）明确设计的行为位，正是本轮「学上游逻辑」的成果，
+  抹掉它等于抹掉同源复用里唯一的差异；② 项目里本就有「应用生成标题优先」的先例——
+  `workbuddy.js:251-296` 的 `ai-title` 优先（有实测理由），而 Codex/新 6 家取第一句真人输入
+  （`codex.test.js:213` 锁「不被应用标题覆盖」），两种口径并存、都有据；③ 标题是**展示名**不是事实层数据
+  （project/id/时间戳才是事实），允许各家按产品语义取。→ **如实记这个不一致**，收尾在 README
+  「真实用户第一句」那节标注例外，避免下次深读重新纠结。
+- **收尾「多源集成验证」抓出两个真缺陷**（`research/probes/verify-multi-source.mjs` /
+  `diag-multisrc.mjs`，可复用）——这是「把多家假备份喂给 `--source`」才暴露的，
+  单家 e2e 与单测都发现不了，说明跨入口验证不能省：
+  1. **`structure.js` 的 `tmp` 豁免**（已修，lead）：`inspectSignals`/`walkCandidates` 会把
+     `SKIP_NAMES` 里的 `tmp` 当噪声跳过，但 **Gemini CLI 的会话就在 `~/.gemini/tmp/<hash>/chats/`**，
+     导致 `.gemini` 有 `tmp` 信号却 `files=0`、候选被丢弃 → 显式源下 `gemini` 完全识别不到
+     （`scoreStructure(gemini.spec, dir)` 单独跑是正常的 score=5/anchor=.gemini，问题只在候选收集）。
+     修法：把 `anchorNames`（各家 `rootAnchor.from` 第一段，含 `tmp`）传进 `inspectSignals`，
+     命中 `SKIP_NAMES` 但属于 `anchorNames` 的目录仍下钻。**通用规律：`tmp`/`cache`/`logs`
+     对通用扫描是噪声，对某家恰恰是数据载体，SKIP 判定必须让位于结构声明。**
+  2. **旧 11 家缺 `structureSpec`/`discoverWithin`**（P1，已派 `scan-legacy-spec` teammate）：
+     P0 只给 codex 做了样板、三个补扫描器 teammate 只做新 9 家，**旧 11 家（claude-code/zcode/qoder/
+     dsh/hermes/cursor/opencode/antigravity/kiro/copilot/workbuddy）漏了**。后果有两层：
+     显式源下旧家数据全读不出；更隐蔽的是 `~/.claude/projects/...` 被 **codebuddy 的
+     `projects/*/*.jsonl` spec 抢走、识别成 codebuddy**（因为 `identify()` 只从有 spec 的声明打分，
+     claude-code 缺席就没有竞争者）。→ **「补覆盖面」不只等于「加新家」，解耦契约必须覆盖全部
+     已接入的家，否则同构 spec 会张冠李戴。**
+  3. **`parseAll` 悖论（第三个，最隐蔽）**：`zcode`/`opencode`/`cursor`/`hermes` 的
+     `parseAll(file)` **忽略传入的 `file`**，内部用模块级 `dbPath()`/`getDb()` 开本机库连接
+     （zcode.js:71-80 实证）。而 `registry.parseFile` 原本只调 `parseAll(file)`、不透传 ctx。
+     于是显式源下这四家「能识别、能列文件、但解析开的还是本机库」——静默错数据，
+     且这四家恰是数据量最大的。修法：`registry.parseFile` 把 ctx 透传给 `parseAll(file, ctx)`
+     /`parse(file, ctx)`（旧扫描器忽略多余参数，零回归）；四家改用传入的 `file` 开连接，
+     连接缓存的键也要按 `file` 比，否则切 source 复用旧连接。
+     → **通用规律：`discoverWithin` 只解决「找哪些文件」，解析器还必须真的读「传进来的那个文件」；
+     任何「模块级本机路径」都会在脱离本机后变成静默错误。** 这两条（列文件 / 读文件）要成对验证。
+  4. **已知边界（本轮刻意不修，留给下一轮）**：`identify()`（`source.js:182-187`）**只在 `hits.length>1`
+     时用 `dirHintMatch` 消歧，单一命中时不校验 dirHints**。于是「只靠一个通用文件名」的 spec
+     （如 hermes 的 `state.db`、SQLite 家）会误绑任何含同名文件的目录——实测一个叫
+     `pgAdmin/sessions/state.db` 的 decoy 被绑成 `hermes@sessions(5)`，尽管 `dirHintMatch=false`。
+     **没修的原因**：改严要动 `source.js`（P0 骨架）+ 给 21 家逐个确认 dirHints 覆盖所有真实形态，
+     误伤真实数据（用户把库放在非点目录名）的代价比这个极端 decoy 大；且真实备份里罕有恰好叫
+     `state.db` 的无关库。多源验证脚本已把 decoy 改成 `neutral.db` 只测「有 sessions 子目录但无强特征」。
+     **下一轮正确修法**：单一命中时，若 `spec.dirHints` 非空且 `dirHintMatch=false`，降级为
+     `unmatched`（或要求 `spec.probes` 至少 2 条独立强特征才算命中）；并给「单文件名即够」的家
+     补一条目录/同伴文件探针。改前必须跑 `test/source.test.js`(11) + `test/structure.test.js`(10) 回归。
+- **收尾前两项只读自检已跑通**（`research/probes/verify-new-scanners.mjs` /
+  `verify-structure-specs.mjs`，可复用）：
+  ① 9 家 scanner 全部 `import` 成功、导出齐全、`name` 无撞车、`structureSpec` 形状一致；
+  ② 造 9 个真实形状最小应用根目录调宿主 `scoreStructure`，**9 家全部命中且 `anchorOf` 正确上溯到点目录层**，
+  pnpm-cache / pgAdmin / 空目录三个 decoy **均未被误判**。即 spec↔宿主匹配器对得上，注册时不会才发现认不出。
+
+---
+
+## 2026-11-11 第五轮：环境/资产层（MCP / 技能 / 渠道）
+
+六天过去，magpie 动了 **442 个文件（+3.5 万行）**，cc-switch 126 个（+1.08 万行）。
+会话层前四轮已做透，这轮按用户要求转向**「各个渠道、各个 Agent、MCP、技能」**——
+也就是 `src/env/`。两份取证见 `findings/{magpie,cc-switch}-env-2026-11-11.md`，
+落地清单见 `findings/adoption-2026-11-11.md`。
+
+### 最重要的一条：读不到 ≠ 没有
+
+两家都用血写下了同一条：magpie 的 `ErrUnreadable` 永不等于空（`#5709` 曾把
+九个 Agent 的 AGENTS.md 清空），cc-switch 的 `Io{path}` / `Config` / `Conflict`
+三分类。我们的环境层原来把「JSON 坏了」「目录没权限」都折成 `0` 或静默跳过——
+在体检工具里，这是最坏的一种错：用户会据此做决定。
+
+现在：`files[]/roots[]` 带 `ok|unreadable|unparsable`，摘要带 `filesUnknown` /
+`rootsUnknown`，`env audit` 单列一条「N 处读不到（未知，未计入）」。
+
+### 第二重要：DSH 自己的 MCP 都没读到
+
+DSH 的 MCP 不是 `mcpServers` 文件，而是 profile 的 `cordis.patch.yml` 里
+`@deepseek-ai/dsh-mcp-client` 的 loader 条目。我们跑在 DSH 里，却把 DSH 显示成
+「0 个 MCP」——**不是没配，是没读**。补上后本机立刻多出 `magpie-image`，
+Antigravity 也从未适配的 0 变成 5 条注册。教训：**先证明自己看得见自己**。
+
+这一轮 MCP 源从 9 个扩到 25 个（24 家 Agent）（dsh/kimi/mcode/pi/omp/antigravity/copilot/grokbuild），
+每次都是「格式同名不同形」：Copilot 的 stdio 写 `type: local`；Antigravity 首次启动
+建 0 字节文件；Grok Build 与 Codex 同为 `[mcp_servers]` TOML。格式覆盖是最笨也
+最值的工作。
+
+### 第三：渠道是跨 Agent 的，不是每家一份
+
+cc-switch 的 Provider 模型让我们意识到：`base_url` 就是渠道身份。同一个中转站
+在 Claude Code、Codex、Qoder 各配一遍，用户心里是**一个渠道、三家在用**。
+新增 `src/env/providers.js` 后本机读到 3 个渠道/11 条配置/5 家 Agent：
+`magpie` 本机网关、`嘻嘻-claude` 中转、`magpie-anthropic`。这条直接回答了
+「我到底配了几个渠道」。
+
+安全线：只报 `inline/env/oauth` 形态与环境变量名，URL 去 query/账号密码。
+测试里用 `JSON.stringify(result).includes(secret) === false` 锁死。
+
+### 明确不抄：真连通性探测
+
+cc-switch 的 `mcp_connectivity` 做得很细（三态 `Connected/AuthRequired/Failed`、
+30 秒超时不排队、并发 3、无缓存），magpie 的 `CheckServers` 更细（tools/list
+分页、每个 step 单独预算、401 续签一次）。但两家的实现都要 **spawn 用户配置里的
+任意命令**、发带凭据的请求。我们是只读档案馆，这等于给配置文件一个本地代码
+执行入口。只抄状态词汇与错误分类，探测本身不抄；用**静态 PATH 检查**替代
+（命令是否存在，不执行）。
+
+### 数字
+
+- 用例 **351 → 362 全绿**（本轮 +11）。
+- MCP：7 服务/13 注册 → **21 服务/37 注册**（Qoder 的 settings.json 里有 16 条、mcp.json 只有 5 条——只读后者会漏一大半）；`filesUnknown=0`。
+- 渠道：**3 个/11 条配置/5 家 Agent**。
+- 技能：297 个/385 处安装；整树哈希只在"同 SKILL.md 的不同副本"间启用，
+  平扫不加 IO。

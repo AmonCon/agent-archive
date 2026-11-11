@@ -1,0 +1,2 @@
+{"message_id":"msg-1","turn_id":"turn_1","message":{"role":"user","content":"第一句真人输入","timestamp":1791717525043}}
+{"message_id":"msg-2","turn_id":"turn_1","message":{"role":"assistant","provider":"custom_provider:relay","model":"m2","usage":{"input":123,"output":7,"cacheRead":50,"cacheWrite":20},"timestamp":1791717526043}}

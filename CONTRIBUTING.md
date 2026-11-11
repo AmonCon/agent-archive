@@ -75,6 +75,57 @@ export function closeStore() {}            // 可选，用完关句柄
 export function candidateRoots() {}        // 可选但强烈建议：声明你会去哪些目录
 ```
 
+### 两套契约：本机默认 与 指定数据源
+
+上面这些是**本机默认**契约——不给数据源时，工具扫当前机器。此外还有一套
+**可选**的「指定数据源」契约：用户可以给一批任意目录（别的机器拷来的备份、
+导出包、`zip` 解开的目录），工具据此识别里面是哪家的会话并解出来。
+本机真实数据只是测试样本，不是立项前提；指定数据源和扫本机走的是**同一条解析链路**，
+不复制第二套解析代码。
+
+要让你写的扫描器也能参与「指定数据源」，额外导出两样（**纯数据 + 纯函数**，
+不需要 import 本项目的任何模块）：
+
+```js
+// 声明「在应用根之下，我认什么样的结构」。纯数据对象。
+export const structureSpec = {
+  agent: 'xxx',
+  probes: [                                     // 相对「应用根」的 glob/path
+    { glob: 'sessions/**/*.jsonl', kind: 'file', weight: 3 },
+    { path: 'sessions', kind: 'dir', weight: 1 },
+  ],
+  rootAnchor: { from: 'sessions', up: 1 },      // 命中项上溯 N 层 = 应用根
+  dataPaths: ['sessions'],                      // discoverWithin 要扫的相对子目录
+  format: 'xxx-jsonl', minScore: 3,
+  dirHints: ['.xxx'],                           // 应用根首选目录名（同构消歧用）
+};
+
+// 在给定的一组「应用根」下找会话文件。纯函数。
+export function discoverWithin(roots, ctx = {}) {
+  const out = [];
+  for (const root of roots) {
+    // 按 structureSpec.dataPaths 遍历，push 文件路径
+    // ctx = { sourceId, origin, roots }；越界校验用 ctx.roots || 本机根
+  }
+  return out;
+}
+```
+
+三条纪律：
+
+1. **旧签名一个不改**。推荐把 `discover()` 写成一行封装
+   `return discoverWithin(本机默认根(), {})`——这样本机路径与显式数据源共用同一份解析。
+2. **`structureSpec` 与 `discoverWithin` 必须成对加**。只有其中一个、或两个都没有的扫描器，
+   在「指定数据源」模式下会被记一条 `source-unsupported` 并跳过——**绝不静默退回扫本机**
+   （否则两份数据混在一起无法解释）。只扫本机时两者都不需要。
+3. **拿不准就不认**。`structureSpec` 只描述形状，靠 `dirHints` 和强特征消歧；
+   同构目录（如都认 `projects/*/*.jsonl` 的几家）判不准时宿主会报 `ambiguous` 让用户指定，
+   **不按分数最高者猜**。
+
+`readMessages(session, ctx = {})` 若做路径越界校验，用 `ctx.roots || 本机默认根`，
+否则外部备份的会话会被当成「根目录之外」拒读。完整设计与字段含义见
+[`research/upstream/findings/source-decoupling-2026-11-05.md`](research/upstream/findings/source-decoupling-2026-11-05.md)。
+
 ### 返回普通对象就行
 
 **不需要 import 这个项目的任何模块。** `parse`/`parseAll` 返回普通对象，缺省值

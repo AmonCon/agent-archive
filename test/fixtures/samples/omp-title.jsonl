@@ -1,0 +1,5 @@
+{"type":"title","title":"Oh My Pi 演示会话"}
+{"type":"session","version":3,"id":"omp-title-demo","timestamp":"2026-11-05T00:00:00.000Z","cwd":"/work/omp-demo"}
+{"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-05T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"omp 的第一句话"}]}}
+{"type":"model_change","id":"m1","parentId":"u1","timestamp":"2026-11-05T00:00:02.000Z","model":"anthropic/demo-model"}
+{"type":"message","id":"a1","parentId":"m1","timestamp":"2026-11-05T00:00:03.000Z","message":{"role":"assistant","content":[{"type":"text","text":"omp 的回答"}],"provider":"anthropic","model":"demo-model"}}
