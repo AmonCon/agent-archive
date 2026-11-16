@@ -110,6 +110,10 @@ export function resolveSource({ cliSources = [], cliBindings = [], withLocal = f
   const bindings = (Array.isArray(cliBindings) ? cliBindings : [])
     .map((b) => {
       if (typeof b === 'string') {
+        // 裸 Windows 路径 `C:\dir` 里的冒号不是 `<agent>:<dir>` 的分隔符。
+        // 先认盘符（含 UNC），否则会把盘符当 Agent 名、把 `\dir` 当路径，
+        // 然后因为“没有叫 C 的扫描器”被静默丢弃。
+        if (/^[A-Za-z]:[\\/]/.test(b) || /^\\\\/.test(b)) return { root: b };
         const i = b.indexOf(':');
         return i > 0 ? { agent: b.slice(0, i), root: b.slice(i + 1) } : { root: b };
       }

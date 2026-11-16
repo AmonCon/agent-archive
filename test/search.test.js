@@ -251,6 +251,36 @@ test('search: 老库带明文 body 的记录，重开后被迁移并且仍能搜
   }
 });
 
+test('search: 返回索引覆盖口径，docs/total/failed/builtAt 都要有', async () => {
+  const box = sandbox();
+  try {
+    writeSession(box, { id: 's1', text: '第一场讲缓存' });
+    writeSession(box, { id: 's2', text: '第二场讲部署' });
+
+    await box.run(async () => {
+      clearScanCache();
+      await buildIndex();
+
+      const r = search('缓存');
+      assert.equal(r.index.docs, 2);
+      assert.equal(r.index.total, 2, '建索引时扫描到 2 场');
+      assert.equal(r.index.failed, 0);
+      assert.ok(r.index.builtAt instanceof Date, 'builtAt 要是 Date，调用方才能算新旧');
+
+      // 新建一场但不重建索引：搜索仍然只覆盖旧的 2 场，必须如实说 2/2，
+      // 而不是让调用方以为“全库只有 2 场”。
+      writeSession(box, { id: 's3', text: '第三场还没来得及进索引' });
+      clearScanCache();
+      const stale = search('第三场');
+      assert.equal(stale.total, 0);
+      assert.equal(stale.index.docs, 2, '没重建索引就不该假装覆盖新会话');
+      assert.equal(stale.index.total, 2);
+    });
+  } finally {
+    box.cleanup();
+  }
+});
+
 test('secrets: 压缩正文里的凭证仍然能被扫出来', async () => {
   const box = sandbox();
   try {

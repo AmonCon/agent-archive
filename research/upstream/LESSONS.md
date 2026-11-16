@@ -802,3 +802,215 @@ cc-switch 的 `mcp_connectivity` 做得很细（三态 `Connected/AuthRequired/F
 - 渠道：**3 个/11 条配置/5 家 Agent**。
 - 技能：297 个/385 处安装；整树哈希只在"同 SKILL.md 的不同副本"间启用，
   平扫不加 IO。
+
+---
+
+## 2026-11-16 第六轮：会话搜索、斜杠命令、失败语义（+ Chat Memo 产品参照）
+
+五天里 magpie 动了 **402 个文件（+2.6 万行）**、cc-switch **110 个（+1.3 万行）**。
+取证见 `findings/{magpie,cc-switch}-2026-11-16.md`；另外按用户要求研究了
+[Chat Memo](https://chatmemo.ai/zh-CN/)（一个「实时备份 AI 对话」的消费级产品），
+记录在 `findings/chatmemo-2026-11-16.md`。用户这轮的原话是「这个软件太屌了，
+每天都在不停更新，我们做得不好的地方，都可以学习它」——所以要记的不只是
+技术点，还有**它把能力讲清楚的方式**。
+
+### 最重要的一条：搜索必须说出自己覆盖了多少
+
+magpie 新做了跨 Agent 搜索（`said-v1.db`），它的设计前提和我们完全不同：它是
+**会话级词袋索引**（`content=''`、`detail='none'`，每 chunk 5 万去重词，不存正文），
+只回答「哪些会话含这些词」，命中后回源文件读片段。它这么做的原因是硬数字：
+本机 Claude Code 历史 29 GB / 7390 文件、Codex 8 GB，每查一次全读不可能。
+
+我们不抄这个实现（我们的索引同时承担 BM25 排序、摘录、正文缓存，169 MB / 3.1k 场
+完全负担得起；而主力格式是 zstd 单帧，回源读正文的成本远高于它）。**但它有一条
+纪律我们必须抄：**
+
+> `SaidFound` 带 `indexed / total / listing / cut` 四个字段。首次检索只等 2 秒，
+> 拿到多少答多少，并明确说「还在索引」「共 N 场已索引 M 场」。
+> —— `said_index.go:55-67,541-589`；`gateway-sessions.md:645-664`
+
+这是第五轮「读不到 ≠ 没有」在搜索层的同一个错误，只是换了个位置：**只报 hits 时，
+「这场会话没进索引」和「这场会话没说过」长得一模一样。** 对调用方（一个模型）
+来说，前者该去建索引，后者该换关键词，同形就永远修不好。
+
+已落地（`src/search.js`、`src/mcp.js`、`src/cli.js`）：
+- `search()` 返回 `index: {exists, docs, total, failed, builtAt}`；`buildIndex()`
+  把 `total_sessions` / `failed` 写进 `meta`，老库没有这两项时如实给 `null`。
+- MCP `search_sessions` 同样带 `index`，空索引时的 hint 改成
+  「建一次之后日常只需增量更新」——把「一次性成本」和「每次都要跑」区分开。
+- CLI 搜不到时补一行 `索引覆盖 N/M 场（K 场读不出）· 建于 …`。
+
+**通用规律**：任何"查询类"出口都要同时报**覆盖率**与**新鲜度**。数字本身不重要，
+重要的是让人能判断"这个空结果是不是真的空"。
+
+### 第二重要：`find` —— 从命中处打开会话
+
+搜索结果给的是片段，但打开会话只能从头读。magpie 的 `read_session(session, find?, from?)`
+从命中词前 3 条消息开始，并告诉页面"前面还有 N 条没显示"（`transcript.go:78-139`、
+`sessions_mcp.go:216-274`）。我们的 `read_session` 原来只有字符 `offset`。
+
+已落地（`src/mcp.js`）：`find` 参数 + `find: {query, matchedMessage, startMessage}` 返回；
+找不到时给 `find_not_found` 而不是静默从头读。渲染层拆成 `renderMessageChunks()`
+（每条消息带 `messageIndex`），`renderMessages()` 变成它的 join——不改变原有输出。
+
+### 第三：Claude 分叉/复制的 token 被重复计了
+
+这是本轮唯一一个**已经在产生错误数字**的缺陷，不是"缺功能"。
+
+Claude Code 的 `--fork-session` / `/branch` 会把整段历史复制到新文件。我们的
+`copyOf`/`branchOf` 只在**列表与索引**层去重（`model.js`、`scanners/claude-code.js`），
+但 `usage.js` 的 Claude 读取器是**每个文件各建一个 `seen` map**（在
+`for (const file of list)` 内部），同一个 `message.id` 在原件和副本里各算一次。
+
+magpie 的 `ccRest` 正是为这件事写的：只统计「副本有、keeper 没有」的消息
+（`cc_copies.go:335-397`）。我们的修法更简单——`message.id` 本来就是每次模型回复的
+唯一标识，把 `seen` 提到所有文件之外全局去重即可，同时保留"同 id 取 output 最大"
+（流式写入时输出会增长）。
+
+**实测（本机 2 个 Claude 文件 / 149 条 usage 行）**：44 个唯一 id、**105 条重复**。
+也就是说这一家的用量此前被高估了两倍多。修完 `usage` 用例 9/9 全绿，
+新增用例锁住「原件 + 完全复制 + 分叉」三文件场景。
+
+**教训**：去重做在展示层不等于做在统计层。同一条纪律要问「在我们代码里落地了几处」——
+这和 2026-11-03 第三轮记的那条是同一个毛病（路径归一、缓存判据各落地程度不一）。
+
+### 第四：WorkBuddy 的用量，我们认会话却不认账
+
+cc-switch 这轮把 WorkBuddy 接进了会话层和用量层（`providers/workbuddy.rs` 646 行 +
+`session_usage_workbuddy.rs` 411 行）。我们早有 WorkBuddy 会话扫描器（正文保真还比它强：
+`resend-fork-notice`、`providerData.error`、头尾快读），但 `usage.js` 的 `SOURCES`
+里没有它——**用量页把 WorkBuddy 算成 0**。
+
+口径（照 `session_usage_workbuddy.rs:1-12,83-111`）：
+- 一次请求的 `providerData.rawUsage` 记在该请求的**最后一个事件**上，可能是 assistant
+  message，也可能是 `function_call`（工具调用常承载大部分 token）。
+- `prompt_tokens` 是 OpenAI 口径、**已含缓存**：`prompt_cache_hit + prompt_cache_miss
+  == prompt_tokens` → 按 `semantic:'total'` 入库，由 `normalizeFresh` 减。
+- `completion_tokens` 已含思考 token；`reasoning_tokens` 只单列，不再加到 output。
+- `rawUsage.credit` 是**积分不是钱**，`cost: null` 交给价目表估算，绝不把当日价格
+  固化进历史行。
+- 子代理 `<session>/subagents/*.jsonl` 的请求算父会话的。
+- 不做持久化字节游标：用量层本来就是全量重算的只读汇总，按事件 id 批内去重足够；
+  引入游标要维护 dedup 账本（上游有 `session_usage_dedup` 表），风险大于收益。
+
+**本机实测**：1288 条请求、未缓存输入 935.8 万、输出 102.6 万、缓存读 1.27 亿、
+成本全部未知（`costUnknown=1288`）——这些数字此前根本不存在。
+
+### 第五：斜杠命令是第七类环境资产，我们完全没有
+
+magpie 这轮把 slash commands 做成了环境层的一等公民（`commands.go` 读侧 +
+`command_import.go` 写侧）。读侧覆盖 6 家：Claude Code `commands/*.md`、
+OpenCode `commands/` + `command/`、Pi `prompts/*.md`、Gemini CLI `commands/*.toml`、
+Qwen Code `.md|.toml` 双格式、Factory Droid `commands/*.md`；Codex `~/.codex/prompts`
+**只列出不解析**（0.165 后已废弃，skills 取代）。
+
+我们的 `src/env/` 有 MCP / 技能 / 记忆 / 渠道 / CLI，没有 commands。已新增
+`src/env/commands.js`（零依赖、只读）并接进 `fullInventory` / `env` 总览 /
+`env commands` / MCP `inventory type=commands` / 网页 `/env?tab=commands`。
+
+三条设计决定值得记：
+1. **正文绝不出模块**：只给 `promptLength`（UTF-8 字节）与 `hash`。命令正文可能几十 KB，
+   也可能是用户私有内容——这与 `env/mcp.js` 只给环境变量键名是同一条线。
+2. **同名同内容合并、同名不同内容冲突**：`hash = sha256(description + "\0" + prompt)`，
+   与 `skills.js` 的 `groupByHash` 同一套身份模型。冲突要显眼地标出来，因为
+   「换个 Agent 执行会得到不同行为」。
+3. **missing ≠ unknown**：目录不存在是正常状态（没装/没定义），不算"读不到"；
+   只有 EACCES / 坏 TOML 才进 `errors`。
+
+本机实测只扫出 1 条（Claude 的 `/commit`），12 个根 missing、0 未知——**如实报 1 条
+比虚报一堆强**，这也正是"覆盖面"该有的样子。
+
+### 第六：环境层的存在性清单漏了 9 家
+
+cc-switch 的 `ToolSpec` 给了一个纪律：**名字只有一张表，表生成 fixture、两侧都测**
+（`commands/misc.rs:170-214,4808-4826` + `tests/config/tools.test.ts`）。我们的对应问题是：
+`registry.js` 认得 21 家扫描器，但 `env/inventory.js` 的 `AGENT_PRESENCE` 只有 12 家、
+`DISPLAY` 只有 13 项。后果是**会话层认得 WorkBuddy/Pi/Kimi，能力面里却找不到它们**。
+
+已补：WorkBuddy / CodeBuddy / Pi / Oh My Pi / Kimi / Grok Build / MiniMax Code /
+Cline / OpenClaw 的 presence 与显示名，并加了一条契约用例——
+`scanners` 里每一个有名字的扫描器，都必须在 `AGENT_PRESENCE` 里声明且有 `DISPLAY`。
+以后新增扫描器忘了补存在性清单，测试先红。
+
+### 第七：失败不能当删除（会话层的两处静默丢数据）
+
+cc-switch 的 `ScanStatus` 写着「A failed worker is not evidence that all its sessions
+were deleted」（`mod.rs:136-143`）：`NotFound` 才算"成功空结果"，其他 I/O 错误一律
+`incomplete`，失败的 worker 不计入 `complete_providers`、不据此删会话。
+
+我们的 `registry.js` 有两处违反：
+1. `scanner.discover()` 抛异常 → 当成空列表 → 该家上一轮缓存条目在本轮保存时**全部消失**。
+   用户看到的是「某一家会话全没了」，实际只是 discover 抛错。
+2. `statOrNull()` 吞掉所有错误 → 主循环 `mtimeMs === null` 直接 continue，
+   既不记 problems 也不走 keptStale。文件从"可读"变"权限拒绝"时，那场会话静默消失。
+
+已修（`src/registry.js`）：`statOrNull()` 带 `{code, reason}`；只有 `ENOENT` 算删除，
+`EACCES/EPERM/EBUSY` 等保留上一轮 session、计入 `keptStale`、记 `problems`；
+discover 抛错时把该家旧缓存原样搬回并记 `kind:'discover'`。`doctor.js` 的
+`summarizeProblems` 补了这两种 kind 的中文标签和一句「已沿用上一次扫描结果，没有被
+当成删除」。
+
+三条新用例（含"故障恢复后不再报"）锁住。
+
+### 顺带修掉的三处小但真实的坑
+
+| 问题 | 现象 | 修法 |
+|---|---|---|
+| `env/mcp.js` 只认 `enabled: false` | WorkBuddy 等用 `disabled: true`，被我们报成"可用" | 两个约定都认 |
+| `env/providers.js` 用前缀正则判本机 | `localhost.example.com` / `127.0.0.1.evil.com` 会被当成本机渠道 | 按 host 全等（含端口剥离）判断 |
+| `source.js` 的 `<agent>:<dir>` 取第一个冒号 | 裸 `C:\dir` 被拆成 agent `C` + `\dir`，绑定被静默丢弃 | 先认盘符/UNC 再拆 agent |
+
+第三条尤其值得记：**Windows 盘符冒号是个反复出现的坑**（cc-switch 这轮也刚修了
+Unix 路径里的冒号，`env_manager.rs:105-118`，只是方向相反——它改用 `rsplit_once`
+从最后一个冒号切）。同一个"用错分隔符"的 bug，在两个平台上各咬一次。
+
+### 明确不抄（本轮新增）
+
+| 项 | 判断 | 理由 |
+|---|---|---|
+| magpie 的二进制解析缓存（`cache_binary.go`） | **已否决（当前规模）** | 它是用反射开销换 40 MB JSON 的启动成本（parse 320–440 ms → 19 ms）。我们的 `scan-v5.json` 只有 **3.29 MB**，实测 `JSON.parse` 24 ms / `JSON.stringify` 15 ms。零依赖 + 可读性（能 `jq`、能 diff、能手工修）更值钱。若将来缓存 >20 MB 或 parse >100 ms 再评估，届时只借 magic+version+整份拒绝。 |
+| `said-v1.db` 的"只存词、不存正文" | **已否决（当前）** | 它的成立前提是"查询时回源文件可接受"（6 秒预算）。我们的索引同时承担 BM25 排序、摘录与正文缓存，回源读 zstd 单帧的成本远高。 |
+| slash commands 的写侧（`syncCommands` / `Applied.Commands` / `Taken` / 备份） | **不适用** | 我们只读，不写任何 Agent 的 commands 目录。只借读侧清单与冲突检测。 |
+| WorkBuddy 额度查询（WBIPC + HMAC + ticket） | **不适用** | 要连本地进程、读凭据、发请求，越过只读边界。只借 `NotRunning/NotCurrent/NotSignedIn/Failed` 四个状态词汇。 |
+| cc-switch 的锁恢复 / panic 回滚 / `ReplaceFileW` / `write_and_commit` | **不适用** | Node 单线程、没有 `Mutex` poison，我们也不写用户文件。`registry.saveCache()` 的 tmp+fsync+rename 已经比它更强（跨进程可用）。 |
+| Antigravity 的 `session_log_sync` 游标 + `session_usage_dedup` 回执 | **不适用** | 我们没有用量账本表；引入游标会带来"空表回退导致全量重导"的风险。只借一条通用规律：**伴生库（如 `conversations/<id>.db` + `-wal`）必须一起进缓存指纹**，否则"转录没变、原生库后到"会永久缺 model。 |
+| `d50ae6fc` 的 `Group.Last` | **我们更强（已有）** | `summarizeUsage` / `summarizeCalls` 早就有 `first/last`。 |
+| `hubFromPage` 的请求头判定 | **不适用** | 我们不跑 gateway。但记一条通用原则：**不要用一个普通原生客户端也会设置的请求头来判定"这是浏览器"**（它踩的坑是 Node fetch 也带 `Sec-Fetch-Mode: cors`）。 |
+
+### Chat Memo 那篇的结论（产品侧，不是技术侧）
+
+它最值得学的不是"备份"这个功能，而是三件事：**把能力讲成资产/中枢的叙事结构**、
+**把"装好之后能干什么"做成三步上手和配方**、**两三天一个用户视角小版本**。
+最不该学的是消费级订阅、浏览器插件抓网页对话、以及"绝对安全 / 20000+ 用户"这类
+无法兑现或验证的说法——它自己的隐私政策就承认会经 Cloudflare 转发，
+营销话术比法律文本更绝对。
+
+有一句判断框架对我们直接有用（X 帖原文）：
+
+> 不同 Agent 的对话记录的价值密度是不一样的……多数 coding session 随着开发，
+> 其中的对话价值都已经成为了代码事实。
+
+这解释了为什么我们的卖点不该是"保存所有聊天"，而是**"把代码里看不到的那部分
+项目记忆留下来"**——为什么这么改、试过哪些方案、放弃了什么、下一步留给谁。
+`brief` / `handoff` / 换手间隔正是这件事，比普通聊天备份更适合我们。
+
+产品化建议（按投入产出排，详见 findings 第 5 节）：README 首屏重排 + 一张截图、
+把 `docs/recipes` 三条配方前置、加「读什么/写什么/联网什么」边界卡、
+发布到 npm + 第一个 git tag + `CHANGELOG.md`、`agent-archive connect`（只打印配置）、
+`agent-archive demo` + Web 空状态、`serve --open`。
+
+### 数字
+
+- 用例 **364 → 400 全绿**（净增 36：usage 2、search 1、mcp-read-find 2、registry 3、
+  inventory 2、commands 12、memory 3、skills 9、providers 1、source 1）。基线 364 是
+  在 `HEAD` 的独立 worktree 里跑出来的，不是估的。
+- `usage` 源 **6 → 7 家**（新增 WorkBuddy）；本机 WorkBuddy 读到 1288 条请求 /
+  未缓存输入 935.8 万 / 缓存读 1.27 亿。
+- `env` 资产类 **5 → 6 类**（新增斜杠命令）；本机读到 1 条命令 / 12 个根 missing。
+- `inventory` 存在性清单 **12 → 21 家**，与会话层扫描器一一对齐（契约测试锁住）；
+  本机能力面从 12 家变 14 家（有数据的）。
+- 技能根 **10 → 14 个**，本机安装处 386 → **482**、独立技能 298 → **363**——
+  多出来的全是真实存在、之前只是没去读的目录（WorkBuddy 4、Pi 27、OpenClaw 65、
+  Antigravity 2）。这是本轮**最实在的一块覆盖面**，成本只是改一张 ROOTS 表。
+- 会话层失败语义：`problems` 新增 `discover` / `stat` 两种 kind，`keptStale` 覆盖
+  "stat 读不到"这条路径；`doctor` 补了对应中文标签与一句处置建议。

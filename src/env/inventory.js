@@ -17,6 +17,7 @@ import { skillSummary } from './skills.js';
 import { memorySummary } from './memory.js';
 import { cliSummary } from './cli.js';
 import { providerSummary } from './providers.js';
+import { commandSummary } from './commands.js';
 import { statePath } from '../paths.js';
 
 /**
@@ -31,7 +32,7 @@ import { statePath } from '../paths.js';
  * 只按"目录存在"判断会高估：装了个 VS Code 扩展也会创建目录。
  * 只按"有会话"判断会低估：配好 MCP 但还没聊过的 Agent 是真实存在的状态。
  */
-const AGENT_PRESENCE = [
+export const AGENT_PRESENCE = [
   { agent: 'claude-code', config: ['.claude.json', '.claude/settings.json'], data: ['.claude/projects'] },
   { agent: 'codex', config: ['.codex/config.toml'], data: ['.codex/sessions', '.codex/memories'] },
   { agent: 'zcode', config: ['.zcode/cli/config.json'], data: ['.zcode/cli/db'] },
@@ -44,9 +45,21 @@ const AGENT_PRESENCE = [
   { agent: 'kiro', config: ['.kiro/argv.json'], data: ['.kiro/skills'] },
   { agent: 'antigravity', config: [], data: ['.gemini/antigravity/conversation_summaries.db'] },
   { agent: 'copilot', config: [], data: ['AppData/Roaming/Code/User/workspaceStorage'] },
+  // 2026-11-16：补全会话层已经支持的 9 家。环境层原来只列 12 家，
+  // 用户明明有 WorkBuddy/Pi/Kimi 的会话，能力面里却找不到它们——
+  // 不是没装，是存在性清单漏了（cc-switch 的 ToolSpec 教训：名字只有一张表）。
+  { agent: 'workbuddy', config: ['.workbuddy/mcp.json'], data: ['.workbuddy/projects', '.workbuddy-ai/projects'] },
+  { agent: 'codebuddy', config: ['.codebuddy.json'], data: ['.codebuddy/projects'] },
+  { agent: 'pi', config: ['.pi/agent/settings.json'], data: ['.pi/agent/sessions'] },
+  { agent: 'omp', config: ['.omp/agent/settings.json'], data: ['.omp/agent/sessions'] },
+  { agent: 'kimi', config: ['.kimi-code/config.toml'], data: ['.kimi-code/sessions', '.kimi/sessions'] },
+  { agent: 'grokbuild', config: ['.grok/config.toml'], data: ['.grok/sessions', '.grok/archived_sessions'] },
+  { agent: 'mcode', config: ['.minimax/mcp.json'], data: ['.minimax/v2'] },
+  { agent: 'cline', config: [], data: ['.cline/data/sessions'] },
+  { agent: 'openclaw', config: ['.openclaw/sessions.json'], data: ['.openclaw/agents', '.openclaw-autoclaw/agents'] },
 ];
 
-const DISPLAY = {
+export const DISPLAY = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   zcode: 'ZCode',
@@ -59,6 +72,15 @@ const DISPLAY = {
   kiro: 'Kiro',
   antigravity: 'Antigravity',
   copilot: 'Copilot Chat',
+  workbuddy: 'WorkBuddy',
+  codebuddy: 'CodeBuddy',
+  pi: 'Pi',
+  omp: 'Oh My Pi',
+  kimi: 'Kimi Code',
+  grokbuild: 'Grok Build',
+  mcode: 'MiniMax Code',
+  cline: 'Cline',
+  openclaw: 'OpenClaw',
   'shared-agents': '~/.agents（共享）',
 };
 
@@ -119,7 +141,7 @@ let cachedAt = 0;
  */
 // 缓存结构变过就 bump：老缓存里没有 providers 字段，直接读会把渠道显示成
 // undefined（实测踩过一次）。版本号进文件名，老缓存自然失效。
-const INVENTORY_CACHE_VERSION = 2;
+const INVENTORY_CACHE_VERSION = 3;
 // 磁盘缓存比内存（5 分钟）留得久：内存过期后先读盘，不重新扫 295 个目录。
 // 环境层的数据是"装了哪些技能/MCP"，半小时内变化很小。
 const INVENTORY_DISK_TTL_MS = 30 * 60_000;
@@ -190,6 +212,7 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
   const skills = skillSummary({ includeLocations: includeDetails });
   const memory = memorySummary();
   const providers = providerSummary();
+  const commands = commandSummary();
 
   // 以真实存在的 Agent 为准（不是三家全集的并集）
   const present = presence.filter((p) => p.level !== 'none');
@@ -230,6 +253,18 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
         ? 'provided'
         : 'none';
 
+    // 斜杠命令：只有"这个 Agent 的命令目录真的在"才算它有这一维能力；
+    // 目录不在是 none（没装/没用过），不是 0 个命令。
+    const cmdRootsFor = (commands.roots || []).filter((r) => r.agent === a);
+    const cmdCount = commands.byAgent[a] || 0;
+    const commandsState = commands.errors.some((e) => e.agent === a)
+      ? 'partial'
+      : cmdRootsFor.length === 0
+        ? 'none'
+        : cmdCount > 0
+          ? 'provided'
+          : 'empty';
+
     return {
       agent: a,
       display: p.display,
@@ -251,9 +286,11 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
       memoryLocations: memory.byAgent[a] ? memory.byAgent[a].files : 0,
       // 这家 Agent 配了哪些模型渠道（按渠道身份，不是按配置条目）
       channels: channelsFor.map((c) => c.display),
+      // 这家 Agent 自己定义了几个斜杠命令（同名同内容算一个）
+      commands: cmdCount,
       // 结构化能力快照：给 MCP 工具/网页直接消费，避免它们各自拼
       capabilities: {
-        status: [mcpState, skillsState, channelsState].includes('partial') ? 'partial' : 'ok',
+        status: [mcpState, skillsState, channelsState, commandsState].includes('partial') ? 'partial' : 'ok',
         mcp: { state: mcpState, count: mcpList.length, services: mcpList.map((s) => s.service), disabled: mcpDisabled.map((s) => s.service) },
         skills: {
           state: skillsState,
@@ -261,6 +298,11 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
           manualOnly: skills.list.filter((s) => s.manual && s.agents.includes(a)).length,
         },
         channels: { state: channelsState, count: channelsFor.length, names: channelsFor.map((c) => c.display) },
+        commands: {
+          state: commandsState,
+          count: cmdCount,
+          conflicts: commands.list.filter((c) => c.conflict && c.agents.includes(a)).map((c) => c.name),
+        },
         cli: { state: cliFor.visible.length > 0 ? 'provided' : 'none', visible: cliFor.visible.length, used: cliFor.used.length },
       },
     };
@@ -286,6 +328,11 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
       // 渠道层：几个模型渠道、几条注册
       channels: providers.channels,
       channelRegistrations: providers.registrations,
+      // 斜杠命令层：几个命令、几份文件、几组同名冲突
+      commands: commands.commands,
+      commandFiles: commands.files,
+      commandConflicts: commands.conflicts,
+      commandsUnknown: commands.rootsUnknown,
       // 有"读不到"来源的 Agent 数：这些 Agent 的能力面是"部分未知"
       agentsPartial: agents.filter((a) => a.capabilities && a.capabilities.status === 'partial').length,
     },
@@ -293,6 +340,7 @@ export function fullInventory({ includeDetails = false, fresh = false } = {}) {
     skills,
     memory,
     providers,
+    commands,
     cli,
   };
 
@@ -420,7 +468,12 @@ export function auditEnvironment() {
 
   // 11. 读不到 ≠ 零。环境层任何一处"未知"都要单独报出来。
   const unknown =
-    (inv.mcp.filesUnknown || 0) + (inv.skills.rootsUnknown || 0) + (inv.providers.filesUnknown || 0);
+    (inv.mcp.filesUnknown || 0) +
+    (inv.skills.rootsUnknown || 0) +
+    (inv.providers.filesUnknown || 0) +
+    (inv.memory.filesUnknown || 0) +
+    (inv.memory.rootsUnknown || 0) +
+    (inv.commands.rootsUnknown || 0);
   if (unknown > 0) {
     findings.push({
       level: 'warn',
@@ -428,8 +481,23 @@ export function auditEnvironment() {
       title: `${unknown} 处配置读不到/解析不了`,
       detail:
         '这些来源被当作"未知"处理，没有算成"没有配置"。' +
-        `详情：MCP ${inv.mcp.filesUnknown || 0} 处、技能 ${inv.skills.rootsUnknown || 0} 处、渠道 ${inv.providers.filesUnknown || 0} 处。` +
+        `详情：MCP ${inv.mcp.filesUnknown || 0} 处、技能 ${inv.skills.rootsUnknown || 0} 处、` +
+        `渠道 ${inv.providers.filesUnknown || 0} 处、记忆 ${(inv.memory.filesUnknown || 0) + (inv.memory.rootsUnknown || 0)} 处、` +
+        `斜杠命令 ${inv.commands.rootsUnknown || 0} 处。` +
         '常见原因是权限不足或文件正被写入；修好后重跑即可。',
+    });
+  }
+
+  // 12. 同名斜杠命令内容不同：换 Agent 会拿到不一样的行为。
+  if (inv.commands.conflicts > 0) {
+    findings.push({
+      level: 'info',
+      area: 'commands',
+      title: `${inv.commands.conflicts} 组同名斜杠命令内容不同`,
+      detail:
+        `例如：${inv.commands.conflictNames.slice(0, 5).join('、')}。` +
+        '同名不同内容，换个 Agent 执行会得到不同结果；确认哪一份是你要的，' +
+        '或者改名区分。',
     });
   }
 
@@ -446,5 +514,3 @@ function rank(level) {
   if (level === 'info') return 1;
   return 2;
 }
-
-export { DISPLAY };

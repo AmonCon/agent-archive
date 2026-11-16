@@ -395,7 +395,12 @@ function stampOf(scanner, file, depth = 'head') {
     } catch {
       extra = [];
     }
-    for (const p of extra) parts.push({ path: p, ...statOrNull(p), sizeOnly: true });
+    for (const p of extra) {
+      // 附属文件（-wal 等）只取判据本身，不带 code/reason：它们缺失是常态
+      // （没有 wal 就没有 wal），把错误信息写进指纹只会让缓存白白变大。
+      const st = statOrNull(p);
+      parts.push({ path: p, mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, size: st.size, sizeOnly: true });
+    }
   }
   if (depth === 'head') {
     // 只给主文件算头哈希。附属文件是二进制的，头也没有语义。
@@ -404,12 +409,26 @@ function stampOf(scanner, file, depth = 'head') {
   return { files: parts };
 }
 
+/**
+ * 取文件状态。**失败时要把错误码一起带出来，不能只返回 null。**
+ *
+ * 这个区别是数据完整性的关键：`ENOENT` 说明文件真的没了（可以当删除），
+ * 而 `EACCES` / `EPERM` / `EBUSY` 等只说明"这次读不到"——文件很可能还在，
+ * 只是权限、占用或瞬时 I/O 出了问题。以前两种情况都返回 null，扫描主循环
+ * 一律 `continue`，于是一次权限抽风就会让这场会话从档案里静默消失。
+ */
 function statOrNull(p) {
   try {
     const st = fs.statSync(p);
     return { mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, size: st.size };
-  } catch {
-    return { mtimeMs: null, ctimeMs: null, size: null };
+  } catch (e) {
+    return {
+      mtimeMs: null,
+      ctimeMs: null,
+      size: null,
+      code: (e && e.code) || 'UNKNOWN',
+      reason: e && e.message ? String(e.message) : String(e),
+    };
   }
 }
 
@@ -583,12 +602,14 @@ export function scanAll({ noCache = false, only = null, source = null } = {}) {
     if (disabled.has(scanner.name)) continue;
     let files;
     let scannerCtx = null; // 显式 source 时带生效根，透传给 normalizeAll/postProcess/enrich
+    let discoverError = null; // discover()/discoverWithin() 抛错时的原因；null 表示成功
     if (!p) {
       // 没给 source：严格走原来的 discover()，一个字不改（265 用例的向后兼容基线）
       try {
         files = scanner.discover();
-      } catch {
+      } catch (e) {
         files = [];
+        discoverError = errorReason(e, '扫描器 discover() 抛了错，但没有给出原因');
       }
     } else {
       const roots = p.bindings.filter((b) => b.agent === scanner.name).map((b) => b.root);
@@ -598,8 +619,9 @@ export function scanAll({ noCache = false, only = null, source = null } = {}) {
       if (typeof scanner.discoverWithin === 'function') {
         try {
           files = scanner.discoverWithin(roots, scannerCtx);
-        } catch {
+        } catch (e) {
           files = [];
+          discoverError = errorReason(e, '扫描器 discoverWithin() 抛了错，但没有给出原因');
         }
       } else {
         // 有绑定却没实现 discoverWithin：记 problem 并跳过，绝不退回扫本机
@@ -614,6 +636,37 @@ export function scanAll({ noCache = false, only = null, source = null } = {}) {
     }
     const agentStat = { files: 0, sessions: 0, cacheHits: 0, failures: 0 };
     manifest.byAgent[scanner.name] = agentStat;
+
+    // 发现失败 ≠ 这家没有会话。
+    //
+    // 原来的写法是 catch 后 files=[]，而 nextCache 默认从 {} 开始：这一轮
+    // 保存时这家上一轮的缓存条目会被整批抹掉，用户看到的是"某一家会话全
+    // 没了"，实际只是 discover() 抛了一次错。这里把旧条目原样搬回结果和
+    // 缓存，并在 problems 里留下失败身份（50 条上限由 recordProblem 统一
+    // 处理）。迁移前的老缓存条目没有 scanner 字段，无法可靠归属，只能跳过。
+    if (discoverError) {
+      recordProblem(stats, { agent: scanner.name, kind: 'discover', reason: discoverError });
+      let kept = 0;
+      for (const [key, entry] of Object.entries(cache)) {
+        if (key.startsWith('__')) continue;
+        if (!entry || entry.scanner !== scanner.name || !Array.isArray(entry.sessions)) continue;
+        nextCache[key] = entry;
+        for (const s of entry.sessions) sessions.push(deserialize(s));
+        kept += entry.sessions.length;
+        if (entry.stamp && Array.isArray(entry.stamp.files) && entry.stamp.files[0]) {
+          manifestParts.push(
+            p
+              ? `${scanner.name}\t${pathKey(key)}\t${entry.stamp.files[0].size}\t${sid}`
+              : `${scanner.name}\t${pathKey(key)}\t${entry.stamp.files[0].size}`
+          );
+        }
+      }
+      if (kept) {
+        stats.byAgent[scanner.name] = (stats.byAgent[scanner.name] || 0) + kept;
+        agentStat.sessions += kept;
+      }
+      continue;
+    }
 
     // 这一家的解析代码变了吗？没变才允许它的条目命中缓存。
     //
@@ -632,17 +685,53 @@ export function scanAll({ noCache = false, only = null, source = null } = {}) {
       agentStat.files++;
       const key = file;
       const prev = cache[key];
+      // 条目若属于另一家（理论上不该发生），按"这次变了"处理，别串用结果
+      const sameOwner = !prev || !prev.scanner || prev.scanner === scanner.name;
 
       // 第一层：只取 stat
       const statStamp = stampOf(scanner, file, 'stat');
-      // 主文件本身不可读就跳过——附属文件缺失不影响
-      if (statStamp.files[0].mtimeMs === null) continue;
+      const primaryStat = statStamp.files[0];
+      if (primaryStat.code) {
+        // 只有 ENOENT 是"这个文件真的没了"（比如 discover 到 stat 之间被删）。
+        // EACCES / EPERM / EBUSY 等是"这次读不到"：文件很可能还在，只是权限
+        // 或占用出了问题。此时保留上一轮结果并记 problems；否则一次权限抽风
+        // 就会让这场会话从档案里静默消失，症状和"被删了"一模一样。
+        //
+        // 删除缓存条目只在本家拥有它时才做：条目可能属于另一家扫描器
+        // （理论上不该发生，但缓存是跨版本共享的），那时交给它自己去处理。
+        if (primaryStat.code === 'ENOENT') {
+          if (sameOwner) delete nextCache[key];
+          continue;
+        }
+        recordProblem(stats, {
+          agent: scanner.name,
+          file,
+          kind: 'stat',
+          reason: `无法读取文件状态（${primaryStat.code}）：${primaryStat.reason || '没有更多信息'}`,
+        });
+        if (prev && sameOwner && Array.isArray(prev.sessions) && prev.sessions.length) {
+          nextCache[key] = prev;
+          for (const s of prev.sessions) sessions.push(deserialize(s));
+          stats.keptStale = (stats.keptStale || 0) + prev.sessions.length;
+          stats.byAgent[scanner.name] = (stats.byAgent[scanner.name] || 0) + prev.sessions.length;
+          agentStat.sessions += prev.sessions.length;
+          if (prev.stamp && Array.isArray(prev.stamp.files) && prev.stamp.files[0]) {
+            manifestParts.push(
+              p
+                ? `${scanner.name}\t${pathKey(key)}\t${prev.stamp.files[0].size}\t${sid}`
+                : `${scanner.name}\t${pathKey(key)}\t${prev.stamp.files[0].size}`
+            );
+          }
+        } else if (sameOwner) {
+          // 没有旧结果可保留：别让 wanted 模式下从 cache 复制过来的空条目赖着不走
+          delete nextCache[key];
+        }
+        continue;
+      }
 
       let stamp = statStamp;
       let hit = false;
 
-      // 条目若属于另一家（理论上不该发生），按"这次变了"处理，别串用结果
-      const sameOwner = !prev || !prev.scanner || prev.scanner === scanner.name;
       if (prev && fpOk && sameOwner && sameStatOnly(prev.stamp, statStamp)) {
         // 第二层只在 ctime 不可用时才做头部哈希。
         //
@@ -1007,6 +1096,12 @@ function recordProblem(stats, problem) {
   } else {
     stats.problemsDropped = (stats.problemsDropped || 0) + 1;
   }
+}
+
+/** 从异常里取出能给人看的原因；空消息退回一句兜底，避免 problems 里出现空字符串。 */
+function errorReason(e, fallback) {
+  const reason = (e && e.message ? String(e.message) : String(e)).trim();
+  return reason || fallback;
 }
 
 /**

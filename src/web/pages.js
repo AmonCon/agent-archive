@@ -69,6 +69,43 @@ import { icon } from './icons.js';
 
 /* ------------------------------ 项目列表 ------------------------------ */
 
+/**
+ * 首次访问的空状态。
+ *
+ * 以前这里只有一句「运行 agent-archive projects」。问题是：新用户装完之后
+ * 第一眼看到的正好是这个页面，而"运行一条命令"回答不了"这玩意儿长什么样"。
+ * 三个入口对应三种人：没有数据想看效果（demo）、有数据但扫不出（doctor）、
+ * 想知道支持哪些家（21 家清单）。
+ */
+function firstRunHtml() {
+  const cmd = (c) => commandLine(c, '复制命令');
+  return `<section class="section" style="margin-top:0">
+    ${sectionHead({
+      title: '还没有识别到会话',
+      desc: '三种可能：这个位置还没有任何 Agent 写过会话、会话在别处、或者扫描器还没适配你用的那一款。',
+    })}
+    <div class="card">
+      <div class="card-body" style="display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
+        <div>
+          <h3 style="margin:0 0 6px">先看看它长什么样</h3>
+          <p class="hint" style="margin:0 0 8px">用合成样例数据跑一遍，不碰你的真实会话。</p>
+          ${cmd('agent-archive demo')}
+        </div>
+        <div>
+          <h3 style="margin:0 0 6px">看看扫描器读到了什么</h3>
+          <p class="hint" style="margin:0 0 8px">体检会如实报「读不了」和「还没适配」，不会假装成功。</p>
+          ${cmd('agent-archive doctor')}
+        </div>
+        <div>
+          <h3 style="margin:0 0 6px">确认一下装了哪几家</h3>
+          <p class="hint" style="margin:0 0 8px">支持 21 家 Agent，各自的存储位置和格式都不同。</p>
+          <a class="btn outline" href="/env">${icon('layers', 15)} 看能力面</a>
+        </div>
+      </div>
+    </div>
+  </section>`;
+}
+
 export async function pageProjects() {
   const { projects, totalSessions, subagentSessions, stats, unbound } = listProjects({});
   const agentCount = Object.keys(stats.byAgent || {}).length;
@@ -144,6 +181,7 @@ export async function pageProjects() {
         <a class="btn outline" href="/env">${icon('layers', 15)} 能力面</a>
       </div>
     </div>
+    ${projects.length ? '' : firstRunHtml()}
     ${statGrid([
       { label: '项目', value: String(projects.length), sub: '有归属的工作目录', icon: 'folder' },
       { label: '主会话', value: String(totalSessions), sub: '可作为时间线主线', icon: 'message' },
@@ -1652,6 +1690,7 @@ const ENV_TABS = [
   ['mcp', 'MCP'],
   ['cli', 'CLI'],
   ['skills', '技能'],
+  ['commands', '命令'],
   ['usage', '使用率'],
   ['memory', '记忆'],
   ['audit', '体检'],
@@ -1663,7 +1702,7 @@ export async function pageEnv(tab) {
   // 只有总览、MCP、CLI、技能、记忆这几个 tab 真的需要完整清单。
   // 「使用率」只查索引里的技能调用；「体检」内部自己算清单。以前这里
   // 无条件 fullInventory()，导致点开使用率也要先扫 2.4 秒的技能目录。
-  const needsInventory = ['overview', 'mcp', 'cli', 'skills', 'memory'].includes(active);
+  const needsInventory = ['overview', 'mcp', 'cli', 'skills', 'commands', 'memory'].includes(active);
   const inv = needsInventory ? fullInventory() : null;
 
   let body = '';
@@ -1671,13 +1710,14 @@ export async function pageEnv(tab) {
   else if (active === 'mcp') body = envMcp(inv.mcp);
   else if (active === 'cli') body = envCli(inv.cli);
   else if (active === 'skills') body = envSkills(inv.skills);
+  else if (active === 'commands') body = envCommands(inv.commands);
   else if (active === 'usage') body = envUsage(await skillUsageSummary({}));
   else if (active === 'memory') body = envMemory(inv.memory);
   else body = envAudit(auditEnvironment());
 
   const nav = tabsNav(ENV_TABS, active, (k) => `/env?tab=${k}`);
   const lead = inv
-    ? `${inv.summary.agentsWithData} 家 Agent 有数据 · ${inv.summary.mcpServices} 个 MCP 服务 · ${inv.summary.cliProducts} 个 CLI 产品 · ${inv.summary.skills} 个技能 · ${inv.summary.memoryEntries} 条记忆。只报出处，不替你决定。`
+    ? `${inv.summary.agentsWithData} 家 Agent 有数据 · ${inv.summary.mcpServices} 个 MCP 服务 · ${inv.summary.cliProducts} 个 CLI 产品 · ${inv.summary.skills} 个技能 · ${inv.summary.commands || 0} 个斜杠命令 · ${inv.summary.memoryEntries} 条记忆。只报出处，不替你决定。`
     : active === 'usage'
       ? '技能使用率：装了哪些、用过哪些、哪些一直没用过。只报出处，不替你决定。'
       : '环境体检：配置不一致、明文凭证、记忆分散等值得注意的事实。只报出处，不替你决定。';
@@ -1694,6 +1734,7 @@ export async function pageEnv(tab) {
     'GET /api/env',
     'GET /api/env?tab=mcp',
     'GET /api/env?tab=skills',
+    'GET /api/env?tab=commands',
     'GET /api/env?tab=usage',
     'GET /api/env?tab=memory',
     'GET /api/env?tab=audit',
@@ -1716,6 +1757,7 @@ function envOverview(inv) {
       <td><span class="strong">${esc(a.display)}</span><span class="sub mono">${esc(a.agent)}</span></td>
       <td class="num">${a.mcp.length}</td>
       <td class="num">${a.skills}</td>
+      <td class="num">${a.commands || 0}</td>
       <td class="num">${a.cli.visible}<span class="sub">用过 ${a.cli.used}</span></td>
       <td class="num">${a.memory}</td>
       <td>${a.mcp.length ? a.mcp.slice(0, 5).map((m) => badge(m, 'outline')).join('') : '<span class="subtle">—</span>'}${
@@ -1750,13 +1792,14 @@ function envOverview(inv) {
     { label: 'MCP 服务', value: String(s.mcpServices), sub: `${s.mcpRegistrations} 条注册`, icon: 'cpu' },
     { label: 'CLI 产品', value: String(s.cliProducts), sub: `${s.cliDetected} 个找到安装位置`, icon: 'terminal' },
     { label: '技能', value: String(s.skills), sub: `${s.skillInstalls} 处安装`, icon: 'sparkles' },
+    { label: '斜杠命令', value: String(s.commands || 0), sub: `${s.commandFiles || 0} 份文件`, icon: 'command' },
     { label: '记忆条目', value: String(s.memoryEntries), sub: `${s.memoryLocations} 处记忆`, icon: 'book' },
   ])}
   <section class="section" style="margin-top:0">
-    ${sectionHead({ title: '各 Agent 的能力面', desc: 'MCP 按服务身份归并，技能按内容哈希归并；CLI 的可见数按安装位置推断。' })}
+    ${sectionHead({ title: '各 Agent 的能力面', desc: 'MCP 按服务身份归并，技能按内容哈希归并，斜杠命令按内容哈希归并；CLI 的可见数按安装位置推断。' })}
     <div class="table-wrap">${table({
       wrap: false,
-      head: ['Agent', { label: 'MCP', num: true }, { label: '技能', num: true }, { label: 'CLI', num: true }, { label: '记忆', num: true }, '配了哪些 MCP'],
+      head: ['Agent', { label: 'MCP', num: true }, { label: '技能', num: true }, { label: '命令', num: true }, { label: 'CLI', num: true }, { label: '记忆', num: true }, '配了哪些 MCP'],
       rows: agentRows,
     })}</div>
   </section>
@@ -2004,8 +2047,81 @@ function envSkills(sk) {
   </section>`;
 }
 
-function envUsage(r) {
-  if (!r || !r.ready) {
+/**
+ * 斜杠命令面板。
+ *
+ * 命令正文**不进页面**（可能有几十 KB，也可能是用户私有内容）；这里只给
+ * 名字、描述、装在哪几家、正文多大。同名不同内容要显眼地标出来——那意味着
+ * 换个 Agent 执行会得到不同行为。
+ */
+function envCommands(cm) {
+  const byAgent = Object.entries(cm.byAgent || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([a, n]) => `<tr><td>${agentChip(a)}</td><td class="num">${n}</td></tr>`);
+
+  const list = (cm.list || []).slice().sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const rows = list.map(
+    (c) => `<tr>
+      <td class="strong">/${esc(c.name)}${c.legacy ? '<span class="sub">旧目录，Codex 0.165 后不再加载</span>' : ''}</td>
+      <td>${c.agents.map((a) => agentChip(a)).join(' ')}</td>
+      <td class="num">${c.promptLength == null ? '—' : `${Math.round(c.promptLength / 1024)} KB`}</td>
+      <td class="dim" style="font-size:12px">${c.conflict ? '<strong>同名内容不同</strong> · ' : ''}${esc(oneLine(c.description || '', 100))}</td>
+    </tr>`
+  );
+
+  return `${statGrid([
+    { label: '命令', value: String(cm.commands || 0), sub: '同名同内容算一条', icon: 'terminal' },
+    { label: '文件', value: String(cm.files || 0), sub: '各家目录里的实际文件', icon: 'file' },
+    { label: '跨 Agent 共享', value: String(cm.shared || 0), sub: '一家以上定义', icon: 'users' },
+    { label: '同名冲突', value: String(cm.conflicts || 0), sub: '同名但内容不同', icon: 'alert' },
+  ])}
+  ${
+    cm.rootsUnknown
+      ? `<p class="hint">有 ${cm.rootsUnknown} 处命令目录读不到（未知，未计入）。</p>`
+      : ''
+  }
+  <section class="section" style="margin-top:0">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-head"><div><h2 class="card-title">按 Agent 的命令文件数</h2></div></div>
+        <div class="card-body">
+          <div class="table-wrap" style="border:0;box-shadow:none">
+            ${table({ wrap: false, head: ['Agent', { label: '命令', num: true }], rows: byAgent })}
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div><h2 class="card-title">这一层是什么</h2></div></div>
+        <div class="card-body">
+          <p class="hint" style="margin:0">
+            斜杠命令是各家自己的 <code>/命令</code> 定义（Claude Code 的 <code>commands/</code>、
+            Pi 的 <code>prompts/</code>、Gemini 的 <code>commands/*.toml</code> 等）。
+            这里只报"定义了什么、装在哪几家、正文多大"，<strong>不返回正文</strong>——
+            命令正文可能有几十 KB，也可能是你的私有内容。
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="section">
+    ${sectionHead({ title: `全部命令 · ${cm.commands || 0}`, desc: '同名同内容已按哈希归并；同名不同内容会标出来。' })}
+    <div class="table-wrap" style="max-height:560px;overflow:auto">
+      <div class="table-toolbar">
+        <label class="filter">${icon('search', 14)}<input type="search" data-filter="commands-table" placeholder="筛选命令名、Agent 或描述…"></label>
+        <span class="filter-count" data-filter-count="commands-table"></span>
+      </div>
+      ${table({
+        wrap: false,
+        id: 'commands-table',
+        className: 'compact',
+        head: ['命令', '定义在哪', { label: '正文', num: true }, '描述'],
+        rows,
+      })}
+    </div>
+  </section>`;
+}
+
+function envUsage(r) {  if (!r || !r.ready) {
     return `${emptyState({
       icon: 'database',
       title: '还算不出来',

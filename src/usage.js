@@ -315,6 +315,15 @@ async function readClaudeCode({ files } = {}) {
   if (!list || !list.length) return { ready: false, reason: '没有找到 Claude Code 的会话文件' };
 
   const out = [];
+  // 同一 message.id 可能因流式写入出现多次，取 output 最大的那条代表整次回复。
+  //
+  // seen 必须跨文件共享，不能每个文件一份：Claude Code 的 --fork-session /
+  // /branch 会把整段历史复制到新文件，同一个 message.id 会在原件与副本里
+  // 各出现一次。按文件去重会把同一段历史算两遍（MAGPIE 的 ccRest 就是
+  // 按「副本有、keeper 没有」统计的）。message.id 是每次模型回复的唯一
+  // 标识，按它全局去重既覆盖流式重复，也覆盖分叉/复制。取 output 最大的
+  // 那条仍然保留——流式过程中同一 id 的输出会不断增长。
+  const seen = new Map();
   for (const file of list) {
     let text;
     try {
@@ -322,8 +331,6 @@ async function readClaudeCode({ files } = {}) {
     } catch {
       continue;
     }
-    // 同一 message.id 可能因流式写入出现多次，取 output 最大的那条代表整次回复
-    const seen = new Map();
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let o;
@@ -350,24 +357,26 @@ async function readClaudeCode({ files } = {}) {
         cacheWrite: u.cache_creation_input_tokens,
       });
     }
-    for (const v of seen.values()) {
-      if (v.at == null) continue;
-      out.push(
-        makeRow({
-          agent: 'claude-code',
-          fidelity: 'request',
-          at: v.at,
-          session: v.session,
-          model: v.model,
-          calls: 1,
-          input: v.input,
-          semantic: 'fresh',
-          output: v.output,
-          cacheRead: v.cacheRead,
-          cacheWrite: v.cacheWrite,
-        })
-      );
-    }
+  }
+  // 所有文件读完后再一次性出 rows：seen 是跨文件共享的，不能每读完一个
+  // 文件就把累计结果推一遍（那会把前面文件的记录重复 N 次）。
+  for (const v of seen.values()) {
+    if (v.at == null) continue;
+    out.push(
+      makeRow({
+        agent: 'claude-code',
+        fidelity: 'request',
+        at: v.at,
+        session: v.session,
+        model: v.model,
+        calls: 1,
+        input: v.input,
+        semantic: 'fresh',
+        output: v.output,
+        cacheRead: v.cacheRead,
+        cacheWrite: v.cacheWrite,
+      })
+    );
   }
   return { ready: true, fidelity: 'request', rows: out };
 }
@@ -635,6 +644,137 @@ async function readDsh({ files: filesOverride } = {}) {
   return { ready: true, fidelity: 'request', rows };
 }
 
+/* ------------------------------ WorkBuddy ------------------------------ */
+
+/**
+ * WorkBuddy：会话 JSONL 里每次模型请求的 `providerData.rawUsage`。
+ *
+ * 口径（对照 cc-switch `session_usage_workbuddy.rs`）：
+ *   - `prompt_tokens` 是 OpenAI 口径，**已含缓存命中**：
+ *     `prompt_cache_hit_tokens + prompt_cache_miss_tokens == prompt_tokens`。
+ *     所以按 semantic='total' 入库，由 normalizeFresh 减掉缓存读写。
+ *   - `completion_tokens` 已含思考 token；`completion_tokens_details.reasoning_tokens`
+ *     只是单列展示，不能再加到 output 上。
+ *   - `rawUsage.credit` 是 WorkBuddy 积分，不是钱——**不当作成本**。
+ *   - 一次请求的 rawUsage 记在该请求的最后一个事件上：可能是 assistant
+ *     message，也可能是 function_call（工具调用常常承载大部分 token）。
+ *   - 子代理文件 `<session>/subagents/*.jsonl` 的请求算父会话的。
+ *   - 事件 id 在同一份文件里唯一；按它批内去重，文件重写/重复读取不会重复计。
+ *
+ * 这里不做持久化字节游标：用量层本来就是全量重算的只读汇总，按事件 id
+ * 去重足够；引入游标反而要维护 dedup 账本，风险更大。
+ */
+async function readWorkbuddy({ files } = {}) {
+  let list = files;
+  if (!list) {
+    try {
+      const mod = await import('./scanners/workbuddy.js');
+      list = mod.discover();
+    } catch {
+      list = [];
+    }
+  }
+  if (!list || !list.length) return { ready: false, reason: '没有找到 WorkBuddy 的会话文件' };
+
+  const rows = [];
+  const seen = new Set();
+
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const maxNum = (...vals) => Math.max(0, ...vals.map(num));
+
+  for (const file of list) {
+    let text;
+    try {
+      text = fs.readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    // 子代理文件：<…>/<sessionId>/subagents/agent-xxx.jsonl
+    const parts = String(file).split(/[\\/]/);
+    const subIdx = parts.lastIndexOf('subagents');
+    const parentSession = subIdx > 0 ? parts[subIdx - 1] : null;
+    const isSubagent = subIdx > 0;
+
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let o;
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const pd = o && o.providerData;
+      if (!pd || typeof pd !== 'object') continue;
+      const raw = pd.rawUsage && typeof pd.rawUsage === 'object' ? pd.rawUsage : null;
+      const sdk = !raw && pd.usage && typeof pd.usage === 'object' ? pd.usage : null;
+      if (!raw && !sdk) continue;
+
+      const id = o.id || o.uuid;
+      if (!id) continue;
+      const session = parentSession || o.sessionId || null;
+      const key = `${session || ''}|${id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      let input = 0;
+      let output = 0;
+      let cacheRead = 0;
+      let cacheWrite = 0;
+      let reasoning = 0;
+
+      if (raw) {
+        input = num(raw.prompt_tokens);
+        output = num(raw.completion_tokens);
+        cacheRead = maxNum(
+          raw.prompt_cache_hit_tokens,
+          raw.cache_read_input_tokens,
+          raw.cached_tokens,
+          raw.prompt_tokens_details && raw.prompt_tokens_details.cached_tokens
+        );
+        cacheWrite = maxNum(raw.cache_creation_input_tokens, raw.prompt_cache_write_tokens);
+        reasoning = maxNum(
+          raw.completion_tokens_details && raw.completion_tokens_details.reasoning_tokens,
+          raw.completion_thinking_tokens
+        );
+      } else {
+        input = num(sdk.inputTokens);
+        output = num(sdk.outputTokens);
+        const inDetails = Array.isArray(sdk.inputTokensDetails) ? sdk.inputTokensDetails : [];
+        cacheRead = maxNum(...inDetails.map((d) => d && d.cached_tokens));
+        const outDetails = Array.isArray(sdk.outputTokensDetails) ? sdk.outputTokensDetails : [];
+        reasoning = maxNum(...outDetails.map((d) => d && d.reasoning_tokens));
+      }
+
+      const model = String(pd.model || pd.requestModelId || '').replace(/^custom-[^:]+:/, '') || null;
+      const at = toMs(o.timestamp);
+      if (at == null) continue;
+
+      rows.push(
+        makeRow({
+          agent: 'workbuddy',
+          source: 'workbuddy',
+          fidelity: 'request',
+          at,
+          session,
+          model,
+          calls: 1,
+          input,
+          semantic: 'total',
+          output,
+          cacheRead,
+          cacheWrite,
+          reasoning,
+          cost: null,
+          costStatus: 'unknown',
+        })
+      );
+    }
+  }
+
+  if (!rows.length) return { ready: false, reason: '有 WorkBuddy 会话但没有找到 rawUsage 记录' };
+  return { ready: true, fidelity: 'request', rows };
+}
+
 /* ------------------------------ 工具 ------------------------------ */
 
 /** 时间可能是毫秒数、秒数或 ISO 字符串，三种都见过。 */
@@ -666,6 +806,7 @@ export const SOURCES = [
   { id: 'claude-code', display: 'Claude Code', read: readClaudeCode },
   { id: 'codex', display: 'Codex', read: readCodex },
   { id: 'dsh', display: 'DSH', read: readDsh },
+  { id: 'workbuddy', display: 'WorkBuddy', read: readWorkbuddy },
 ];
 
 /**

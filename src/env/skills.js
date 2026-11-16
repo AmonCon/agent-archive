@@ -1,10 +1,10 @@
 /**
  * 技能（SKILL.md 目录）的跨 Agent 识别。
  *
- * 实测：至少 366 处技能安装，其中 `~/.agents/skills` 的 72 个至少还有
- * 四份副本（Claude / Codex / Qoder / Hermes 各自一份目录）。同一个技能
- * 在五个地方装着，只按目录名认会把列表撑爆，所以身份按**内容哈希**算，
- * 名字只作为"别名"。
+ * 实测（2026-11-16）：至少 482 处技能安装、14 个根，其中 `~/.agents/skills`
+ * 的 73 个还有五份以上副本（Claude / Codex / Qoder / Hermes / Kiro / Pi
+ * 各自一份目录或链接）。同一个技能在五个地方装着，只按目录名认会把列表撑爆，
+ * 所以身份按**内容哈希**算，名字只作为"别名"。
  *
  * 为什么用内容而不是名字：
  *   - 名字会改（`design-taste-frontend` / `design-taste-frontend-v1` 是两代）
@@ -19,8 +19,24 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { userDataCandidates } from '../platform.js';
+import { envOverrides, pathKey, userDataCandidates } from '../platform.js';
 import { statePath } from '../paths.js';
+
+/**
+ * 数据目录型环境变量 → 技能根。
+ *
+ * 这些工具的官方覆盖变量指向的是**数据根**（不是 skills 目录本身），
+ * 技能固定在其下的 `skills/`。环境变量优先，默认位置兜底，且不因为
+ * 环境变量存在就丢掉默认位置——有人主副两套目录共存（与 platform.js
+ * 的 `withOverrides` 同一策略）。
+ *
+ * @param {string[]} envNames 环境变量名，按优先级
+ * @param {...string} defaults 默认技能目录
+ * @returns {string[]}
+ */
+function dataDirSkillRoots(envNames, ...defaults) {
+  return [...envOverrides(envNames).map((dir) => path.join(dir, 'skills')), ...defaults];
+}
 
 /**
  * 各 Agent 的技能目录。
@@ -94,9 +110,115 @@ const ROOTS = [
     depth: 2,
   },
   {
-    // Gemini / Antigravity 的技能目录
+    // Gemini CLI 的技能目录（上游 `skill.rs:758`）
     agent: 'gemini',
+    dirs: () => [path.join(os.homedir(), '.gemini', 'skills')],
+    depth: 2,
+  },
+  {
+    // Antigravity 的技能目录（上游 `skill.rs:765`）。
+    // 旧实现把这里标成了 gemini：两处同时存在时会张冠李戴。
+    agent: 'antigravity',
     dirs: () => [path.join(os.homedir(), '.gemini', 'config', 'skills')],
+    depth: 2,
+  },
+  {
+    // WorkBuddy：`WORKBUDDY_CONFIG_DIR` 或 ~/.workbuddy（上游 `workbuddy_config.rs:42-45`、
+    // `skill.rs:754`）。`.workbuddy-ai` 是社区/旧版变体，和会话扫描器同口径。
+    agent: 'workbuddy',
+    dirs: () =>
+      dataDirSkillRoots(
+        ['WORKBUDDY_CONFIG_DIR'],
+        path.join(os.homedir(), '.workbuddy', 'skills'),
+        path.join(os.homedir(), '.workbuddy-ai', 'skills')
+      ),
+    depth: 2,
+  },
+  {
+    // Pi：`PI_CODING_AGENT_DIR` 直接指向 agent 目录；`PI_CONFIG_DIR` 是它的上一级
+    // （`~/.pi`）。默认 ~/.pi/agent（上游 `pi_config/mod.rs`）。
+    // 实测 27 个技能全是指向 ~/.agents/skills 的 junction。
+    agent: 'pi',
+    dirs: () => [
+      ...envOverrides(['PI_CODING_AGENT_DIR']).map((dir) => path.join(dir, 'skills')),
+      ...envOverrides(['PI_CONFIG_DIR']).map((dir) => path.join(dir, 'agent', 'skills')),
+      path.join(os.homedir(), '.pi', 'agent', 'skills'),
+    ],
+    depth: 2,
+  },
+  {
+    // DSH：`DSH_HOME` 或 ~/DeepSeekHarness，另兼容旧版的 ~/.dsh。
+    agent: 'dsh',
+    dirs: () =>
+      dataDirSkillRoots(
+        ['DSH_HOME'],
+        path.join(os.homedir(), 'DeepSeekHarness', 'skills'),
+        path.join(os.homedir(), '.dsh', 'skills')
+      ),
+    depth: 2,
+  },
+  {
+    // Kimi：`KIMI_CODE_HOME` 或 ~/.kimi-code，另兼容 ~/.kimi。
+    agent: 'kimi',
+    dirs: () =>
+      dataDirSkillRoots(
+        ['KIMI_CODE_HOME'],
+        path.join(os.homedir(), '.kimi-code', 'skills'),
+        path.join(os.homedir(), '.kimi', 'skills')
+      ),
+    depth: 2,
+  },
+  {
+    // Mcode（MiniMax）：`MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR` 或 ~/.minimax。
+    agent: 'mcode',
+    dirs: () =>
+      dataDirSkillRoots(
+        ['MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR'],
+        path.join(os.homedir(), '.minimax', 'skills')
+      ),
+    depth: 2,
+  },
+  {
+    // GitHub Copilot CLI：`COPILOT_HOME` 或 ~/.copilot（上游 `copilot_config.rs`）。
+    agent: 'copilot',
+    dirs: () => dataDirSkillRoots(['COPILOT_HOME'], path.join(os.homedir(), '.copilot', 'skills')),
+    depth: 2,
+  },
+  {
+    // Claude Desktop：上游默认 ~/.claude-desktop/skills；再按各平台的
+    // Application Support / AppData / XDG 候选兜底（换机、跨平台拷贝时可能命中）。
+    // userDataCandidates 自己会补上小写目录名，所以这里只给规范名。
+    agent: 'claude-desktop',
+    dirs: () => [
+      path.join(os.homedir(), '.claude-desktop', 'skills'),
+      ...userDataCandidates('Claude').map((root) => path.join(root, 'skills')),
+    ],
+    depth: 2,
+  },
+  {
+    // GrokBuild（名字与 inventory.js 的 AGENT_PRESENCE / DISPLAY 对齐；
+    // `GROK_HOME` 与 mcp.js 的 grokbuild 源同口径）
+    agent: 'grokbuild',
+    dirs: () => dataDirSkillRoots(['GROK_HOME'], path.join(os.homedir(), '.grok', 'skills')),
+    depth: 2,
+  },
+  {
+    // OpenClaw：标准目录和 autoclaw 变体并存
+    agent: 'openclaw',
+    dirs: () => [
+      path.join(os.homedir(), '.openclaw', 'skills'),
+      path.join(os.homedir(), '.openclaw-autoclaw', 'skills'),
+    ],
+    depth: 2,
+  },
+  {
+    // Omp（Oh My Pi）：`OMP_DATA_DIR` 或 ~/.omp，技能在 `agent/skills`
+    // （上游 `omp_config.rs` 的 native_agent_dir；与 mcp.js 的 OMP_DATA_DIR 同口径）
+    agent: 'omp',
+    dirs: () => [
+      ...envOverrides(['OMP_DATA_DIR']).map((dir) => path.join(dir, 'agent', 'skills')),
+      path.join(os.homedir(), '.omp', 'agent', 'skills'),
+    ],
     depth: 2,
   },
 ];
@@ -117,11 +239,32 @@ const MAX_SKILL_BYTES = 512 * 1024;
  *
  * 用 lstat + stat 区分"链接"和"真目录"：链接不参与环路保护判断，
  * 真目录才记录已访问路径。环路只在真目录链上才可能形成。
+ *
+ * @param {string} root
+ * @param {number} maxDepth
+ * @param {Array<{path: string, code: string, message: string, scope: 'root'|'file'}>} [errors]
+ *   收集读失败（权限/IO）。**目录/文件不存在是正常 missing，不进来**：
+ *   断链、扫到一半被删都属于"没有"，不是"未知"。
+ * @returns {string[]} 技能目录
  */
-function findSkillDirs(root, maxDepth) {
+function findSkillDirs(root, maxDepth, errors) {
   const out = [];
   const visitedReal = new Set();
   const MAX_VISITS = 5000;
+
+  // NotFound（ENOENT）/ 路径中途变文件（ENOTDIR）都是"没了"，不算错误。
+  const report = (pathname, err, lvl) => {
+    if (!errors) return;
+    const code = (err && err.code) || 'EUNKNOWN';
+    if (code === 'ENOENT' || code === 'ENOTDIR') return;
+    errors.push({
+      path: pathname,
+      code,
+      message: (err && err.message) || String(err || code),
+      // 根目录本身读不了 = 整家未知（rootsUnknown）；子目录/文件读不了 = 少扫了一部分（filesUnknown）
+      scope: lvl === 0 ? 'root' : 'file',
+    });
+  };
 
   const walk = (dir, lvl) => {
     if (lvl > maxDepth) return;
@@ -130,7 +273,8 @@ function findSkillDirs(root, maxDepth) {
     let ents;
     try {
       ents = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
+    } catch (e) {
+      report(dir, e, lvl);
       return;
     }
 
@@ -141,13 +285,14 @@ function findSkillDirs(root, maxDepth) {
     // SKILL.md 也可能本身是个链接（少见但可能）
     for (const e of ents) {
       if (e.name !== 'SKILL.md') continue;
+      const manifest = path.join(dir, e.name);
       try {
-        if (fs.statSync(path.join(dir, e.name)).isFile()) {
+        if (fs.statSync(manifest).isFile()) {
           out.push(dir);
           return;
         }
-      } catch {
-        /* 断链 */
+      } catch (err) {
+        report(manifest, err, lvl + 1);
       }
     }
 
@@ -161,15 +306,17 @@ function findSkillDirs(root, maxDepth) {
         let st;
         try {
           st = fs.statSync(full);
-        } catch {
-          continue; // 断链，跳过
+        } catch (err) {
+          report(full, err, lvl + 1); // 断链是正常 missing；权限错误要报出来
+          continue;
         }
         if (st.isFile() && e.name === 'SKILL.md') continue; // 已在上面处理
         if (st.isDirectory()) {
           let real;
           try {
             real = fs.realpathSync(full);
-          } catch {
+          } catch (err) {
+            report(full, err, lvl + 1);
             continue;
           }
           // 已经沿这条真实路径走过，说明成环
@@ -193,7 +340,8 @@ function findSkillDirs(root, maxDepth) {
   // 根目录本身可能是链接：这一步需要真实的绝对路径
   try {
     visitedReal.add(fs.realpathSync(root));
-  } catch {
+  } catch (err) {
+    report(root, err, 0);
     return out;
   }
 
@@ -299,13 +447,35 @@ let cacheDirty = false;
 
 export function saveSkillCache() {
   if (!cacheDirty) return;
+  const target = cacheFile();
+  let tmp = null;
   try {
-    const dir = path.dirname(cacheFile());
+    const dir = path.dirname(target);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(cacheFile(), JSON.stringify(loadCache()), 'utf8');
+    // 原子写：同目录 tmp → fsync → rename。直接 writeFileSync 写一半崩了会留下
+    // 截断的 JSON，下次 loadCache 解析失败会当成空缓存全量重扫（技能多时很慢）。
+    // 模式与 src/registry.js 的 saveCache 一致，并发写也不会互相截断。
+    tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
+    const fd = fs.openSync(tmp, 'w');
+    try {
+      fs.writeFileSync(fd, JSON.stringify(loadCache()), 'utf8');
+      fs.fsyncSync(fd); // 先落盘再改名：崩溃时不会出现"改名成功但内容为空"
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmp, target);
+    tmp = null;
     cacheDirty = false;
   } catch {
     /* 写不进去不影响正确性 */
+  } finally {
+    if (tmp) {
+      try {
+        fs.unlinkSync(tmp);
+      } catch {
+        /* 留着也不影响，下次会覆盖 */
+      }
+    }
   }
 }
 
@@ -322,13 +492,28 @@ export function clearSkillCache() {
  * 第一版分两个函数、各读一遍，等于每个技能多一次 IO（435 个就是
  * 435 次多余读 + 435 次多余 stat）。
  */
-function readSkill(dir, agent, viaSymlink = false) {
+function readSkill(dir, agent, viaSymlink = false, errors) {
   const file = path.join(dir, 'SKILL.md');
+
+  // 读失败必须带身份（path/code/message）：一个 EACCES 不能静默变成"这个技能不存在"。
+  // ENOENT 除外——扫描和读取之间目录被删是正常竞态，按 missing 处理。
+  const report = (err) => {
+    if (!errors) return;
+    const code = (err && err.code) || 'EUNKNOWN';
+    if (code === 'ENOENT' || code === 'ENOTDIR') return;
+    errors.push({
+      path: file,
+      code,
+      message: (err && err.message) || String(err || code),
+      scope: 'file',
+    });
+  };
 
   let st;
   try {
     st = fs.statSync(file);
-  } catch {
+  } catch (err) {
+    report(err);
     return null;
   }
   if (st.size > MAX_SKILL_BYTES) return null;
@@ -342,7 +527,8 @@ function readSkill(dir, agent, viaSymlink = false) {
   let buf;
   try {
     buf = fs.readFileSync(file);
-  } catch {
+  } catch (err) {
+    report(err);
     return null;
   }
 
@@ -400,8 +586,10 @@ export function scanSkills() {
     }
 
     for (const root of dirs) {
-      if (!root || seenPaths.has(root)) continue;
-      seenPaths.add(root);
+      // 去重键用 platform.js 的 pathKey：Windows/macOS 大小写不敏感，
+      // 同一目录换个写法会被算成两个根（Claude Desktop 的候选就有这种重叠）。
+      if (!root || seenPaths.has(pathKey(root))) continue;
+      seenPaths.add(pathKey(root));
 
       let st;
       try {
@@ -411,24 +599,59 @@ export function scanSkills() {
         // 不存在 = 这家没装技能（正常）。权限/IO 错误 = 未知，必须报出来，
         // 否则「没权限读」会被显示成「0 个技能」。
         if (e && e.code !== 'ENOENT') {
-          roots.push({ agent: src.agent, root, status: 'unreadable', found: 0, shared: Boolean(src.shared) });
-          errors.push({ root, agent: src.agent, error: `读不到：${e.code || e.message}` });
+          roots.push({
+            agent: src.agent,
+            root,
+            status: 'unreadable',
+            found: 0,
+            shared: Boolean(src.shared),
+            code: e.code || 'EUNKNOWN',
+          });
+          errors.push({
+            path: root,
+            agent: src.agent,
+            kind: 'root',
+            code: e.code || 'EUNKNOWN',
+            message: e.message || String(e),
+          });
         }
         continue;
       }
 
-      const found = findSkillDirs(root, src.depth);
-      roots.push({ agent: src.agent, root, status: 'ok', found: found.length, shared: Boolean(src.shared) });
+      // findSkillDirs / readSkill 把权限、IO 失败收集到这里（带 path/code/message）。
+      // 目录不存在、断链、扫描中被删都是正常 missing，不会进来。
+      const ioErrors = [];
+      const found = findSkillDirs(root, src.depth, ioErrors);
+      const rootErrors = ioErrors.filter((e) => e.scope === 'root');
+      if (rootErrors.length) {
+        // stat 成功但读不了目录（如 EACCES）：整家未知，不是 0 个技能
+        roots.push({
+          agent: src.agent,
+          root,
+          status: 'unreadable',
+          found: 0,
+          shared: Boolean(src.shared),
+          code: rootErrors[0].code,
+        });
+        pushSkillErrors(errors, rootErrors, src.agent);
+        continue;
+      }
 
       // 只保留最新版本的根（插件缓存这类按版本堆积的目录）：
       // 同一个技能名在同一插件下可能留了七八个历史版本，
       // 那些是缓存残留，不是"装了七八个技能"。
       const keep = src.latestOnly ? keepLatest(found, src.versionOf) : found;
       const dropped = found.length - keep.length;
+      const rootEntry = {
+        agent: src.agent,
+        root,
+        status: ioErrors.length ? 'partial' : 'ok',
+        found: found.length,
+        shared: Boolean(src.shared),
+      };
       if (dropped > 0) {
-        const r = roots[roots.length - 1];
-        r.superseded = dropped;
-        r.kept = keep.length;
+        rootEntry.superseded = dropped;
+        rootEntry.kept = keep.length;
       }
 
       for (const dir of keep) {
@@ -439,14 +662,34 @@ export function scanSkills() {
         } catch {
           /* 保持 false */
         }
-        const s = readSkill(dir, src.agent, viaSymlink);
+        const s = readSkill(dir, src.agent, viaSymlink, ioErrors);
         if (s) installs.push(s);
       }
+
+      if (ioErrors.length) {
+        rootEntry.status = 'partial';
+        rootEntry.filesUnknown = ioErrors.length;
+      }
+      roots.push(rootEntry);
+      pushSkillErrors(errors, ioErrors, src.agent);
     }
   }
 
   saveSkillCache();
   return { installs, roots, errors };
+}
+
+/** 把 findSkillDirs/readSkill 收集的错误统一成 scanSkills().errors[] 的形状。 */
+function pushSkillErrors(errors, list, agent) {
+  for (const e of list) {
+    errors.push({
+      path: e.path,
+      agent,
+      kind: e.scope === 'root' ? 'root' : 'file',
+      code: e.code || 'EUNKNOWN',
+      message: e.message || String(e.code || 'unknown'),
+    });
+  }
 }
 
 /**
@@ -704,6 +947,11 @@ export function skillSummary({ includeLocations = false } = {}) {
   const { installs, roots, errors } = scanSkills();
   const groups = groupByHash(installs);
 
+  // 读不到 ≠ 零：根目录读不了（rootsUnknown）和技能文件读不了（filesUnknown）分开计数。
+  // 命名和 src/env/mcp.js 的 filesUnknown 对齐。
+  const rootsUnknown = errors.filter((e) => e.kind === 'root').length;
+  const filesUnknown = errors.filter((e) => e.kind !== 'root').length;
+
   return {
     installs: installs.length,
     skills: groups.length,
@@ -713,10 +961,12 @@ export function skillSummary({ includeLocations = false } = {}) {
     single: groups.filter((g) => g.agents.length === 1).length,
     // 模型不能主动调用的技能（frontmatter disable-model-invocation）
     manualOnly: groups.filter((g) => g.manual).length,
-    // 读不到的根：未知 ≠ 零
-    rootsUnknown: errors.length,
+    // 读不到的根/文件：未知 ≠ 零
+    rootsUnknown,
+    filesUnknown,
     errors,
-    roots: roots.filter((r) => r.found > 0),
+    // 有技能或有异常的根都列出来（unreadable/partial 的根即使 0 个也不能消失）
+    roots: roots.filter((r) => r.found > 0 || r.status !== 'ok'),
     byAgent: countBy(installs, (s) => s.agent),
     list: groups.map((g) => ({
       name: g.name,

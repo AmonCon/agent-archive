@@ -4,6 +4,7 @@
 import './boot.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionContent } from './query.js';
 import { cacheLocation } from './registry.js';
@@ -81,7 +82,10 @@ function usage() {
   agent-archive export <项目> --bundle         导出该项目全部会话正文
   agent-archive export <id> --session          导出单场会话正文
   agent-archive serve                          起本地网页查看器
+  agent-archive serve --open                   起网页并自动打开浏览器
   agent-archive mcp                            打印 MCP 配置（接给别的 Agent）
+  agent-archive connect                        按 Agent 打印可直接粘贴的 MCP 配置
+  agent-archive demo                           用合成样例数据跑一遍（不碰真实会话）
 
 cat 的会话参数:
   <id 前缀>                按会话 id 匹配，不必抄全
@@ -100,6 +104,8 @@ cat 的会话参数:
   --project <路径>        限制在某个项目内查找（cat）
   --agent <名字>          限制在某个 Agent 内查找（cat）
   --port <端口>           网页端口（serve，默认 7788）
+  --open                  启动后自动打开浏览器（serve）
+  --keep                  demo 跑完保留合成样例目录并打印路径
   --limit <n>             搜索结果条数（search，默认 20）
   --min-gap <分钟>        handoff 只显示间隔超过这个值的换手
   --read <n>              brief 读最近几场会话正文来抽文件和任务（默认 6）
@@ -657,6 +663,37 @@ async function cmdServe(opts) {
   if (opts.json) {
     console.log(JSON.stringify({ url: started.url, port }));
   }
+
+  // --open：启动后自动打开浏览器。自己 spawn 一个系统默认浏览器，
+  // 失败只提示不影响服务——headless 环境里这条必然失败，不该让 serve 退出。
+  if (opts.flags.has('--open')) {
+    const ok = openInBrowser(started.url);
+    if (!ok) console.log(c(C.dim, `  没能自动打开浏览器，请手动访问上面的地址。`));
+  }
+}
+
+/**
+ * 用系统默认浏览器打开一个 URL。
+ *
+ * 不引任何依赖：Windows 用 `start`（必须走 cmd，否则 start 是 shell 内建），
+ * macOS 用 `open`，其余按 XDG 用 `xdg-open`。全部 detached + 忽略 stdio，
+ * 否则子进程会拖住 serve 的退出。
+ */
+function openInBrowser(url) {
+  try {
+    const cmd =
+      process.platform === 'win32'
+        ? { file: 'cmd', args: ['/c', 'start', '', url] }
+        : process.platform === 'darwin'
+          ? { file: 'open', args: [url] }
+          : { file: 'xdg-open', args: [url] };
+    const child = spawn(cmd.file, cmd.args, { detached: true, stdio: 'ignore' });
+    child.on('error', () => {});
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -766,8 +803,18 @@ async function cmdSearch(query, opts) {
     process.exit(2);
   }
 
+  // 搜索是「索引里搜到的」，不是「全库一定没有更多」。把覆盖口径
+  // 一并打出来，避免把「还没进索引」读成「没说过」。
+  const idx = r.index || {};
+  const coverage =
+    idx.total != null
+      ? `索引覆盖 ${idx.docs}/${idx.total} 场` + (idx.failed ? `（${idx.failed} 场读不出）` : '')
+      : `索引 ${idx.docs || 0} 场`;
+  const built = idx.builtAt ? ` · 建于 ${fmtDate(idx.builtAt)}` : '';
+
   if (!r.hits.length) {
     console.log(`没有找到包含「${query}」的会话。`);
+    console.log(c(C.dim, `${coverage}${built}；如果之后有新会话，先运行 agent-archive index`));
     return;
   }
 
@@ -784,7 +831,7 @@ async function cmdSearch(query, opts) {
     if (h.snippet) console.log(c(C.dim, '  ' + indent(h.snippet, '  ').trim()));
     console.log('');
   }
-  console.log(c(C.dim, `读某一场：agent-archive cat <id>   ·   索引：${tildify(indexPath())}`));
+  console.log(c(C.dim, `读某一场：agent-archive cat <id>   ·   ${coverage}${built}   ·   ${tildify(indexPath())}`));
 }
 
 /**
@@ -1155,6 +1202,39 @@ async function cmdDoctor(opts) {
 }
 
 /**
+ * 合成样例：没有真实数据也能看到产品长什么样。
+ *
+ * 三条约束都在 `src/demo.js` 里兑现，这里只负责分派：
+ *   1. 只在临时目录里造数据，跑完就删——绝不碰用户真实会话；
+ *   2. 隔离靠子进程 + 环境变量，不用进程级全局 source
+ *      （那个 shim 早被否决过：async 交错会串根）；
+ *   3. 每一步都是真的 CLI 子进程，所以 demo 里看到的输出就是用户真会看到的输出。
+ */
+async function cmdDemo(opts) {
+  const { runDemo, runDemoTour, DEMO_PROJECT } = await import('./demo.js');
+  const keep = opts.flags.has('--keep');
+
+  // 只跑一步：`agent-archive demo handoff` 就只跑 handoff。
+  //
+  // 需要项目路径的命令自动补上样例项目——用户敲 `demo handoff` 的意思
+  // 显然是"给我看这个样例项目的换手"，不该再要求他抄一遍 E:/demo-project。
+  if (opts.positionals.length) {
+    const argv = [...opts.positionals];
+    const NEEDS_PROJECT = new Set(['timeline', 'tl', 'handoff', 'relay', 'brief', 'handover', 'agents', 'digest']);
+    if (NEEDS_PROJECT.has(argv[0]) && argv.length === 1) argv.push(DEMO_PROJECT);
+    const code = await runDemo(argv, { keep });
+    process.exit(code);
+  }
+
+  const codes = await runDemoTour({ keep });
+  const failed = codes.findIndex((n) => n !== 0);
+  if (failed >= 0) {
+    console.error(c(C.warn, `第 ${failed + 1} 步失败（退出码 ${codes[failed]}）。`));
+    process.exit(codes[failed]);
+  }
+}
+
+/**
  * MCP server 的配置说明与直接启动。
  *
  * 这个命令面向"我要让别的 Agent 读这个档案"的场景：打印出可以
@@ -1189,35 +1269,39 @@ async function cmdMcp(opts) {
   }
 
   console.log(c(C.bold, '把档案馆接到你自己的 Agent 上'));
+  console.log(c(C.dim, '  只打印，不写任何配置文件。每段都能直接粘。'));
   console.log('');
-  // 工具清单从 server 的注册表里取，不在这里再抄一份：
-  // 抄一份的下场就是加了三层新工具、这里还写着"提供 6 个"。
-  const { TOOLS } = await import('./mcp.js');
-  console.log(`这个 server 只读，提供 ${TOOLS.length} 个工具：`);
-  for (const t of TOOLS) {
-    console.log(c(C.dim, `  ${t.name.padEnd(21)}${t.title}`));
+
+  // 按 Agent 打印精确配置：路径表来自 env/mcp.js 的 SOURCES（只一张表），
+  // 片段由 env/connect.js 按各家的格式生成。以前这里只给一份通用 JSON +
+  // 四行路径说明，Codex 还得自己换成 TOML——这是产品最核心的用法，
+  // 却最像开发者文档。
+  const { connectTargets } = await import('./env/connect.js');
+  // 位置参数是命令之后第一个词：`connect codex` → positionals[0] = 'codex'。
+  // --agent 是老写法，一并认。
+  const only = opts.positionals[0] || opts.agent || null;
+  const targets = connectTargets({ all: opts.showAll, agent: only });
+
+  if (!targets.agents.length) {
+    console.log(c(C.dim, '  没找到已安装的 Agent。看全部已知目标：agent-archive connect --all'));
+    console.log('');
+    return;
   }
-  console.log('');
-  console.log(c(C.bold, '配置（粘进对应 Agent 的 MCP 配置）'));
-  console.log('');
-  const conf = {
-    mcpServers: {
-      'agent-archive': {
-        type: 'stdio',
-        command: node,
-        args: [serverPath],
-      },
-    },
-  };
-  console.log(JSON.stringify(conf, null, 2));
-  console.log('');
-  console.log(c(C.dim, '配置文件位置：'));
-  console.log(c(C.dim, '  Claude Code   ~/.claude.json 或项目 .mcp.json'));
-  console.log(c(C.dim, '  Codex         ~/.codex/config.toml（[mcp_servers] 段）'));
-  console.log(c(C.dim, '  Cursor        ~/.cursor/mcp.json'));
-  console.log(c(C.dim, '  其他          ZCode / OpenCode / Kiro 等均支持 mcpServers 格式'));
-  console.log('');
-  console.log(c(C.dim, '先建索引再搜：node src/cli.js index'));
+
+  for (const a of targets.agents) {
+    const state = a.exists ? c(C.ok, '文件已存在') : c(C.dim, '还没有这个文件');
+    console.log(c(C.bold, a.display) + '  ' + c(C.dim, a.configPath) + '  ' + state);
+    if (a.note) console.log(c(C.dim, '  ' + a.note));
+    if (a.altPaths && a.altPaths.length) {
+      console.log(c(C.dim, '  也可能在：' + a.altPaths.join('  ')));
+    }
+    console.log('');
+    console.log(a.snippet);
+    console.log('');
+  }
+
+  console.log(c(C.dim, `  只打印，没有写入任何文件。列全部目标：agent-archive connect --all`));
+  console.log(c(C.dim, '  先建索引再搜：agent-archive index'));
 }
 
 /**
@@ -1674,6 +1758,15 @@ async function cmdEnv(sub, opts) {
     return;
   }
 
+  if (which === 'commands' || which === 'command') {
+    if (opts.json) {
+      console.log(JSON.stringify(inv.commands, null, 2));
+      return;
+    }
+    printCommands(inv.commands);
+    return;
+  }
+
   if (which === 'memory') {
     if (opts.json) {
       console.log(JSON.stringify(inv.memory, null, 2));
@@ -1700,7 +1793,8 @@ function printEnvOverview(inv) {
       `  ${s.agentsWithData} 个 Agent 有数据 · MCP ${s.mcpServices} 个服务（${s.mcpRegistrations} 条注册） · ` +
         `渠道 ${s.channels} 个（${s.channelRegistrations} 条配置） · ` +
         `CLI ${s.cliProducts} 个（${s.cliDetected} 个有安装） · ` +
-        `技能 ${s.skills} 个（${s.skillInstalls} 处安装） · 记忆 ${s.memoryLocations} 处`
+        `技能 ${s.skills} 个（${s.skillInstalls} 处安装） · ` +
+        `斜杠命令 ${s.commands || 0} 个 · 记忆 ${s.memoryLocations} 处`
     )
   );
   console.log('');
@@ -1746,7 +1840,45 @@ function printEnvOverview(inv) {
     console.log('');
   }
 
-  console.log(c(C.dim, '细看：env mcp / env providers / env cli / env skills / env memory / env audit'));
+  console.log(c(C.dim, '细看：env mcp / env providers / env cli / env skills / env commands / env memory / env audit'));
+}
+
+/**
+ * `env commands`：斜杠命令清单。
+ * 只报名字、装在哪几家、正文多大——**正文绝不打印**。命令正文可能有
+ * 几十 KB，也可能写着用户自己的私有内容；要看正文请直接打开源文件。
+ */
+function printCommands(cm) {
+  console.log(c(C.bold, '斜杠命令'));
+  console.log(
+    c(
+      C.dim,
+      `  ${cm.commands} 个命令 · ${cm.files} 份文件 · ${cm.shared} 个跨 Agent 共享` +
+        (cm.conflicts ? ` · ${cm.conflicts} 组同名冲突` : '') +
+        (cm.rootsUnknown ? ` · ${cm.rootsUnknown} 处目录读不到（未知）` : '')
+    )
+  );
+  console.log('');
+
+  if (!cm.list.length) {
+    console.log(c(C.dim, '  没有识别到斜杠命令（各家都还没定义 / 目录不在默认位置）。'));
+    console.log('');
+    return;
+  }
+
+  const sorted = [...cm.list].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const cmd of sorted) {
+    const mark = cmd.conflict ? c(C.warn, '!') : cmd.agents.length > 1 ? c(C.ok, '●') : c(C.dim, '○');
+    const size = cmd.promptLength == null ? '—' : `${Math.round(cmd.promptLength / 1024)} KB`;
+    const legacy = cmd.legacy ? c(C.dim, ' [旧目录]') : '';
+    console.log(
+      `  ${mark} /${cmd.name.padEnd(24)} ${String(cmd.agents.length)} 家  ${c(C.dim, cmd.agents.join(','))}  ${size}${legacy}`
+    );
+    if (cmd.description) console.log(c(C.dim, `      ${clip(cmd.description, 100)}`));
+  }
+  console.log(c(C.dim, '  ● 多家定义且内容相同   ○ 只在一家   ! 同名但内容不同（换 Agent 行为会变）'));
+  console.log(c(C.dim, '  正文不打印；要看请打开源文件。'));
+  console.log('');
 }
 
 /** `env providers`：渠道清单。 */
@@ -2803,7 +2935,10 @@ async function main() {
     case 'price':
       return cmdPricing(opts);
     case 'mcp':
+    case 'connect':
       return cmdMcp(opts);
+    case 'demo':
+      return cmdDemo(opts);
     case 'secrets':
     case 'leaks':
       return cmdSecrets(opts);

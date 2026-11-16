@@ -111,6 +111,21 @@ test('source: resolveSource 没给显式来源时退回 local，给了就显式'
   assert.equal(wl.withLocal, true, 'withLocal 仅保留标记，P0 不在 scanAll 里叠加本机');
 });
 
+test('source: 裸 Windows 路径不会被当成 <agent>:<dir>', () => {
+  // C:\dir 的第一个冒号是盘符，不是 agent 分隔符。误拆的后果很安静：
+  // agent 名变成 "C"，找不到对应扫描器，绑定被丢掉，数据凭空少一家。
+  const r = resolveSource({ cliBindings: ['C:\\Users\\me\\proj'] });
+  assert.equal(r.kind, 'explicit');
+  assert.deepEqual(r.roots, [path.resolve('C:\\Users\\me\\proj')]);
+  assert.equal(r.bindings.length, 0, '没有 agent 就只当路径，不编一个 agent');
+
+  const withAgent = resolveSource({ cliBindings: ['codex:C:\\backup'] });
+  assert.ok(
+    withAgent.bindings.some((b) => b.agent === 'codex' && b.root === path.resolve('C:\\backup')),
+    '<agent>:<盘符路径> 仍要能拆开'
+  );
+});
+
 test('source: identify 混合包——1 个 codex binding，decoy 只进 unmatched 且是「看到什么」', () => {
   const box = tempDir();
   try {

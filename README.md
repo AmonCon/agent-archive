@@ -1,6 +1,84 @@
 # agent-archive
 
-跨 Agent 的项目级会话档案馆，也是一个**通用的跨 Agent 会话识别/归一引擎**。
+**把 21 家 Agent 在一个项目里的会话，合成一条可查的时间线。换 Agent 时，不用重新讲项目史。**
+
+Claude Code 里定位的问题、Codex 里改的代码、Qoder 里补的用例——散在三个工具里，
+彼此的记录互不可见。这个工具把它们按时间合并成一条线，回答三个问题：
+**上一段做到哪、隔了多久、留了什么给下一位。**
+
+![项目列表：一个项目、三家 Agent、6 场会话](docs/screenshots/01-projects.png)
+
+一个 AI 能读得懂的档案馆，而不是一个会读东西的 AI：它只提供事实与出处
+（扫描、归一、时间线、交接单），总结和判断交给你自己的模型——通过 MCP，
+不通过我们的 API Key。
+
+## 三步上手
+
+```bash
+# 1. 装（需要 Node 22.16+，零 npm 依赖）
+npm install -g github:AmonCon/agent-archive
+
+# 2. 先看看它长什么样（用合成样例，不碰你的真实会话）
+agent-archive demo
+
+# 3. 打开你自己的档案
+agent-archive serve --open
+```
+
+`demo` 跑完你会看到：项目列表 → 时间线 → 换手链 → 交接单。下面这些截图都是
+用 `demo` 的合成数据截的，所以任何人在任何机器上跑出来都一样：
+
+| 时间线：一个项目里到底发生过什么 | 换手链：谁在什么时候接手、隔了多久 |
+|---|---|
+| ![时间线](docs/screenshots/02-timeline.png) | ![跨 Agent 接力](docs/screenshots/03-handoff.png) |
+
+## 接给你自己的 Agent（MCP）
+
+这是这个工具最有用的一步：接好之后，你在任何一家 Agent 里都能问
+"这个项目上一段做到哪"，它会自己来读档案。
+
+```bash
+agent-archive connect            # 按你装了的 Agent，打印可直接粘贴的配置
+agent-archive connect codex      # 只看 Codex 该怎么配
+```
+
+它会给出各家**精确的**配置片段（Claude Code / Cursor 的 JSON、Codex 的 TOML）
+和配置文件路径，**只打印、不写任何文件**。
+
+## 它不是什么
+
+- **不注入上下文。** 不往任何 Agent 里塞东西；要不要读、读多少，由那个 Agent 自己决定。
+- **不采集网页版 AI 对话。** 那要往别人的页面注入脚本，我们只读本机 Agent 的会话文件。
+- **不改你的配置、不做网关。** 不转发请求，不接管流量，不碰你的模型账单。
+- **不是实时监听。** 按需扫描 + 缓存，不是后台守护进程。
+
+完整的「读什么 / 写什么 / 联什么网」在 [docs/boundaries.md](docs/boundaries.md)——
+每一条都能在代码或测试里核对，不是文档里的承诺。
+
+## 装好之后能干什么：三条配方
+
+「配方」是可以直接粘给你正在用的 Agent 的提示词，加上推荐的 MCP 工具调用顺序。
+档案馆只保管原始矿石，炼金交给你自己的模型。
+
+| 配方 | 什么时候用 | 主要工具 |
+|---|---|---|
+| [接手前速读](docs/recipes/handoff-quickread.md) | 刚接手一个别人做过的项目 | `project_brief` → `search_sessions` → `read_session` |
+| [项目周报](docs/recipes/weekly-report.md) | 每周回顾这个项目发生了什么 | `project_timeline` → `read_session` |
+| [主题洞察](docs/recipes/topic-insight.md) | 回顾某个主题在多次对话里怎么演变 | `search_sessions` → `read_session` |
+
+更新记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+---
+
+## 目录
+
+- [它长什么样](#它长什么样) · [当前支持](#当前支持) · [用法](#用法) · [指定数据源](#指定数据源把任意目录当输入)
+- **怎么做的**：搜索与中文分词 · 续接会话合并 · 子代理会话 · 时间戳 · 缓存 · 索引
+- **四层**：会话层 · 调用层 `calls` · 用量层 `usage` · 环境层 `env`
+- **接口**：跨 Agent 接力 · 交接单 · 导出 · MCP server · 本地网页查看器
+- **跨平台与扩展**：三个系统的路径差异 · 哪些家读不了 · 写一个扫描器 · 设计要点
+
+## 跨 Agent 的项目级会话档案馆，也是一个通用的会话识别/归一引擎
 
 给定一个项目路径，把所有 Agent 在这个项目里发生过的会话，按时间合并成一条线。
 
@@ -35,9 +113,8 @@ CC Switch 与 MAGPIE 两款软件会话识别逻辑的持续研究，见
 浏览器里的 `serve`，导出成 Markdown 的 `export`，
 以及给其他 Agent 用的 `/api/*` 与 **MCP server**。
 
-**定位：一个 AI 能读得懂的档案馆，而不是一个会读东西的 AI。**
 事实层（扫描、归一、时间线）是确定性的、可复现的、零成本的；
-总结、归纳、蒸馏交给用户自己的模型——通过 MCP，不通过我们的 API Key。
+总结、归纳、蒸馏交给用户自己的模型。
 
 ## 它长什么样
 
@@ -45,7 +122,7 @@ CC Switch 与 MAGPIE 两款软件会话识别逻辑的持续研究，见
 项目名和对话是编的，格式、排序和换手判断都是真的。
 
 ```bash
-$ node src/cli.js timeline C:/example/my-app
+$ agent-archive timeline C:/example/my-app
 C:/example/my-app
 4 个会话 · claude-code / codex / qoder · 2026-03-02 17:12 → 2026-03-05 16:52 · 累计 2.3h
 
@@ -65,7 +142,7 @@ C:/example/my-app
 `handoff` 把同一批会话压成**接力链**——谁在什么时候接手、中间隔了多久：
 
 ```bash
-$ node src/cli.js handoff C:/example/my-app
+$ agent-archive handoff C:/example/my-app
 4 场会话压成 4 段 · 3 家 Agent · 2026-03-02 17:12 → 2026-03-05 16:52
 
 换手概况
@@ -200,6 +277,10 @@ API：它是避免引入第三方依赖的唯一办法，而且入口自检已�
 把 `node src/cli.js` 换成 `agent-archive` 即可。
 
 ```bash
+# 用合成样例跑一遍：项目列表 → 时间线 → 换手 → 交接单
+# 不碰真实会话；也可以只跑一步：demo handoff / demo brief
+node src/cli.js demo
+
 # 实测有哪些项目（自动过滤掉家目录、桌面、临时目录）
 node src/cli.js projects
 
@@ -326,8 +407,8 @@ node src/cli.js projects --source D:\backup --source E:\export --json
 - **扫描与合并**：搜索与中文分词 · 续接会话合并 · 子代理会话 · 时间戳 · 符号链接 · 解析失败 · 缓存原子写
 - **接口**：跨 Agent 接力 · 导出 · MCP server · 本地网页查看器 · `cat`
 - **成本与安全**：调用层 `calls` · 用量层 `usage` · 凭证扫描 `secrets`
-- **环境层**：MCP / 技能 / 记忆 · 采集体检 `doctor`
-- **跨平台**：三个系统的路径差异 · 为何只有 10 家
+- **环境层**：MCP / 技能 / 斜杠命令 / 记忆 · 采集体检 `doctor`
+- **跨平台**：三个系统的路径差异 · 哪些家读不了
 - **扩展**：给别人家的 Agent 写扫描器 · 反向发现没适配的存储 · 设计要点 · 下一步
 
 ## 搜索：为什么需要索引，以及中文怎么切
@@ -351,6 +432,13 @@ node src/cli.js projects --source D:\backup --source E:\export --json
 
 **只索引人说的话和工具调用摘要**，不索引完整工具输出——那些多是日志和
 源码，放进去既占空间又把真正的对话信号淹没。
+
+**搜索结果会如实报出索引覆盖了多少。** 每条结果都带
+`index: {docs, total, failed, builtAt}`：`docs` 是真正进了索引的会话数，
+`total` 是建索引时扫描到的会话数，`failed` 是其中读不出正文的（比如
+Antigravity 的加密 `.pb`）。理由很简单——**只报 hits 时，「这场会话没进索引」
+和「这场会话没说过」长得一模一样**，而前者该去重建索引，后者该换关键词。
+MCP 的 `search_sessions` 和 CLI 的 `search` 都带这份口径。
 
 ## 合并：一场对话可能散在多个文件里
 
@@ -563,7 +651,8 @@ enrich 自己的读取按 `(size, mtime)` 在进程内记忆，所以重算很�
 npm test          # node --no-warnings --test
 ```
 
-**349 个用例**（2026-11-05 实测，约 27 秒）。零依赖——用 Node 内置的 `node:test`。
+**400 个用例**（2026-11-16 实测，约 80–115 秒；基线 364 是在同一提交上跑出来的）。
+零依赖——用 Node 内置的 `node:test`。
 其中包含「指定数据源」的结构识别、误报固化、缓存隔离与多源 e2e，以及 21 家
 扫描器各自的格式契约用例。
 
@@ -1121,11 +1210,23 @@ server，用户已经在用的 Agent（Claude Code、Codex、ZCode、Cursor、
 OpenCode、Kiro……）自己就能来读。
 
 ```bash
-node src/cli.js mcp          # 打印可粘贴的配置
-node src/cli.js mcp --json   # 只要配置 JSON
+node src/cli.js connect           # 按你装了的 Agent 打印可粘贴的配置（推荐）
+node src/cli.js connect codex     # 只看一家
+node src/cli.js connect --all     # 列出全部已知目标
+node src/cli.js connect --json    # 结构化输出
 ```
 
-粘进对应 Agent 的 MCP 配置即可（各家的位置不同，命令会列出来）。
+它复用的是**识别各家 MCP 配置的那同一张路径表**（`src/env/mcp.js` 的 `SOURCES`），
+所以打印出来的路径和 `env mcp` 读的是同一份事实——不会出现"文档说这里、
+实际读那里"的漂移。每种格式都给对应形状：Claude Code / Cursor 是 JSON，
+Codex / Grok Build 是 TOML（用单引号字面量字符串，避免 Windows 路径里的
+反斜杠被当成转义），ZCode / OpenCode 是带嵌套层级的 JSON。
+
+**只打印，不写任何文件。** 有一条测试专门锁这件事：跑完 `connect` 之后，
+配置目录里所有文件的 `size:mtime` 必须一个都没变。另有测试把生成的片段
+真的写进假配置文件再读回来，断言能被自己的解析器解析成同一个 command。
+
+旧的 `node src/cli.js mcp` 仍可用（同一实现），`mcp --serve` 直接起 stdio 服务。
 
 **零依赖实现。** MCP 的 stdio 传输就是「stdin/stdout 上一行一条
 JSON-RPC」，手写足够，不需要引入任何 npm 包。
@@ -1245,6 +1346,14 @@ node src/cli.js usage --by project     # 按项目（要先扫归档，把会话
 | OpenCode | 每场会话 | 91 | 2,589 万 | 1.97 亿 | 88% |
 | Claude Code | 每条消息 | 44 | 82 万 | 332 万 | 80% |
 | Codex | 每场会话（只有总量） | 1,779 | 200.37 亿 | — | 口径未知 |
+| WorkBuddy | 每个请求 | 1,288 | 935.8 万 | 1.27 亿 | 93% |
+
+WorkBuddy 的口径值得单独说一句：它的 `providerData.rawUsage` 记在**每次请求的
+最后一个事件**上——可能是 assistant message，也可能是 `function_call`（工具调用
+常常承载大部分 token），只认前者会漏掉一大半。`prompt_tokens` 是 OpenAI 口径、
+**已含缓存**（`prompt_cache_hit + prompt_cache_miss == prompt_tokens`），所以按
+`semantic: 'total'` 入库再减；`credit` 是它的积分，不是钱，`cost` 一律 `null`。
+子代理 `<session>/subagents/*.jsonl` 里的请求算父会话的。
 
 DSH 也走同一条路，只是它的 token 不在单独的账本表里，而是散在会话事件的
 `assistant/message.data.usage` 上：每个 `assistant/message` 就是一次模型请求，
@@ -1262,6 +1371,7 @@ DSH 的会话文件是多帧 zstd，读法和其他源的 SQLite / JSONL 不同�
 | OpenCode | 某场 `cache_read` 6,600 万、`input` 310 万 | input **不含**缓存 |
 | Hermes | `cache_read` 2.2 亿 > `input` 7,500 万 | input **不含**缓存 |
 | DSH | `totalTokens` 恒等于 `input + output + cacheRead + cacheWrite` | input **不含**缓存 |
+| WorkBuddy | `prompt_cache_hit + prompt_cache_miss == prompt_tokens` | input **含**缓存 |
 | Codex | 只有 `threads.tokens_used` 一个会话级总量 | 看不出来 |
 
 所以每条记录都带 `semantic`，统一换算成 `fresh`（不含缓存的输入）之后再比。
@@ -1467,7 +1577,7 @@ node src/cli.js refresh --project E:\my-app
 | `/search?q=` | 全文搜索，关键词高亮；默认 20 场，`&limit=50` 看更多 |
 | `/handoff` | 跨 Agent 接力的项目清单 |
 | `/handoff?path=` | 某项目的换手点、间隔与并行情况 |
-| `/env` | **能力面**：各 Agent 的 MCP / 技能 / 记忆（`?tab=` 切换） |
+| `/env` | **能力面**：各 Agent 的 MCP / 技能 / 斜杠命令 / 记忆（`?tab=` 切换） |
 | `/usage?by=` | **用量**：token 与成本，`by` 取 `agent`/`model`/`project`/`day` |
 | `/api/projects` | 项目清单 |
 | `/api/timeline?path=` | 时间线 |
@@ -1478,9 +1588,9 @@ node src/cli.js refresh --project E:\my-app
 | `/api/session?agent=&id=&limit=&offset=&message=` | 会话正文，默认前 200 条，`message` 取单条；响应带 `turns` 目录 |
 | `/api/session/html?agent=&id=&offset=&limit=` | 会话正文的 HTML 片段，供「加载更多」按块追加 |
 | `/api/usage?by=` | 用量数据 |
-| `/api/env?tab=` | 能力面数据，`tab` 取 `mcp`/`cli`/`skills`/`usage`/`memory`/`audit` |
+| `/api/env?tab=` | 能力面数据，`tab` 取 `mcp`/`cli`/`skills`/`commands`/`usage`/`memory`/`audit` |
 
-`/env` 用七个 tab 而不是一个长页：技能清单有几百行、记忆有几十处，
+`/env` 用八个 tab 而不是一个长页：技能清单有几百行、记忆有几十处，
 全堆一页会让人找不到重点。默认落在总览——那才是第一眼该看的。
 
 `tab` 参数只认白名单里的值，别的一律回落到总览，不把用户输入拼进页面。
@@ -1583,14 +1693,38 @@ node src/cli.js env mcp          # MCP 服务清单，跨 Agent 归并
 node src/cli.js env providers    # 模型渠道清单，跨 Agent 归并
 node src/cli.js env cli          # CLI 产品、安装位置与各 Agent 的调用
 node src/cli.js env skills       # 技能清单，按内容去重
+node src/cli.js env commands     # 斜杠命令清单，按内容去重（正文不打印）
 node src/cli.js env usage        # 技能使用率：哪些真用过
 node src/cli.js env memory       # 记忆与指令文件
 node src/cli.js env audit        # 体检
 ```
 
-对应的 MCP 工具是 `inventory`（`type` 取 `overview` / `mcp` / `providers` / `cli` / `skills` / `usage` / `memory` / `audit`）。
+对应的 MCP 工具是 `inventory`（`type` 取 `overview` / `mcp` / `providers` / `cli` / `skills` / `commands` / `usage` / `memory` / `audit`）。
 **这是给新 Agent 用的入口**：它自己调一次 `inventory`，就知道这台机器上别的
 Agent 配了什么、装了什么、记得什么，再自己决定要不要跟进——本工具不替它搬。
+
+### 斜杠命令：第七类资产，正文绝不出模块
+
+各家都有自己的 `/命令` 定义，位置和格式各不相同：Claude Code 的
+`commands/*.md`、OpenCode 的 `commands/` 与 `command/`、Pi 的 `prompts/*.md`、
+Gemini CLI 的 `commands/*.toml`、Qwen Code 的 `.md`/`.toml` 双格式、
+Factory Droid 的 `commands/*.md`。Codex 的 `~/.codex/prompts` 只列出、不解析——
+0.165 之后它已经不读自定义 prompts 了（skills 取代），列出来只是让用户看见
+"这里还有旧的"。
+
+三条设计决定：
+
+1. **只给长度与哈希，不给正文。** 命令正文可能有几十 KB，也可能写着用户自己的
+   私有内容。这与 `env mcp` 只给环境变量键名是同一条线：这一层不制造新的泄漏面。
+2. **同名同内容合并、同名不同内容冲突。** 身份是 `sha256(description + "\0" + prompt)`，
+   与技能的 `groupByHash` 同一套模型。冲突要显眼地标出来——它意味着
+   **换个 Agent 执行会得到不同行为**。
+3. **目录不存在是正常状态。** `missing`（没装/没定义）不算"读不到"；
+   只有权限拒绝或坏 TOML 才进 `errors` 并计入 `rootsUnknown`。
+
+本机实测只扫出 1 条（Claude 的 `/commit`），12 个根 missing、0 未知——
+**如实报 1 条比虚报一堆强**。
+
 
 ### 技能使用率：实测 290 个技能里用过 25 个
 
@@ -1689,10 +1823,16 @@ URL 去掉 query 与账号密码。**值永远不出这个模块**——这条�
 
 ### 读不到 ≠ 没有
 
-环境层的每个文件/目录都带状态：`ok` / `unreadable` / `unparsable`。
-JSON 坏了、目录没权限，**不算成"0 个服务/技能/渠道"**，而是计入 `filesUnknown` /
-`rootsUnknown`，`env audit` 单独列一条。这是参照项目踩过事故的教训：
+环境层的每个文件/目录都带状态：`ok` / `missing` / `unreadable` / `unparsable`。
+`missing`（没装、没定义）是正常状态，不算未知；JSON 坏了、目录没权限，**不算成
+"0 个服务/技能/渠道/命令"**，而是计入 `filesUnknown` / `rootsUnknown`，
+`env audit` 单独列一条。这是参照项目踩过事故的教训：
 magpie 的 `ErrUnreadable` 永不等于空（`#5709` 曾清空九个 Agent 的 AGENTS.md）。
+
+技能层的根目录从 10 个扩到 14 个（补 WorkBuddy / Pi / DSH / Kimi / Mcode /
+Copilot / Claude Desktop / Grok Build / OpenClaw / Omp），本机因此从
+386 处安装变成 **482 处**——多出来的全是真实存在、之前只是没去读的目录。
+`.gemini/config/skills` 的归属也从 gemini 改成 antigravity（那是它的目录）。
 
 ### CLI：装在哪，谁能看见
 
@@ -2004,16 +2144,15 @@ Cursor 的项目目录名是「绝对路径把所有分隔符换成 `-`」——
 第 3 条是关键：**宁可留空，也不给一个看起来合理、实际错误的路径。**
 错的路径会静默污染项目归集，比缺数据难发现得多。
 
-## 为何只有 10 家
+## 哪些家读不了，以及为什么不硬啃
 
-实测装了 13 个 Agent，其中三个**确认读不了**，`doctor` 会把它们单独列成
-「已调研、确认读不了」而不是待办：
+现在的覆盖面是 **21 家**（见「当前支持」）。剩下读不了的，`doctor` 会把它们
+单独列成「已调研、确认读不了」而不是待办：
 
 | Agent | 结论 | 证据 |
 |---|---|---|
 | Trae | 会话库加密 | `ModularData/ai-chat/database.db` 熵 7.999 bits/byte，无 `SQLite format 3` 头，是 SQLCipher 或类似加密 |
 | Windsurf | 会话文件加密 | `.codeium/windsurf/cascade/*.pb` 熵 7.998，无 protobuf 可读结构，`database/` 为空 |
-| Cline | 实测无数据 | 所有库 0 行，`-wal` 的几十 KB 全是建表 schema 页，扩展本身也没装 |
 
 **不去破解加密。** 那既不可靠，也会产出错误内容。`doctor` 把「还没做」
 和「做不了」分开报，待办里只留前者——否则清单永远挂着几个不可能完成项。

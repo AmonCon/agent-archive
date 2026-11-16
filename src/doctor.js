@@ -229,10 +229,19 @@ export async function auditCollection({ samplePerAgent = 3, noCache = false } = 
 function summarizeProblems(stats) {
   const list = Array.isArray(stats.problems) ? stats.problems : [];
   const dropped = stats.problemsDropped || 0;
-  // 按 kind 分组：解析抛错（我做不到）和解析为空（文件里没有我认识的东西）
-  // 是两种完全不同的故障，混在一起报会让人无法判断该不该管。
-  const byKind = { parse: stats.failures || 0, emptied: stats.emptied || 0 };
-  const total = byKind.parse + byKind.emptied;
+  // 按 kind 分组。四种故障的处置完全不同：
+  //   parse     文件读到了、解析抛错（我做不到）
+  //   emptied   文件读到了、里面没有我认识的东西
+  //   discover  连"这家有哪些文件"都问不出来（扫描器/目录读失败）
+  //   stat      文件在清单里、但拿不到状态（权限/占用）
+  // 后两种是新加的：它们以前被静默当成"这家没会话了"，是最危险的一种错。
+  const byKind = {
+    parse: stats.failures || 0,
+    emptied: stats.emptied || 0,
+    discover: list.filter((p) => p.kind === 'discover').length,
+    stat: list.filter((p) => p.kind === 'stat').length,
+  };
+  const total = byKind.parse + byKind.emptied + byKind.discover + byKind.stat;
 
   // 只列前几条。同一种故障（比如某个扫描器整体的适配坏了）在明细里会是
   // 几百条同样的 reason，列 5 条已经足够认出是哪一家。
@@ -245,16 +254,32 @@ function summarizeProblems(stats) {
     reason: p.reason,
   }));
 
+  const KIND_LABEL = {
+    parse: '解析失败',
+    emptied: '解析为空',
+    discover: '发现失败（该家沿用上次结果）',
+    stat: '读不到状态（该场沿用上次结果）',
+  };
+
   const lines = [];
   if (total) {
+    const parts = [`解析失败 ${byKind.parse}`, `解析为空 ${byKind.emptied}`];
+    if (byKind.discover) parts.push(`发现失败 ${byKind.discover}`);
+    if (byKind.stat) parts.push(`读不到状态 ${byKind.stat}`);
     lines.push(
-      `采集问题 ${total} 个：解析失败 ${byKind.parse} · 解析为空 ${byKind.emptied}` +
+      `采集问题 ${total} 个：${parts.join(' · ')}` +
         (dropped ? `（另有 ${dropped} 个只记了数、没留明细）` : '')
     );
     for (const p of top) {
-      lines.push(`${p.agent}  ${p.file}  [${p.kind === 'parse' ? '解析失败' : '解析为空'}] ${p.reason}`);
+      lines.push(`${p.agent}  ${p.file}  [${KIND_LABEL[p.kind] || p.kind}] ${p.reason}`);
     }
     if (total > top.length) lines.push(`…其余 ${total - top.length} 个未列出`);
+    if (byKind.discover || byKind.stat) {
+      lines.push(
+        '发现/状态失败的会话已沿用上一次扫描结果，没有被当成删除——' +
+          '修好权限或等文件写完后再跑一次即可。'
+      );
+    }
   }
 
   return { total, byKind, dropped, top, lines };

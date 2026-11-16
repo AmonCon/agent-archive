@@ -299,18 +299,20 @@ test('mcp: 被客户端停用的条目仍列出，但不算可用能力', async 
         mcpServers: {
           offByList: { command: 'node', args: ['a.js'] },
           offByField: { command: 'node', args: ['b.js'], enabled: false },
+          // WorkBuddy 等客户端用 disabled: true（与 enabled 相反），也要认。
+          offByDisabled: { command: 'node', args: ['d.js'], disabled: true },
           live: { command: 'node', args: ['c.js'] },
         },
         disabledMcpServers: ['offByList'],
       })
     );
     const r = await scan(box);
-    assert.equal(r.registrations.length, 3, '停用的也要列出来');
-    assert.equal(r.registrations.filter((x) => x.enabled === false).length, 2);
+    assert.equal(r.registrations.length, 4, '停用的也要列出来');
+    assert.equal(r.registrations.filter((x) => x.enabled === false).length, 3);
     const { mcpSummary } = await import('../src/env/mcp.js');
     const s = await box.run(() => mcpSummary());
-    assert.equal(s.disabled, 2);
-    assert.equal(s.list.filter((x) => x.disabled).length, 2, '两个停用条目各自成一个服务');
+    assert.equal(s.disabled, 3);
+    assert.equal(s.list.filter((x) => x.disabled).length, 3, '三个停用条目各自成一个服务');
     assert.equal(s.list.filter((x) => !x.disabled).length, 1, 'live 是唯一可用的');
   } finally {
     box.cleanup();

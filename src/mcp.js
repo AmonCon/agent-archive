@@ -2,6 +2,7 @@
 // 同 cli.js：环境自检必须排在所有静态 import 之前，否则提示跑不到。
 import './boot.js';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { listProjects, projectTimeline, groupByAgent, findSessions, readSessionContent } from './query.js';
 import { search, indexStats } from './search.js';
@@ -28,6 +29,23 @@ import { discoverUnknownStores } from './doctor.js';
  *
  * 所有工具都是只读的。这个 server 不会修改任何 Agent 的原始数据。
  */
+
+/**
+ * 版本号从 package.json 读，不在这里抄一份。
+ *
+ * 抄一份的下场是发版时改了 package.json、MCP 的 serverInfo 还报旧版本，
+ * 客户端日志里两个数字对不上。读失败就退回 '0.0.0'——它只用于握手信息，
+ * 不该成为 server 起不来的理由。
+ */
+let VERSION = '0.0.0';
+try {
+  const pkg = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+  );
+  if (pkg && pkg.version) VERSION = String(pkg.version);
+} catch {
+  /* 保持 0.0.0 */
+}
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
@@ -148,7 +166,11 @@ const TOOLS = [
         project,
       });
       if (!r.ready) {
-        return { error: r.message, hint: '在终端运行 `node src/cli.js index` 建立索引后再试。' };
+        return {
+          error: r.message,
+          hint: '在终端运行 `agent-archive index` 建立索引后再试；建一次之后日常只需增量更新。',
+          index: r.index,
+        };
       }
       return {
         query,
@@ -160,6 +182,10 @@ const TOOLS = [
           start: iso(h.start),
           snippet: h.snippet,
         })),
+        // 搜索结果是「索引里搜到的」，不是「全库一定没有更多」。把覆盖
+        // 口径一并返回：docs 少于 total 或有 failed，说明有空缺，别下
+        // 「没说过」的结论。
+        index: r.index,
       };
     },
   },
@@ -180,6 +206,12 @@ const TOOLS = [
           description: '最多返回多少字符（默认 8000，上限 40000）',
         },
         offset: { type: 'number', description: '从第几个字符开始（默认 0）' },
+        find: {
+          type: 'string',
+          description:
+            '从这句话第一次出现的地方打开这场会话（会自动往前多给 3 条消息的上下文）。' +
+            '搜索结果拿到 snippet 后，直接用它开现场，不必自己从头翻。',
+        },
         includeTools: {
           type: 'boolean',
           description: '是否包含工具调用与输出（默认 false，只给人说的话）',
@@ -188,7 +220,7 @@ const TOOLS = [
       required: ['id'],
       additionalProperties: false,
     },
-    handler: async ({ id, agent, maxChars = 8000, offset = 0, includeTools = false }) => {
+    handler: async ({ id, agent, maxChars = 8000, offset = 0, find = '', includeTools = false }) => {
       // 先分辨"Agent 名打错了"。旧实现把这一步并进"没有匹配"里，
       // 调用方（一个模型）会以为是 id 错了，于是换 id 重试——重试再多次
       // 也不会成功，而真正该做的是换 Agent 名或看可用列表。
@@ -225,10 +257,40 @@ const TOOLS = [
           hint: '档案里还留着它的元数据，说明它曾被采集到；源文件可能已删除、移动，或格式变了。',
         };
       }
-      const full = renderMessages(messages, includeTools);
+      const chunks = renderMessageChunks(messages, includeTools);
+      const full = chunks.map((ch) => ch.text).join('\n\n');
 
       const cap = Math.min(Math.max(Number(maxChars) || 8000, 500), 40000);
-      const from = Math.max(0, Number(offset) || 0);
+      let from = Math.max(0, Number(offset) || 0);
+      let matchedMessage;
+      let startMessage;
+
+      // `find`：搜索命中后直接打开现场。先按消息粒度找第一处包含这句话的
+      // 消息，再从它前面 3 条开始读——只给字符 offset 的话，调用方得自己
+      // 从头数到命中位置，长会话上不可行。
+      const needle = String(find || '').trim();
+      if (needle) {
+        const idx = chunks.findIndex((ch) => ch.text.toLowerCase().includes(needle.toLowerCase()));
+        if (idx === -1) {
+          return {
+            error: `这场会话里找不到「${needle}」`,
+            code: 'find_not_found',
+            session: { agent: session.agent, id: session.id, title: session.title },
+            hint: '会话可能在搜索后又被追加/改写；换一个搜索词，或去掉 find 从开头读。',
+          };
+        }
+        const startIdx = Math.max(0, idx - 3);
+        const starts = [];
+        let pos = 0;
+        for (const ch of chunks) {
+          starts.push(pos);
+          pos += ch.text.length + 2; // join('\n\n')
+        }
+        from = starts[startIdx];
+        matchedMessage = chunks[idx].messageIndex;
+        startMessage = chunks[startIdx].messageIndex;
+      }
+
       const slice = full.slice(from, from + cap);
 
       return {
@@ -247,6 +309,7 @@ const TOOLS = [
         returnedChars: slice.length,
         hasMore: from + slice.length < full.length,
         nextOffset: from + slice.length < full.length ? from + slice.length : undefined,
+        find: needle ? { query: needle, matchedMessage, startMessage } : undefined,
         text: slice,
       };
     },
@@ -563,11 +626,12 @@ const TOOLS = [
       properties: {
         type: {
           type: 'string',
-          enum: ['overview', 'mcp', 'providers', 'cli', 'skills', 'usage', 'memory', 'audit'],
+          enum: ['overview', 'mcp', 'providers', 'cli', 'skills', 'commands', 'usage', 'memory', 'audit'],
           description:
             'overview=每个 Agent 一行的总览（默认）；mcp=MCP 服务清单，含跨 Agent 归并；' +
             'providers=模型渠道清单（同一 base_url 的多家配置算一个渠道，只报凭证形态不读值）；' +
             'cli=命令行产品、安装位置与各 Agent 的调用；skills=技能清单；' +
+            'commands=斜杠命令清单（同名同内容跨 Agent 归并，正文不返回，只给长度与哈希）；' +
             'usage=技能使用率（哪些真被调用过）；memory=记忆与指令文件；audit=体检与建议',
         },
         agent: {
@@ -653,8 +717,28 @@ const TOOLS = [
         };
       }
 
-      if (type === 'usage') {
-        const { skillUsageSummary } = await import('./env/usage.js');
+      if (type === 'commands') {
+        const list = agent
+          ? inv.commands.list.filter((c) => c.agents.includes(agent))
+          : inv.commands.list;
+        return {
+          commands: inv.commands.commands,
+          files: inv.commands.files,
+          shared: inv.commands.shared,
+          conflicts: inv.commands.conflicts,
+          conflictNames: inv.commands.conflictNames,
+          legacy: inv.commands.legacy,
+          rootsUnknown: inv.commands.rootsUnknown,
+          note:
+            '按 description+正文的哈希归并：同名同内容算一条。' +
+            '正文不返回（可能有几十 KB、也可能是私有内容），只给长度与哈希；要看正文请打开源文件。',
+          byAgent: inv.commands.byAgent,
+          list: list.slice(0, cap),
+          truncated: list.length > cap,
+        };
+      }
+
+      if (type === 'usage') {        const { skillUsageSummary } = await import('./env/usage.js');
         return skillUsageSummary({});
       }
 
@@ -886,10 +970,10 @@ const TOOLS = [
  * 默认不含工具调用——工具输出常有几十万字，而模型真正需要的是
  * "人在说什么"。需要时用 includeTools 打开，但仍然只给摘要。
  */
-function renderMessages(messages, includeTools) {
+function renderMessageChunks(messages, includeTools) {
   const out = [];
-  for (const m of messages) {
-    if (m.role === 'system') continue;
+  messages.forEach((m, messageIndex) => {
+    if (m.role === 'system') return;
     const parts = [];
     for (const p of m.parts) {
       if (p.kind === 'text') parts.push(p.text);
@@ -898,12 +982,18 @@ function renderMessages(messages, includeTools) {
         parts.push(`[${p.name}${detail ? ' ' + detail : ''}]`);
       }
     }
-    if (!parts.length) continue;
+    if (!parts.length) return;
     const who = m.role === 'user' ? '用户' : m.role === 'assistant' ? '助手' : '工具';
     const when = m.ts ? ` ${hhmm(m.ts)}` : '';
-    out.push(`## ${who}${when}\n${parts.join('\n')}`);
-  }
-  return out.join('\n\n');
+    out.push({ messageIndex, text: `## ${who}${when}\n${parts.join('\n')}` });
+  });
+  return out;
+}
+
+function renderMessages(messages, includeTools) {
+  return renderMessageChunks(messages, includeTools)
+    .map((ch) => ch.text)
+    .join('\n\n');
 }
 
 /* ------------------------------ 协议 ------------------------------ */
@@ -979,7 +1069,7 @@ async function dispatch(msg) {
       return {
         protocolVersion: version,
         capabilities: { tools: {} },
-        serverInfo: { name: 'agent-archive', version: '0.1.0' },
+        serverInfo: { name: 'agent-archive', version: VERSION },
         instructions:
           '这是本机跨 Agent 的档案馆，只读。它有四层：' +
           '**会话层**——list_projects 看有哪些项目 → project_brief 看上一段做到哪、动过哪些文件（不花钱） → ' +

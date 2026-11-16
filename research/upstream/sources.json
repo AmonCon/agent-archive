@@ -10,18 +10,18 @@
       "repo": "https://github.com/yetone/magpie",
       "why": "个人版模型网关；会话读取、增量校验、零副作用只读打开、旁路表修正",
       "license": "MIT",
-      "commit": "de13afbf6f1eb652264fc40b3d56731df02728d4",
-      "fetchedAt": "2026-11-11",
-      "notes": "2026-11-11 第五轮：环境/资产层。MCP 25 种格式（Target{mcpFile{Path,Format,Also,Extra}}）；技能整树 Hash/Manual/Copies/Others/Shared；skill-router 只按技能文件夹路由、mcp-router 按 agent+项目；能力快照=AgentView+Problems 三层计算。采纳：三态读取、per-agent 状态+原因、DSH MCP 源、整树 hash、manual/enabled。详见 findings/magpie-env-2026-11-11.md。"
+      "commit": "1bfc6378c9c95e5ceefccb9c1ad1b1a9d8101ece",
+      "fetchedAt": "2026-11-16",
+      "notes": "2026-11-16 第六轮：会话搜索 + 资产层。said-v1.db 是会话级词袋索引（content=''/detail='none'、每 chunk 5 万去重词、只筛候选、片段回源），带 indexed/total/listing/cut 覆盖披露；read_session 新增 find（命中前 3 条）+ 消息号续读；解析缓存改二进制（magic+version+zone+parser 版本，40MB JSON 320-440ms→19ms）；cc_copies 的 ccRest 只统计「副本有、keeper 没有」的消息；slash commands 成为第七类环境资产（读侧 6 家 + Codex legacy）。采纳：搜索覆盖披露、read_session find、Claude 分叉/复制用量去重、env/commands.js；否决二进制缓存与词袋 FTS。详见 findings/magpie-2026-11-16.md。"
     },
     {
       "id": "cc-switch",
       "repo": "https://github.com/farion1231/cc-switch",
       "why": "供应商切换器；会话解析的逐家模块、两级缓存、契约式测试体系",
       "license": "MIT",
-      "commit": "abf50589ed0ff60900ead3a83cfda9ff009cd6ef",
-      "fetchedAt": "2026-11-11",
-      "notes": "2026-11-11 第五轮：环境层。14 个 MCP 适配器（含 DSH 的 profiles/*/cordis.patch.yml）；mcp_connectivity 三态 Connected/AuthRequired/Failed、30s 超时不计排队、并发 3、无缓存；Provider.settings_config + category(official/cn_official/aggregator/third_party) + AuthBinding；写入用 staged tmp+fsync+ReplaceFileW+内容哈希 revision 检测外部改动。采纳：补 MCP 源、校验计数上报、静态 PATH 检查、渠道模型；不抄真连通性探测与写入。详见 findings/cc-switch-env-2026-11-11.md。"
+      "commit": "09acca04941a359096bb16ea4fa4073c5e2c46e5",
+      "fetchedAt": "2026-11-16",
+      "notes": "2026-11-16 第六轮：WorkBuddy 接入会话层+用量层（providers/workbuddy.rs 646 行、session_usage_workbuddy.rs 411 行，rawUsage 口径 prompt 含缓存→FRESH、子代理算父会话、事件 id 去重）；ScanStatus 的「NotFound 才算空、其他 IO 错误一律 incomplete、失败 worker 不据此删会话」；ToolSpec 单表 + 表生成 fixture 两侧测试；技能根 17 个 app 目录；rsplit_once 修 Unix 路径冒号；本地 host 精确匹配。采纳：WorkBuddy 用量源、失败不当删除（discover/stat）、技能根与 inventory 存在性清单、disabled:true、盘符冒号、host 全等；不抄锁恢复/panic 回滚/额度 IPC。详见 findings/cc-switch-2026-11-16.md。"
     },
     {
       "id": "autoswarm",

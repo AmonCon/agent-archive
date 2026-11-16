@@ -1,6 +1,6 @@
 {
   "name": "agent-archive",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "跨 Agent 的项目级会话档案馆：把同一项目在各家 AI Agent 里的会话合并成一条时间线，并提供 MCP 接口给其他 Agent 读取",
   "keywords": [
     "ai-agent",
@@ -22,6 +22,7 @@
   },
   "files": [
     "src/",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE",
     "NOTICE.md"

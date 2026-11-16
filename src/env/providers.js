@@ -79,6 +79,20 @@ function hostOf(url) {
   }
 }
 
+/**
+ * 本地地址必须按 host 全等判断，不能用前缀正则。
+ *
+ * `localhost.example.com` / `127.0.0.1.evil.com` 都以 `localhost` 开头，
+ * 前缀匹配会把它们误认成本机网关。host 可能带端口，所以按“主机名 + 可选
+ * 端口”比较。
+ */
+function isLocalHost(host) {
+  if (!host) return false;
+  const h = String(host).toLowerCase();
+  const name = h.replace(/:\d+$/, '');
+  return name === 'localhost' || name === '127.0.0.1' || name === '[::1]' || name === '::1';
+}
+
 /** 渠道身份 = 脱敏后的 base_url（同 host 不同路径算不同渠道，例如网关的 /v1 与 /anthropic）。 */
 function channelKeyOf(baseUrl) {
   const clean = sanitizeUrl(baseUrl);
@@ -470,7 +484,7 @@ export function groupByChannel(registrations) {
         auth: new Set(),
         apiKeyEnvs: new Set(),
         registrations: [],
-        local: /^(localhost|127\.0\.0\.1|\[::1\])/.test(hostOf(r.baseUrl) || ''),
+        local: isLocalHost(hostOf(r.baseUrl)),
       };
       map.set(key, g);
     }

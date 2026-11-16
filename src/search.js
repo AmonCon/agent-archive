@@ -762,6 +762,11 @@ export async function buildIndex({ force = false, onProgress } = {}) {
   }
 
   db.prepare('insert or replace into meta (k, v) values (?,?)').run('built_at', String(Date.now()));
+  // 覆盖口径落盘：搜索时要告诉调用方「索引里有多少场、建的时候一共
+  // 有多少场、几场读不出」。只有 docs 没有 total，用户会把「读不出」
+  // 误当成「没有这场会话」——和 MAGPIE `said` 索引的 indexed/total 同题。
+  db.prepare('insert or replace into meta (k, v) values (?,?)').run('total_sessions', String(indexable.length));
+  db.prepare('insert or replace into meta (k, v) values (?,?)').run('failed', String(failed));
   db.close();
 
   return { total: indexable.length, reused, rebuilt, failed, removed, fts };
@@ -904,7 +909,13 @@ export function stripEmbeddedTranscript(text) {
 export function search(query, { limit = 20, agent, project, includeSubagents = true } = {}) {
   const db = openIndex({ create: false });
   if (!db) {
-    return { ready: false, hits: [], total: 0, message: '索引还没建，先运行：agent-archive index' };
+    return {
+      ready: false,
+      hits: [],
+      total: 0,
+      message: '索引还没建，先运行：agent-archive index',
+      index: { exists: false, docs: 0, total: null, failed: null, builtAt: null },
+    };
   }
 
   const match = queryFor(query);
@@ -959,8 +970,38 @@ export function search(query, { limit = 20, agent, project, includeSubagents = t
     score: r.score,
   }));
 
+  const index = indexMetaOf(db);
   db.close();
-  return { ready: true, hits, total: hits.length };
+  return { ready: true, hits, total: hits.length, index };
+}
+
+/**
+ * 索引覆盖信息：docs=实际进索引的会话数，total=建索引时扫描到的会话数，
+ * failed=其中读不出正文的数量，builtAt=这次构建时间。
+ *
+ * 为什么要这三项一起给：只报 hits，用户会把「这场会话没进索引」误当成
+ * 「这场会话没说过」。搜索工具最危险的错误不是搜不到，是让人以为不存在。
+ */
+function indexMetaOf(db) {
+  const meta = {};
+  try {
+    for (const row of db.prepare('select k, v from meta').all()) meta[row.k] = row.v;
+  } catch {
+    /* 老库没有 meta 表时按未知处理 */
+  }
+  let docs = 0;
+  try {
+    docs = db.prepare('select count(*) c from doc').get().c;
+  } catch {
+    /* 同上 */
+  }
+  return {
+    exists: true,
+    docs,
+    total: meta.total_sessions == null ? null : Number(meta.total_sessions),
+    failed: meta.failed == null ? null : Number(meta.failed),
+    builtAt: meta.built_at == null ? null : new Date(Number(meta.built_at)),
+  };
 }
 
 /** 只重建倒排索引时用：内部已经打开好的连接交给它。 */
@@ -968,9 +1009,9 @@ export { openIndex };
 /** 索引规模，供 stats 展示。 */
 export function indexStats() {
   const db = openIndex({ create: false });
-  if (!db) return { exists: false, docs: 0, chars: 0, builtAt: null, bytes: 0 };
+  if (!db) return { exists: false, docs: 0, total: null, failed: null, chars: 0, builtAt: null, bytes: 0 };
   const row = db.prepare('select count(*) c, coalesce(sum(chars),0) n from doc').get();
-  const meta = db.prepare("select v from meta where k = 'built_at'").get();
+  const index = indexMetaOf(db);
   db.close();
   let bytes = 0;
   try {
@@ -979,10 +1020,8 @@ export function indexStats() {
     /* 无所谓 */
   }
   return {
-    exists: true,
-    docs: row.c,
+    ...index,
     chars: row.n,
-    builtAt: meta ? new Date(Number(meta.v)) : null,
     bytes,
   };
 }

@@ -136,25 +136,128 @@ const DB_TARGETS = [
 
 /** 只读文件开头，够判断"写的是什么"就行。 */
 const HEAD_BYTES = 400;
+/** frontmatter 完整校验的上限：正常 frontmatter 只有几十行，超过这个长度本身就是坏的。 */
+const FRONTMATTER_BYTES = 64 * 1024;
 
-function statOf(p) {
+/**
+ * stat 的失败不是一回事：
+ *   ENOENT / ENOTDIR → 路径确实不存在（missing，正常状态）
+ *   其余（EACCES / EPERM / EIO / ELOOP…）→ 存在但读不到（unreadable，未知）
+ *
+ * 把前者当"没有"是对的，把后者当"没有"就会让用户以为这份记忆不存在——
+ * 在体检工具里，这是最坏的一种假阴性。
+ */
+function statResult(p) {
   try {
-    return fs.statSync(p);
-  } catch {
-    return null;
+    return { stat: fs.statSync(p) };
+  } catch (e) {
+    return { error: e };
   }
 }
 
-function readHead(p, bytes = HEAD_BYTES) {
+function statusForError(e) {
+  const code = e && e.code;
+  return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unreadable';
+}
+
+function errorText(prefix, e) {
+  const code = e && e.code ? e.code : '';
+  const msg = e && e.message ? e.message : String(e);
+  return code ? `${prefix}：${code}` : `${prefix}：${msg}`;
+}
+
+/**
+ * 读文件开头。
+ *
+ * 与旧 readHead 的区别：失败时不是返回空串——空串会把"读不到"伪装成
+ * "空文件"。这里保留错误，交给调用方决定记 unreadable 还是 unparsable。
+ */
+function readHeadResult(p, bytes = HEAD_BYTES) {
+  let fd;
   try {
-    const fd = fs.openSync(p, 'r');
+    fd = fs.openSync(p, 'r');
     const buf = Buffer.alloc(bytes);
     const n = fs.readSync(fd, buf, 0, bytes, 0);
-    fs.closeSync(fd);
-    return buf.slice(0, n).toString('utf8');
-  } catch {
-    return '';
+    return { ok: true, text: buf.subarray(0, n).toString('utf8'), bytesRead: n };
+  } catch (e) {
+    return { ok: false, error: e };
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* 关闭失败不影响已经读到的内容 */
+      }
+    }
   }
+}
+
+/**
+ * 校验 frontmatter 的**形状**，不做完整 YAML 解析。
+ *
+ * 记忆文件实际只有两类：`---` 包裹的 `key: value`，或者没有 frontmatter
+ * 直接以 `# 标题` 开头（Hermes 就是这样）。这里只回答"它是不是一份结构
+ * 完整、语法上没坏掉的 frontmatter"：
+ *   - 有开头 `---` 但没闭合 → unparsable
+ *   - 有闭合，但中间出现既不是 `key: value`、也不是缩进续行/列表项/注释的行 → unparsable
+ *
+ * 不为几种字段引 YAML 库，理由与 mcp.js 的极简 YAML 解析一致。
+ */
+function parseFrontmatter(text) {
+  const src = String(text || '').replace(/^\uFEFF/, '');
+  if (!/^---\r?\n/.test(src)) return { present: false, data: null };
+
+  const m = src.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!m) {
+    // 没有闭合线。可能是真的坏 frontmatter，也可能只是文档以分隔线 `---`
+    // 开头——后者在 markdown 里合法，不能当成解析失败。
+    // 判据：紧跟其后的**连续一段**（到第一个空行为止）全都长得像 YAML
+    // 字段，才算"有 frontmatter 意图但没闭合"。
+    const block = [];
+    for (const line of src.replace(/^---\r?\n/, '').split(/\r?\n/)) {
+      if (!line.trim()) break;
+      block.push(line);
+    }
+    const looksLikeFrontmatter =
+      block.length > 0 &&
+      block.every(
+        (l) =>
+          /^\s*[A-Za-z0-9_.-]+\s*:\s*/.test(l) || /^\s+-\s+/.test(l) || /^\s+\S/.test(l) || /^\s*#/.test(l)
+      );
+    if (!looksLikeFrontmatter) return { present: false, data: null };
+    return { present: true, data: null, error: 'frontmatter 未闭合' };
+  }
+
+  const body = m[1];
+  const lines = body.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    if (/^\s*[A-Za-z0-9_.-]+\s*:\s*.*$/.test(line)) continue;
+    if (/^\s+-\s+.*$/.test(line)) continue;
+    if (/^\s+\S/.test(line)) continue;
+    return { present: true, data: body, error: `frontmatter 第 ${i + 1} 行无法解析：${line.trim().slice(0, 60)}` };
+  }
+  return { present: true, data: body };
+}
+
+/**
+ * 从文件头判断 frontmatter 是否可解析。
+ *
+ * 400 字节内没看到闭合线时可能是 frontmatter 较长，再多读一段确认；
+ * 超过 64 KB 还没闭合的 frontmatter 本身就坏了。
+ */
+function frontmatterCheck(p, headText) {
+  const src = String(headText || '').replace(/^\uFEFF/, '');
+  if (!/^---\r?\n/.test(src)) return { error: null };
+
+  if (/\r?\n---(?:\r?\n|$)/.test(src)) {
+    return { error: parseFrontmatter(src).error || null };
+  }
+
+  const more = readHeadResult(p, FRONTMATTER_BYTES);
+  if (!more.ok) return { readError: more.error };
+  return { error: parseFrontmatter(more.text).error || null };
 }
 
 /**
@@ -174,24 +277,168 @@ function titleOf(text) {
   return null;
 }
 
+/**
+ * 识别一个单文件目标。
+ *
+ * @returns {{path: string|null, status: 'ok'|'missing'|'unreadable'|'unparsable', item?: object, error?: string}}
+ */
 function describeFile(t) {
-  const p = t.path();
-  const st = statOf(p);
-  if (!st || !st.isFile()) return null;
+  let p;
+  try {
+    p = t.path();
+  } catch (e) {
+    return { path: null, status: 'unreadable', error: errorText('路径解析失败', e) };
+  }
+  // 版本化库这种目标：目录里没有匹配文件时 path() 返回 null，属于"确实没有"。
+  if (!p) return { path: null, status: 'missing' };
 
-  const head = readHead(p);
+  const st = statResult(p);
+  if (st.error) {
+    const status = statusForError(st.error);
+    return { path: p, status, error: status === 'unreadable' ? errorText('读不到', st.error) : null };
+  }
+  // 同名目录占位（Windows 上模拟权限失败的一种可控方式）也归为"存在但读不到"，
+  // 不能说成"没有这份记忆"。
+  if (!st.stat.isFile()) {
+    return { path: p, status: 'unreadable', error: '目标存在但不是文件（目录或其他类型）' };
+  }
+
+  const head = readHeadResult(p);
+  if (!head.ok) return { path: p, status: 'unreadable', error: errorText('读不到', head.error) };
+
+  const fm = frontmatterCheck(p, head.text);
+  if (fm.readError) return { path: p, status: 'unreadable', error: errorText('读不到', fm.readError) };
+  if (fm.error) return { path: p, status: 'unparsable', error: fm.error };
+
   return {
-    agent: t.agent,
-    kind: t.kind,
-    scope: t.scope,
-    format: 'markdown',
     path: p,
-    bytes: st.size,
-    // 大文件不读正文，只报大小——450 KB 的记忆读进来毫无用处，
-    // 真正要看的时候人会自己打开
-    topic: t.large ? null : titleOf(head),
-    preview: t.large ? null : clip(head.replace(/^---[\s\S]*?---/, '').trim(), 160),
-    large: Boolean(t.large) || st.size > 64 * 1024,
+    status: 'ok',
+    item: {
+      agent: t.agent,
+      kind: t.kind,
+      scope: t.scope,
+      status: 'ok',
+      format: 'markdown',
+      path: p,
+      bytes: st.stat.size,
+      // 大文件不读正文，只报大小——450 KB 的记忆读进来毫无用处，
+      // 真正要看的时候人会自己打开
+      topic: t.large ? null : titleOf(head.text),
+      preview: t.large ? null : clip(head.text.replace(/^---[\s\S]*?---/, '').trim(), 160),
+      large: Boolean(t.large) || st.stat.size > 64 * 1024,
+    },
+  };
+}
+
+/**
+ * 读一个目录里的 markdown 分片，返回分片元数据 + 每个文件的读取状态。
+ *
+ * 分片状态要单独留：目录能列出来，不等于每个分片都能读。某一个分片坏了
+ * 时，其它分片仍然有效，坏的这一个记 unparsable/unreadable 并进 errors。
+ */
+function readShardFiles(dir, t) {
+  const entries = [];
+  const files = [];
+  const errors = [];
+
+  let names;
+  try {
+    names = fs.readdirSync(dir).filter((f) => f.endsWith('.md'));
+  } catch (e) {
+    return { entries, files, errors, count: 0, readdirError: e };
+  }
+
+  for (const f of names.filter((n) => n !== t.index).sort()) {
+    const full = path.join(dir, f);
+    const s = statResult(full);
+    if (s.error) {
+      const status = statusForError(s.error);
+      files.push({ file: full, agent: t.agent, kind: t.kind, scope: t.scope, status });
+      if (status === 'unreadable') errors.push({ file: full, agent: t.agent, error: errorText('读不到', s.error) });
+      continue;
+    }
+    if (!s.stat.isFile()) {
+      files.push({ file: full, agent: t.agent, kind: t.kind, scope: t.scope, status: 'unreadable' });
+      errors.push({ file: full, agent: t.agent, error: '目标存在但不是文件（目录或其他类型）' });
+      continue;
+    }
+
+    const head = readHeadResult(full, 200);
+    if (!head.ok) {
+      files.push({ file: full, agent: t.agent, kind: t.kind, scope: t.scope, status: 'unreadable' });
+      errors.push({ file: full, agent: t.agent, error: errorText('读不到', head.error) });
+      continue;
+    }
+    const fm = frontmatterCheck(full, head.text);
+    if (fm.readError) {
+      files.push({ file: full, agent: t.agent, kind: t.kind, scope: t.scope, status: 'unreadable' });
+      errors.push({ file: full, agent: t.agent, error: errorText('读不到', fm.readError) });
+      continue;
+    }
+    if (fm.error) {
+      files.push({ file: full, agent: t.agent, kind: t.kind, scope: t.scope, status: 'unparsable' });
+      errors.push({ file: full, agent: t.agent, error: fm.error });
+      continue;
+    }
+
+    files.push({ file: full, agent: t.agent, kind: t.kind, scope: t.scope, status: 'ok', bytes: s.stat.size });
+    entries.push({ file: f, topic: titleOf(head.text), bytes: s.stat.size });
+  }
+
+  return { entries, files, errors, count: names.length };
+}
+
+/**
+ * 索引文件（MEMORY.md）单独读：它是目录记忆的入口，坏了也要报 unknown。
+ */
+function describeIndex(dir, t) {
+  const full = path.join(dir, t.index);
+  const s = statResult(full);
+  if (s.error) {
+    const status = statusForError(s.error);
+    return {
+      index: null,
+      // 索引文件不存在是正常形态（很多目录只放分片），不记进 files。
+      file: status === 'missing' ? null : { file: full, agent: t.agent, kind: t.kind, scope: t.scope, status },
+      error: status === 'unreadable' ? { file: full, agent: t.agent, error: errorText('读不到', s.error) } : null,
+    };
+  }
+  if (!s.stat.isFile()) {
+    return {
+      index: null,
+      file: { file: full, agent: t.agent, kind: t.kind, scope: t.scope, status: 'unreadable' },
+      error: { file: full, agent: t.agent, error: '目标存在但不是文件（目录或其他类型）' },
+    };
+  }
+
+  const head = readHeadResult(full, 200);
+  if (!head.ok) {
+    return {
+      index: null,
+      file: { file: full, agent: t.agent, kind: t.kind, scope: t.scope, status: 'unreadable' },
+      error: { file: full, agent: t.agent, error: errorText('读不到', head.error) },
+    };
+  }
+  const fm = frontmatterCheck(full, head.text);
+  if (fm.readError) {
+    return {
+      index: null,
+      file: { file: full, agent: t.agent, kind: t.kind, scope: t.scope, status: 'unreadable' },
+      error: { file: full, agent: t.agent, error: errorText('读不到', fm.readError) },
+    };
+  }
+  if (fm.error) {
+    return {
+      index: null,
+      file: { file: full, agent: t.agent, kind: t.kind, scope: t.scope, status: 'unparsable' },
+      error: { file: full, agent: t.agent, error: fm.error },
+    };
+  }
+
+  return {
+    index: { file: t.index, bytes: s.stat.size },
+    file: { file: full, agent: t.agent, kind: t.kind, scope: t.scope, status: 'ok', bytes: s.stat.size },
+    error: null,
   };
 }
 
@@ -200,46 +447,67 @@ function describeFile(t) {
  *
  * 只统计条数和每条的标题，不读正文——实测 ZCode 最大的项目记忆有
  * 36 个分片，全读进来没有意义。
+ *
+ * @returns {{path: string|null, status: string, item?: object, files?: Array, errors?: Array, error?: string}}
  */
 function describeDir(t) {
-  const dir = t.dir();
-  const st = statOf(dir);
-  if (!st || !st.isDirectory()) return null;
-
-  let files;
+  let dir;
   try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith('.md'));
-  } catch {
-    return null;
+    dir = t.dir();
+  } catch (e) {
+    return { path: null, status: 'unreadable', error: errorText('路径解析失败', e) };
   }
-  if (!files.length) return null;
+  if (!dir) return { path: null, status: 'missing' };
 
-  const shards = files.filter((f) => f !== t.index);
-  const entries = [];
-
-  for (const f of shards.sort()) {
-    const full = path.join(dir, f);
-    const s = statOf(full);
-    if (!s || !s.isFile()) continue;
-    const head = readHead(full, 200);
-    entries.push({ file: f, topic: titleOf(head), bytes: s.size });
+  const st = statResult(dir);
+  if (st.error) {
+    const status = statusForError(st.error);
+    return { path: dir, status, error: status === 'unreadable' ? errorText('读不到目录', st.error) : null };
+  }
+  if (!st.stat.isDirectory()) {
+    return { path: dir, status: 'unreadable', error: '目标存在但不是目录' };
   }
 
-  const idxPath = path.join(dir, t.index);
-  const idx = statOf(idxPath);
+  const shard = readShardFiles(dir, t);
+  if (shard.readdirError) {
+    return {
+      path: dir,
+      status: statusForError(shard.readdirError) === 'missing' ? 'missing' : 'unreadable',
+      error: errorText('读不到目录', shard.readdirError),
+    };
+  }
+
+  const idx = describeIndex(dir, t);
+  const files = [...shard.files];
+  const errors = [...shard.errors];
+  if (idx.file) files.push(idx.file);
+  if (idx.error) errors.push(idx.error);
+
+  // 目录存在但没有 markdown 文件：这是一个空的记忆目录，正常状态；
+  // 不产出 item（保持旧的"0 条记忆 = 不列"语义），但 roots 里能看见它。
+  if (!shard.count && !idx.index) {
+    return { path: dir, status: 'ok', item: null, files, errors };
+  }
 
   return {
-    agent: t.agent,
-    kind: t.kind,
-    scope: t.scope,
-    format: 'dir',
     path: dir,
-    index: idx ? { file: t.index, bytes: idx.size } : null,
-    bytes: entries.reduce((n, e) => n + e.bytes, 0) + (idx ? idx.size : 0),
-    // 分片数 = 这个 Agent 积累了多少条记忆
-    entries: entries.length,
-    topics: entries.map((e) => ({ file: e.file, topic: e.topic, bytes: e.bytes })),
-    large: true,
+    status: 'ok',
+    files,
+    errors,
+    item: {
+      agent: t.agent,
+      kind: t.kind,
+      scope: t.scope,
+      status: 'ok',
+      format: 'dir',
+      path: dir,
+      index: idx.index,
+      bytes: shard.entries.reduce((n, e) => n + e.bytes, 0) + (idx.index ? idx.index.bytes : 0),
+      // 分片数 = 这个 Agent 积累了多少条记忆
+      entries: shard.entries.length,
+      topics: shard.entries.map((e) => ({ file: e.file, topic: e.topic, bytes: e.bytes })),
+      large: true,
+    },
   };
 }
 
@@ -248,50 +516,101 @@ function describeDir(t) {
  *
  * 这是 ZCode 的做法，也是这一层最有价值的部分——它把记忆按项目分开，
  * 正好能对上会话层的项目维度。目录名尾部有 16 位哈希，剥掉就是项目名。
+ *
+ * @returns {{rootPath: string|null, rootStatus: string, items: Array, roots: Array, files: Array, errors: Array}}
  */
 function describeProjectDirs(agent, rootRel) {
-  const root = path.join(os.homedir(), ...rootRel.split('/'));
+  const out = { rootPath: null, rootStatus: 'missing', items: [], roots: [], files: [], errors: [] };
+
+  let root;
+  try {
+    root = path.join(os.homedir(), ...rootRel.split('/'));
+  } catch (e) {
+    out.rootStatus = 'unreadable';
+    out.errors.push({ root: null, agent, error: errorText('路径解析失败', e) });
+    return out;
+  }
+  out.rootPath = root;
+
+  const rootStat = statResult(root);
+  if (rootStat.error) {
+    out.rootStatus = statusForError(rootStat.error);
+    if (out.rootStatus === 'unreadable') {
+      out.errors.push({ root, agent, error: errorText('读不到目录', rootStat.error) });
+    }
+    return out;
+  }
+  if (!rootStat.stat.isDirectory()) {
+    out.rootStatus = 'unreadable';
+    out.errors.push({ root, agent, error: '目标存在但不是目录' });
+    return out;
+  }
+  out.rootStatus = 'ok';
+
   let projs;
   try {
     projs = fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory());
-  } catch {
-    return [];
+  } catch (e) {
+    out.rootStatus = 'unreadable';
+    out.errors.push({ root, agent, error: errorText('读不到目录', e) });
+    return out;
   }
 
-  const out = [];
   for (const e of projs) {
     const memDir = path.join(root, e.name, 'memory');
-    let files;
-    try {
-      files = fs.readdirSync(memDir).filter((f) => f.endsWith('.md'));
-    } catch {
+    const mst = statResult(memDir);
+    if (mst.error) {
+      // 项目目录下没有 memory/ 是正常形态（这个项目还没积累记忆），不报；
+      // 只有确实存在但读不到才算未知。
+      if (statusForError(mst.error) === 'unreadable') {
+        out.roots.push({ root: memDir, agent, kind: 'memory', scope: 'project', status: 'unreadable', found: 0 });
+        out.errors.push({ root: memDir, agent, error: errorText('读不到目录', mst.error) });
+      }
       continue;
     }
-    if (!files.length) continue;
-
-    const entries = [];
-    let bytes = 0;
-    for (const f of files) {
-      const full = path.join(memDir, f);
-      const s = statOf(full);
-      if (!s || !s.isFile()) continue;
-      bytes += s.size;
-      if (f === 'MEMORY.md') continue;
-      const head = readHead(full, 200);
-      entries.push({ file: f, topic: titleOf(head), bytes: s.size });
+    if (!mst.stat.isDirectory()) {
+      out.roots.push({ root: memDir, agent, kind: 'memory', scope: 'project', status: 'unreadable', found: 0 });
+      out.errors.push({ root: memDir, agent, error: '目标存在但不是目录' });
+      continue;
     }
 
-    out.push({
+    const shard = readShardFiles(memDir, { agent, kind: 'memory', scope: 'project', index: 'MEMORY.md' });
+    if (shard.readdirError) {
+      out.roots.push({ root: memDir, agent, kind: 'memory', scope: 'project', status: 'unreadable', found: 0 });
+      out.errors.push({ root: memDir, agent, error: errorText('读不到目录', shard.readdirError) });
+      continue;
+    }
+
+    out.roots.push({
+      root: memDir,
+      agent,
+      kind: 'memory',
+      scope: 'project',
+      status: 'ok',
+      found: shard.entries.length,
+    });
+    const idx = describeIndex(memDir, { agent, kind: 'memory', scope: 'project', index: 'MEMORY.md' });
+    out.files.push(...shard.files);
+    if (idx.file) out.files.push(idx.file);
+    out.errors.push(...shard.errors);
+    if (idx.error) out.errors.push(idx.error);
+
+    // 只有 MEMORY.md 也算一份项目记忆（它是索引），不能因为分片为 0 就不列。
+    const bytes = shard.entries.reduce((n, x) => n + x.bytes, 0) + (idx.index ? idx.index.bytes : 0);
+    if (!shard.count && !idx.index) continue;
+
+    out.items.push({
       agent,
       kind: 'memory',
       // 项目级：会被某个项目的工作触发，不是全局生效
       scope: 'project',
+      status: 'ok',
       project: projectFromDirName(e.name),
       format: 'dir',
       path: memDir,
       bytes,
-      entries: entries.length,
-      topics: entries.map((x) => ({ file: x.file, topic: x.topic, bytes: x.bytes })),
+      entries: shard.entries.length,
+      topics: shard.entries.map((x) => ({ file: x.file, topic: x.topic, bytes: x.bytes })),
       large: true,
     });
   }
@@ -351,8 +670,23 @@ function projectFromDirName(dir) {
  * 代价是几 MB 的拷贝，换来的是真的一个字节都没动别人的目录。
  */
 function describeDb(t) {
-  const p = t.path();
-  if (!statOf(p)) return null;
+  let p;
+  try {
+    p = t.path();
+  } catch (e) {
+    return { path: null, status: 'unreadable', error: errorText('路径解析失败', e) };
+  }
+  // 版本化库：目录里没有匹配文件 → 确实没有。
+  if (!p) return { path: null, status: 'missing' };
+
+  const st = statResult(p);
+  if (st.error) {
+    const status = statusForError(st.error);
+    return { path: p, status, error: status === 'unreadable' ? errorText('读不到', st.error) : null };
+  }
+  if (!st.stat.isFile()) {
+    return { path: p, status: 'unreadable', error: '目标存在但不是文件（目录或其他类型）' };
+  }
 
   let db;
   let cleanup = () => {};
@@ -363,20 +697,15 @@ function describeDb(t) {
     db = opened.db;
     cleanup = opened.cleanup;
     tempCopy = opened.copied;
-  } catch {
+  } catch (e) {
     return {
-      agent: t.agent,
-      kind: t.kind,
-      scope: t.scope,
-      format: 'sqlite',
       path: p,
-      bytes: 0,
-      error: '打不开（可能被占用或版本不支持）',
+      status: 'unreadable',
+      error: `打不开（可能被占用或版本不支持）：${(e && (e.code || e.message)) || e}`,
     };
   }
 
   try {
-    const st = statOf(p);
     let entries = null;
     if (t.entries) {
       try {
@@ -401,18 +730,23 @@ function describeDb(t) {
     }
 
     return {
-      agent: t.agent,
-      kind: t.kind,
-      scope: t.scope,
-      format: 'sqlite',
       path: p,
-      bytes: st ? st.size : 0,
-      // 有没有被复制过，说明这个库当时是否有 -wal（有没有别的 Agent 正在写）
-      tempCopy,
-      entries: entries ? entries.count : null,
-      entryLabel: entries ? entries.label : null,
-      tables,
-      large: true,
+      status: 'ok',
+      item: {
+        agent: t.agent,
+        kind: t.kind,
+        scope: t.scope,
+        status: 'ok',
+        format: 'sqlite',
+        path: p,
+        bytes: st.stat.size,
+        // 有没有被复制过，说明这个库当时是否有 -wal（有没有别的 Agent 正在写）
+        tempCopy,
+        entries: entries ? entries.count : null,
+        entryLabel: entries ? entries.label : null,
+        tables,
+        large: true,
+      },
     };
   } finally {
     try {
@@ -488,27 +822,62 @@ function rmTempDir(dir) {
 /**
  * 扫描实测所有记忆与指令文件。
  *
- * @returns {{items: Array, byAgent: object, totals: object}}
+ * 每个目标都带四态：`ok` / `missing` / `unreadable` / `unparsable`。
+ *   - missing     = 路径确实不存在（最常见：这家 Agent 没装 / 没记忆）
+ *   - unreadable  = 路径存在，但 stat/read 失败（权限、IO、同名目录占位…）
+ *   - unparsable  = 文件读到了，但 frontmatter 结构坏了
+ *
+ * `items` 只收 ok 的条目（保持原有字段与语义）；坏掉的目标进入 `files` /
+ * `roots` 的 status 与 `errors`，由 summary 决定怎么展示——绝不能悄悄当成
+ * "0 份记忆"。
+ *
+ * @returns {{items: Array, files: Array, roots: Array, byAgent: object, totals: object, errors: Array}}
  */
 export function scanMemory() {
   const items = [];
+  const files = [];
+  const roots = [];
+  const errors = [];
 
-  for (const t of TARGETS) {
-    const d = describeFile(t);
-    if (d) items.push(d);
-  }
+  const collectFile = (t, r) => {
+    files.push({ file: r.path, agent: t.agent, kind: t.kind, scope: t.scope, status: r.status });
+    if (r.status === 'ok') items.push(r.item);
+    if (r.error) errors.push({ file: r.path, agent: t.agent, error: r.error });
+  };
+
+  for (const t of TARGETS) collectFile(t, describeFile(t));
 
   for (const t of DIR_TARGETS) {
-    const d = describeDir(t);
-    if (d) items.push(d);
+    const r = describeDir(t);
+    roots.push({
+      root: r.path,
+      agent: t.agent,
+      kind: t.kind,
+      scope: t.scope,
+      status: r.status,
+      found: r.item ? r.item.entries : 0,
+    });
+    if (r.item) items.push(r.item);
+    if (r.files) files.push(...r.files);
+    if (r.errors) errors.push(...r.errors);
+    if (r.error) errors.push({ root: r.path, agent: t.agent, error: r.error });
   }
 
-  for (const t of DB_TARGETS) {
-    const d = describeDb(t);
-    if (d) items.push(d);
-  }
+  for (const t of DB_TARGETS) collectFile(t, describeDb(t));
 
-  items.push(...describeProjectDirs('zcode', '.zcode/cli/memories/projects'));
+  const proj = describeProjectDirs('zcode', '.zcode/cli/memories/projects');
+  roots.push({
+    root: proj.rootPath,
+    agent: 'zcode',
+    kind: 'memory',
+    scope: 'project',
+    status: proj.rootStatus,
+    found: proj.items.length,
+  });
+  items.push(...proj.items);
+  files.push(...proj.files);
+  roots.push(...proj.roots);
+  errors.push(...proj.errors);
 
   const byAgent = {};
   for (const it of items) {
@@ -518,8 +887,13 @@ export function scanMemory() {
     byAgent[it.agent][it.kind]++;
   }
 
+  const fileUnknown = files.filter((f) => f.status === 'unreadable' || f.status === 'unparsable').length;
+  const rootUnknown = roots.filter((r) => r.status === 'unreadable' || r.status === 'unparsable').length;
+
   return {
     items,
+    files,
+    roots,
     byAgent,
     totals: {
       locations: items.length,
@@ -529,7 +903,11 @@ export function scanMemory() {
       // 项目级记忆独自一类：它只在特定项目里生效
       projectScoped: items.filter((i) => i.scope === 'project').length,
       entries: items.reduce((n, i) => n + (i.entries || 0), 0),
+      // 这两个计数只用于说明"未知 ≠ 0"：unknown 不进上面的任何能力计数。
+      missing: [...files, ...roots].filter((x) => x.status === 'missing').length,
+      unknown: fileUnknown + rootUnknown,
     },
+    errors,
   };
 }
 
@@ -538,9 +916,12 @@ export function scanMemory() {
  *
  * 刻意**不含 preview 和 topics 的正文**——只给"有没有、多大、多少条"。
  * 要读某一份记忆，用 readMemory(path) 显式取。
+ *
+ * `filesUnknown` / `rootsUnknown` 是"读不到/解析不了"的数量：它们**没有**
+ * 被算进 locations/instructions/memories，调用方据此显示"未知，未计入"。
  */
 export function memorySummary() {
-  const { items, byAgent, totals } = scanMemory();
+  const { items, byAgent, totals, files, roots, errors } = scanMemory();
 
   // 项目级记忆按项目聚合。没有可识别项目名的（ZCode 为未绑定项目的
   // 会话生成的临时目录）仍然列出来——数据是真的存在——但归到
@@ -556,6 +937,10 @@ export function memorySummary() {
     unattributed: unnamed.length
       ? { locations: unnamed.length, entries: unnamed.reduce((n, i) => n + (i.entries || 0), 0) }
       : null,
+    // 读不到/解析不了的记忆文件与目录根：未知不是零，必须单独可见。
+    filesUnknown: files.filter((f) => f.status === 'unreadable' || f.status === 'unparsable').length,
+    rootsUnknown: roots.filter((r) => r.status === 'unreadable' || r.status === 'unparsable').length,
+    errors,
     list: items.map((i) => ({
       agent: i.agent,
       kind: i.kind,
@@ -581,17 +966,36 @@ export function memorySummary() {
  *   - 默认只给 4000 字
  */
 export function readMemory(targetPath, { maxChars = 4000 } = {}) {
-  const { items } = scanMemory();
-  const known = items.some((i) => i.path === targetPath || (i.path && targetPath.startsWith(i.path)));
+  const { items, files, roots } = scanMemory();
+  // 目标可能因为 unreadable/unparsable 不在 items 里，但它仍然属于已识别范围；
+  // 这样报错会是"读不到"而不是误导性的"不在范围内"。
+  const inside = (target, prefix) => {
+    if (!prefix) return false;
+    if (target === prefix) return true;
+    const withSep = prefix.endsWith(path.sep) ? prefix : prefix + path.sep;
+    return target.startsWith(withSep);
+  };
+  const known =
+    items.some((i) => i.path && inside(targetPath, i.path)) ||
+    files.some((f) => f.file === targetPath) ||
+    roots.some((r) => r.root && inside(targetPath, r.root));
   if (!known) {
     throw new Error(`不在已识别的记忆范围内：${targetPath}`);
   }
 
-  const st = statOf(targetPath);
-  if (!st) throw new Error('文件不存在');
-  if (st.isDirectory()) throw new Error('这是一个记忆目录，请指定里面的具体文件');
+  const st = statResult(targetPath);
+  if (st.error) {
+    if (statusForError(st.error) === 'missing') throw new Error('文件不存在');
+    throw new Error(errorText('读不到', st.error));
+  }
+  if (st.stat.isDirectory()) throw new Error('这是一个记忆目录，请指定里面的具体文件');
 
-  const text = fs.readFileSync(targetPath, 'utf8');
+  let text;
+  try {
+    text = fs.readFileSync(targetPath, 'utf8');
+  } catch (e) {
+    throw new Error(errorText('读不到', e));
+  }
   return {
     path: targetPath,
     totalChars: text.length,

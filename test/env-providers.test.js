@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sandbox } from './helpers.js';
-import { scanProviders, channelKeyOf, sanitizeUrl } from '../src/env/providers.js';
+import { scanProviders, channelKeyOf, sanitizeUrl, groupByChannel } from '../src/env/providers.js';
 
 /**
  * 渠道层的契约。
@@ -164,6 +164,19 @@ test('providers: 配置解析失败算"未知"，不算"没有渠道"', async ()
   } finally {
     box.cleanup();
   }
+});
+
+test('providers: 本地渠道按 host 全等判断，localhost.example.com 不算本机', () => {
+  // channel 是 scanProviders 里算好的渠道身份；这里直接给，只测折叠逻辑。
+  const channels = groupByChannel([
+    { agent: 'a', name: 'local', channel: 'c1', baseUrl: 'http://localhost:3425/v1' },
+    { agent: 'b', name: 'lookalike', channel: 'c2', baseUrl: 'http://localhost.example.com/v1' },
+    { agent: 'c', name: 'lookalike2', channel: 'c3', baseUrl: 'http://127.0.0.1.evil.com/v1' },
+  ]);
+  const byName = Object.fromEntries(channels.map((c) => [c.display, c]));
+  assert.equal(byName.local.local, true);
+  assert.equal(byName.lookalike.local, false, 'localhost.example.com 不是本机');
+  assert.equal(byName.lookalike2.local, false, '127.0.0.1.evil.com 不是本机');
 });
 
 test('providers: 渠道身份函数本身', () => {

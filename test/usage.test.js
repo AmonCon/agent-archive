@@ -204,6 +204,144 @@ test('usage: Hermes 老库只有 sessions 表、缺列也能读', async () => {
   }
 });
 
+test('usage: Claude 分叉/复制会话的历史 token 只算一次', async () => {
+  const box = sandbox();
+  try {
+    const line = (id, output, session) =>
+      JSON.stringify({
+        timestamp: '2026-01-01T00:00:00Z',
+        sessionId: session,
+        message: {
+          id,
+          model: 'claude-sonnet',
+          usage: {
+            input_tokens: 10,
+            output_tokens: output,
+            cache_read_input_tokens: 100,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      });
+    // 原件：m1 因流式写入出现两次，第二次 output 更大（应取后者）。
+    const original = box.path('.claude', 'projects', 'p', 'original.jsonl');
+    fs.mkdirSync(path.dirname(original), { recursive: true });
+    fs.writeFileSync(original, [line('m1', 3, 's1'), line('m1', 5, 's1')].join('\n') + '\n');
+    // 完全复制：同样的 m1；分叉：m1 + 自己新增的 m2。
+    const copy = box.path('.claude', 'projects', 'p', 'copy.jsonl');
+    fs.writeFileSync(copy, [line('m1', 5, 's1')].join('\n') + '\n');
+    const branch = box.path('.claude', 'projects', 'p', 'branch.jsonl');
+    fs.writeFileSync(branch, [line('m1', 5, 's1'), line('m2', 7, 's2')].join('\n') + '\n');
+
+    const r = await readUsage({
+      sources: only('claude-code'),
+      paths: { 'claude-code:files': [original, copy, branch] },
+    });
+
+    // m1（原件/复制/分叉里都有）+ m2（分叉新增）= 两行，不是四行。
+    assert.equal(r.rows.length, 2, '复制品里的历史消息不能重复成行');
+    assert.equal(r.rows.reduce((n, x) => n + x.fresh, 0), 20, 'm1 输入 10 + m2 输入 10');
+    assert.equal(r.rows.reduce((n, x) => n + x.output, 0), 12, 'm1 取流式最大 5 + m2 的 7');
+    assert.equal(r.rows.reduce((n, x) => n + x.cacheRead, 0), 200);
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('usage: WorkBuddy 的 rawUsage 按 OpenAI 口径换算，子代理算父会话', async () => {
+  const box = sandbox();
+  try {
+    const dir = box.path('.workbuddy', 'projects', 'p');
+    fs.mkdirSync(dir, { recursive: true });
+    const rec = (o) => JSON.stringify(o);
+    const top = path.join(dir, 'sess-1.jsonl');
+    fs.writeFileSync(
+      top,
+      [
+        rec({
+          type: 'message',
+          id: 'evt1',
+          sessionId: 'sess-1',
+          timestamp: 1767225600000,
+          providerData: {
+            model: 'glm-5.3',
+            rawUsage: {
+              prompt_tokens: 1000,
+              completion_tokens: 100,
+              prompt_cache_hit_tokens: 400,
+              prompt_cache_miss_tokens: 600,
+              cache_creation_input_tokens: 50,
+              completion_tokens_details: { reasoning_tokens: 20 },
+              credit: 4.2,
+            },
+          },
+        }),
+        // 同一个事件重复出现（流式写入/重读）不能重复计。
+        rec({
+          type: 'message',
+          id: 'evt1',
+          sessionId: 'sess-1',
+          timestamp: 1767225600000,
+          providerData: { model: 'glm-5.3', rawUsage: { prompt_tokens: 1000, completion_tokens: 100 } },
+        }),
+        rec({
+          type: 'function_call',
+          id: 'evt2',
+          sessionId: 'sess-1',
+          timestamp: 1767225601000,
+          providerData: {
+            model: 'glm-5.3',
+            rawUsage: { prompt_tokens: 200, completion_tokens: 10 },
+          },
+        }),
+        rec({
+          type: 'message',
+          id: 'evt4',
+          sessionId: 'sess-1',
+          timestamp: 1767225602000,
+          providerData: {
+            model: 'custom-local:my-model',
+            usage: { inputTokens: 80, outputTokens: 8, inputTokensDetails: [{ cached_tokens: 30 }] },
+          },
+        }),
+      ].join('\n') + '\n'
+    );
+    const subDir = path.join(dir, 'sess-1', 'subagents');
+    fs.mkdirSync(subDir, { recursive: true });
+    const sub = path.join(subDir, 'agent-a.jsonl');
+    fs.writeFileSync(
+      sub,
+      rec({
+        type: 'message',
+        id: 'evt3',
+        sessionId: 'sub-own',
+        timestamp: 1767225603000,
+        providerData: { model: 'glm-5.3', rawUsage: { prompt_tokens: 50, completion_tokens: 5 } },
+      }) + '\n'
+    );
+
+    const r = await readUsage({
+      sources: only('workbuddy'),
+      paths: { 'workbuddy:files': [top, sub] },
+    });
+
+    assert.equal(r.rows.length, 4);
+    const bySession = (id) => r.rows.filter((x) => x.session === id);
+    assert.equal(bySession('sess-1').length, 4, '子代理请求要记到父会话 sess-1');
+    assert.equal(bySession('sub-own').length, 0, '子代理自己的 sessionId 不能当独立会话');
+    const sum = (k) => r.rows.reduce((n, x) => n + x[k], 0);
+    // fresh：1000-400-50=550；200；80-30=50；50
+    assert.equal(sum('fresh'), 850);
+    assert.equal(sum('output'), 123);
+    assert.equal(sum('cacheRead'), 430);
+    assert.equal(sum('reasoning'), 20);
+    assert.equal(r.rows[0].cost, null, 'credit 是积分，不是美元，不能当成本');
+    assert.equal(r.rows[0].model, 'glm-5.3');
+    assert.equal(r.rows.find((x) => x.session === 'sess-1' && x.input === 80).model, 'my-model', 'custom-local: 前缀要去掉');
+  } finally {
+    box.cleanup();
+  }
+});
+
 test('usage: 按扫描器默认位置也能发现（不靠显式路径）', async () => {
   const box = sandbox();
   try {

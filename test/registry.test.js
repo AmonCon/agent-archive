@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { sandbox, codexMeta, codexUser } from './helpers.js';
+import { registerUserScanners } from '../src/scanner-loader.js';
 
 /**
  * 注册表（registry.js）的行为契约。
@@ -12,6 +13,82 @@ import { sandbox, codexMeta, codexUser } from './helpers.js';
  */
 
 const registry = await import('../src/registry.js');
+
+/**
+ * 造一个临时的用户扫描器源码。
+ *
+ * discover() 从 `.名字/files.txt` 里读清单，所以测试可以把"文件被删了"
+ * 和"discover 自己抛错"分开模拟；不需要给 registry 加测试专用钩子。
+ */
+function manifestScannerSource(name) {
+  return `import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+export const name = ${JSON.stringify(name)};
+
+export function discover() {
+  const root = path.join(os.homedir(), '.${name}');
+  if (fs.existsSync(path.join(root, 'discover-fails'))) {
+    throw new Error('模拟 discover 失败：存储目录不可读');
+  }
+  try {
+    return fs.readFileSync(path.join(root, 'files.txt'), 'utf8').split('\\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export function parse(file) {
+  let first;
+  try {
+    first = JSON.parse(fs.readFileSync(file, 'utf8').split('\\n')[0]);
+  } catch {
+    return null;
+  }
+  if (!first || !first.id) return null;
+  return {
+    id: first.id,
+    project: first.cwd || null,
+    title: first.title || null,
+    start: first.start || null,
+    end: first.end || null,
+    source: file,
+  };
+}
+`;
+}
+
+/** 按名字造一份清单式 fixture，返回每个会话文件的绝对路径。 */
+function writeManifestFixture(box, name, entries) {
+  const root = path.join(box.home, `.${name}`);
+  fs.mkdirSync(root, { recursive: true });
+  const files = entries.map(({ file, data }) => {
+    const full = path.join(root, file);
+    fs.writeFileSync(full, JSON.stringify(data) + '\n');
+    return full;
+  });
+  fs.writeFileSync(path.join(root, 'files.txt'), files.join('\n'), 'utf8');
+  return files;
+}
+
+/** 加载一个临时用户扫描器，跑完从注册表摘掉（scanners 是模块级数组）。 */
+async function withUserScanner(box, name, fn) {
+  const dir = path.join(box.state, 'scanners');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${name}.js`), manifestScannerSource(name), 'utf8');
+  return box.run(async () => {
+    const before = registry.scanners.length;
+    try {
+      const loaded = await registerUserScanners(dir);
+      assert.deepEqual(loaded.failed, [], '测试用的扫描器本身必须满足契约');
+      registry.clearScanCache();
+      return await fn();
+    } finally {
+      registry.scanners.splice(before, registry.scanners.length - before);
+    }
+  });
+}
 
 /** 造一个只有一场会话的 DSH 存储。 */
 function writeDshSession(box, { id = 's1', content = '第一版' } = {}) {
@@ -295,6 +372,162 @@ test('registry: only 选项只扫指定 Agent，且不覆盖其他 Agent 的缓�
       const cache = registry.loadCache();
       const codexKeys = Object.keys(cache).filter((k) => k.includes('.jsonl'));
       assert.ok(codexKeys.length >= 1, '部分扫描不能把其他 Agent 的缓存条目抹掉');
+    });
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('registry: scanner.discover() 抛错时保留该家上一轮的缓存，不把会话清空', async () => {
+  const box = sandbox();
+  try {
+    const name = 'aa-discover';
+    writeManifestFixture(box, name, [
+      { file: 'a.json', data: { id: 'a1', title: '会话 A', cwd: 'E:/p' } },
+      { file: 'b.json', data: { id: 'b2', title: '会话 B', cwd: 'E:/p' } },
+    ]);
+
+    await withUserScanner(box, name, async () => {
+      const first = registry.scanAll({ noCache: true });
+      assert.equal(
+        first.sessions.filter((s) => s.agent === name).length,
+        2,
+        '基线：两场会话都扫出来了'
+      );
+
+      // 下一轮 discover() 抛错：模拟"目录暂时读不了"这类故障
+      fs.writeFileSync(path.join(box.home, `.${name}`, 'discover-fails'), '1');
+
+      const second = registry.scanAll({});
+      const kept = second.sessions.filter((s) => s.agent === name);
+      assert.deepEqual(
+        kept.map((s) => s.id).sort(),
+        ['a1', 'b2'],
+        '发现失败不能把这家的旧会话抹掉'
+      );
+      assert.equal(
+        kept.find((s) => s.id === 'a1').title,
+        '会话 A',
+        '保留的是上一轮缓存的内容'
+      );
+
+      const problem = second.stats.problems.find((p) => p.agent === name && p.kind === 'discover');
+      assert.ok(problem, '发现失败要有身份：agent + kind=discover');
+      assert.ok(problem.reason, '要说清为什么失败');
+      assert.match(problem.reason, /模拟 discover 失败/, '要带出扫描器给的原因');
+
+      const mine = Object.entries(registry.loadCache()).filter(
+        ([k, e]) => !k.startsWith('__') && e && e.scanner === name
+      );
+      assert.equal(mine.length, 2, '缓存条目也必须原样保留，下一轮才有东西可保');
+
+      // 故障恢复：仍然两场，且不再报 discover 问题
+      fs.rmSync(path.join(box.home, `.${name}`, 'discover-fails'));
+      const third = registry.scanAll({});
+      assert.equal(third.sessions.filter((s) => s.agent === name).length, 2);
+      assert.equal(
+        third.stats.problems.filter((p) => p.agent === name && p.kind === 'discover').length,
+        0,
+        '恢复后不该继续报发现失败'
+      );
+    });
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('registry: stat 报 EACCES 时保留旧会话并计入 keptStale/problems', async () => {
+  const box = sandbox();
+  try {
+    const name = 'aa-stat';
+    const [file] = writeManifestFixture(box, name, [
+      { file: 's1.json', data: { id: 's1', title: '要保留的会话', cwd: 'E:/p' } },
+    ]);
+
+    await withUserScanner(box, name, async () => {
+      const first = registry.scanAll({ noCache: true });
+      assert.ok(
+        first.sessions.find((s) => s.agent === name && s.id === 's1'),
+        '基线：应该有一场会话'
+      );
+
+      // 只对这一个文件模拟 EACCES。用真实的权限设置做不到跨平台，所以在
+      // fs.statSync 这一层拦——registry 通过 fs.statSync 取状态，正好是
+      // "文件在、但这次读不到"的真实故障形态。
+      const target = path.resolve(file);
+      const originalStat = fs.statSync;
+      fs.statSync = function (p, ...args) {
+        if (path.resolve(String(p)) === target) {
+          const err = new Error(`EACCES: permission denied, stat '${p}'`);
+          err.code = 'EACCES';
+          throw err;
+        }
+        return originalStat.call(this, p, ...args);
+      };
+      try {
+        const second = registry.scanAll({});
+        const kept = second.sessions.find((s) => s.agent === name && s.id === 's1');
+        assert.ok(kept, 'stat 失败不能当成删除');
+        assert.equal(kept.title, '要保留的会话', '保留的是上一轮缓存的内容');
+        assert.equal(second.stats.keptStale, 1, '要如实记账：保留了 1 场');
+
+        const problem = second.stats.problems.find((p) => p.agent === name && p.kind === 'stat');
+        assert.ok(problem, 'stat 失败要有身份');
+        assert.equal(path.resolve(problem.file), target, '要记清是哪个文件');
+        assert.match(problem.reason, /EACCES/, '要带出错误码');
+
+        const cached = Object.entries(registry.loadCache()).find(
+          ([k, e]) => !k.startsWith('__') && path.resolve(k) === target
+        );
+        assert.ok(cached && cached[1].scanner === name, '缓存条目要保留，下一轮才能重试');
+      } finally {
+        fs.statSync = originalStat;
+      }
+
+      // 权限恢复：仍是一场，且不再算"保留了旧结果"
+      const third = registry.scanAll({});
+      assert.ok(third.sessions.find((s) => s.agent === name && s.id === 's1'));
+      assert.equal(third.stats.keptStale || 0, 0, '恢复后不该再记 keptStale');
+    });
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('registry: stat 报 ENOENT 时按删除处理，正常移除且不报 failure', async () => {
+  const box = sandbox();
+  try {
+    const name = 'aa-gone';
+    const [file] = writeManifestFixture(box, name, [
+      { file: 's1.json', data: { id: 's1', title: '会被删的会话', cwd: 'E:/p' } },
+    ]);
+
+    await withUserScanner(box, name, async () => {
+      assert.ok(
+        registry.scanAll({ noCache: true }).sessions.find((s) => s.agent === name && s.id === 's1'),
+        '基线：应该有一场会话'
+      );
+
+      // 文件被删了，但 discover 还返回旧清单——这是 discover 与 stat 之间
+      // 的竞态，正好覆盖 statOrNull 的 ENOENT 分支。
+      fs.rmSync(file);
+      const second = registry.scanAll({});
+      assert.equal(
+        second.sessions.filter((s) => s.agent === name).length,
+        0,
+        '文件没了就该移除，不能留着幽灵会话'
+      );
+      assert.equal(
+        second.stats.problems.filter((p) => p.agent === name).length,
+        0,
+        'ENOENT 是正常删除，不是 failure'
+      );
+      assert.equal(second.stats.keptStale || 0, 0, '没有需要保留的旧结果');
+
+      const stillCached = Object.keys(registry.loadCache()).some(
+        (k) => !k.startsWith('__') && path.resolve(k) === path.resolve(file)
+      );
+      assert.equal(stillCached, false, '缓存条目也要删掉');
     });
   } finally {
     box.cleanup();

@@ -239,6 +239,36 @@ const SOURCES = [
   },
 ];
 
+/**
+ * 把上面这张表投影成"配置目标"清单，给 connect 用。
+ *
+ * 存在的理由很直接：**路径只能有一张表**。connect 要按 Agent 告诉用户
+ * "该往哪个文件里粘"，如果它自己再抄一份路径，两边迟早漂移——
+ * 解析器认的位置和打印给你的位置变成两个，而症状是"照你说的贴了，
+ * 它还是看不见"。所以这里只做投影：求值 paths，带上 format 和 note。
+ *
+ * 只读：不读文件内容，也不写任何东西。
+ *
+ * @returns {Array<{agent: string, format: string, paths: string[], note: string|null}>}
+ */
+export function mcpConfigTargets() {
+  return SOURCES.map((src) => {
+    let paths = [];
+    try {
+      paths = src.paths() || [];
+    } catch {
+      // 某家的路径求值失败（目录读不到等）不该让整张表消失
+      paths = [];
+    }
+    return {
+      agent: src.agent,
+      format: src.format,
+      paths: paths.filter((p) => typeof p === 'string' && p),
+      note: src.note || null,
+    };
+  });
+}
+
 /* ------------------------------ 解析 ------------------------------ */
 
 /**
@@ -779,7 +809,9 @@ function normalize(raw, { agent, file, name, disabledByConfig = false }) {
   // 启用语义：条目自身的 `enabled: false`（Pi/Copilot 等）与客户端级的
   // `disabledMcpServers` 名单都算停用。停用的不算"可用能力"，但仍列出来——
   // 用户需要知道"它还在配置里，只是被关掉了"。
-  const enabled = raw?.enabled !== false && !disabledByConfig;
+  // WorkBuddy 等客户端用相反的键：`disabled: true` 表示停用。两个约定都要认，
+  // 否则用户明明关了某个服务，能力面还会把它报成“可用”。
+  const enabled = raw?.enabled !== false && raw?.disabled !== true && !disabledByConfig;
 
   // 校验：缺连接字段的条目不能当成"服务"计数——那会让用户以为配了、其实跑不起来。
   let problem = null;
