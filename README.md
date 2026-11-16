@@ -1687,6 +1687,8 @@ Codex 的 `{command:["powershell.exe","-NoProfile",...]}`、ZCode 的
 
 会话层回答"聊过什么"，环境层回答"**具备什么能力**"，调用层回答"**花了多少**"。
 
+![能力面：每个 Agent 一行，MCP / 技能 / 命令 / CLI / 记忆各一列](docs/screenshots/04-env.png)
+
 ```
 node src/cli.js env              # 每个 Agent 一行
 node src/cli.js env mcp          # MCP 服务清单，跨 Agent 归并
@@ -1704,6 +1706,8 @@ node src/cli.js env audit        # 体检
 Agent 配了什么、装了什么、记得什么，再自己决定要不要跟进——本工具不替它搬。
 
 ### 斜杠命令：第七类资产，正文绝不出模块
+
+![斜杠命令：同名同内容跨 Agent 合并，同名不同内容标冲突](docs/screenshots/05-commands.png)
 
 各家都有自己的 `/命令` 定义，位置和格式各不相同：Claude Code 的
 `commands/*.md`、OpenCode 的 `commands/` 与 `command/`、Pi 的 `prompts/*.md`、

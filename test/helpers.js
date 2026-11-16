@@ -24,6 +24,96 @@ const require = createRequire(import.meta.url);
  */
 
 /**
+ * 「假机器」的环境变量清单。
+ *
+ * **这是隔离的唯一一份定义**：进程内的 `sandbox().run()` 和起子进程的
+ * `runCli()` 都必须用它，否则两份名单迟早漂移——而漂移的表现是某个扫描器
+ * 在测试里读到了跑测试那台机器的真实会话，既不报错也不失败，只是慢和不准。
+ *
+ * 两类变量都要改：
+ *   1. 家目录与平台默认根（`%APPDATA%` / XDG 是**独立于家目录**的变量，
+ *      Cursor、Kiro、Copilot、Hermes 走它们）；
+ *   2. 各家自己的覆盖变量（`CODEX_HOME` 之类）必须清空，否则真实环境的
+ *      设置会从缝里漏进来。
+ *
+ * @returns {Record<string, string|null>} null 表示"删掉这个变量"
+ */
+export function fakeMachineEnv(box) {
+  return {
+    USERPROFILE: box.home,
+    HOME: box.home,
+    AGENT_ARCHIVE_HOME: box.state,
+
+    APPDATA: path.join(box.dir, 'appdata'),
+    LOCALAPPDATA: path.join(box.dir, 'localappdata'),
+    XDG_DATA_HOME: path.join(box.dir, 'xdg-data'),
+    XDG_CONFIG_HOME: path.join(box.dir, 'xdg-config'),
+    XDG_CACHE_HOME: path.join(box.dir, 'xdg-cache'),
+
+    CODEX_HOME: null,
+    CODEX_SQLITE_HOME: null,
+    CLAUDE_CONFIG_DIR: null,
+    HERMES_HOME: null,
+    DSH_HOME: null,
+    QODER_CONFIG_DIR: null,
+    OPENCODE_DATA_DIR: null,
+    OPENCODE_DB: null,
+    OPENCODE_CONFIG_DIR: null,
+    CURSOR_CONFIG_DIR: null,
+    KIRO_HOME: null,
+    KIMI_CODE_HOME: null,
+    GROK_HOME: null,
+    WORKBUDDY_CONFIG_DIR: null,
+    CODEBUDDY_CONFIG_DIR: null,
+    MINIMAX_DATA_DIR: null,
+    MAVIS_DATA_DIR: null,
+    PI_CONFIG_DIR: null,
+    PI_CODING_AGENT_DIR: null,
+    PI_CODING_AGENT_SESSION_DIR: null,
+    OMP_DATA_DIR: null,
+    CLINE_DIR: null,
+    CLINE_HOME: null,
+    OPENCLAW_CONFIG_DIR: null,
+    GEMINI_CONFIG_DIR: null,
+    QWEN_HOME: null,
+    FACTORY_HOME_OVERRIDE: null,
+    COPILOT_HOME: null,
+  };
+}
+
+/**
+ * 当前被**显式覆盖**的环境变量（withEnv 的嵌套栈）。
+ *
+ * 为什么需要：`sandbox().run()` 会把各家覆盖变量清空（防真实环境漏进来），
+ * 但用例常常要**先**用 withEnv 设一个覆盖变量、**再**在盒子里跑扫描器。
+ * 没有这个栈，内层的"清空"会把外层刚设的值删掉——症状是
+ * 「环境变量指向的根要参与发现」这条用例直接红，而且原因极难看出来。
+ *
+ * 规则：fakeMachineEnv 里值为 null（= 要删掉）的键，如果外层已经显式设过，
+ * 就跳过不删，让外层赢。
+ */
+const explicitOverrides = new Map();
+
+/**
+ * 把 `fakeMachineEnv()` 应用到一份**已存在的 env 对象**上（给 spawn 用）。
+ *
+ * 与 `withEnv` 的区别：那个改的是 `process.env`，这个只返回一份新对象，
+ * 适合传给 `child_process`。null 的键会被真正删掉。
+ */
+export function applyFakeMachineEnv(box, base = process.env) {
+  const env = { ...base };
+  for (const [k, v] of Object.entries(fakeMachineEnv(box))) {
+    if (v === null) {
+      // 外层 withEnv 显式设过的，交给外层（见 explicitOverrides 的注释）
+      if (!explicitOverrides.has(k)) delete env[k];
+    } else {
+      env[k] = v;
+    }
+  }
+  return env;
+}
+
+/**
  * 一个完全隔离的"假机器"。
  *
  * 关键点：`os.homedir()` 在运行时跟随 `USERPROFILE`（Windows）/ `HOME`（POSIX），
@@ -59,42 +149,14 @@ export function sandbox(prefix = 'aa-test-') {
       fs.mkdirSync(full, { recursive: true });
       return full;
     },
+    /** 子进程要用的环境变量（同一份隔离定义）。 */
+    env(base = process.env) {
+      return applyFakeMachineEnv(box, base);
+    },
     /** 在隔离环境里跑 fn（家目录 + 状态目录都指向临时位置） */
     async run(fn) {
-      return withEnv(
-        {
-          USERPROFILE: home,
-          HOME: home,
-          AGENT_ARCHIVE_HOME: state,
-
-          // 平台默认根也要一起改掉，光换家目录是不够的。
-          //
-          // `%APPDATA%` / `%LOCALAPPDATA%` / XDG 是**独立于家目录**的环境变量：
-          // Cursor、Kiro、Copilot、Hermes 走的是它们，不是 `~`。不换这几个的话，
-          // 这些扫描器在测试里会读到跑测试那台机器的真实会话——
-          // 实测就有过一次：装包自测时输出里冒出了开发者的真实项目名，
-          // 因为只隔离了家目录。
-          APPDATA: path.join(dir, 'appdata'),
-          LOCALAPPDATA: path.join(dir, 'localappdata'),
-          XDG_DATA_HOME: path.join(dir, 'xdg-data'),
-          XDG_CONFIG_HOME: path.join(dir, 'xdg-config'),
-          XDG_CACHE_HOME: path.join(dir, 'xdg-cache'),
-
-          // 明确清掉可能存在的覆盖变量，否则真实环境的设置会漏进来
-          CODEX_HOME: null,
-          CLAUDE_CONFIG_DIR: null,
-          HERMES_HOME: null,
-          DSH_HOME: null,
-          QODER_CONFIG_DIR: null,
-          OPENCODE_DATA_DIR: null,
-          OPENCODE_DB: null,
-          CURSOR_CONFIG_DIR: null,
-          KIRO_HOME: null,
-        },
-        fn
-      );
-    },
-    cleanup() {
+      return withEnv(fakeMachineEnv(box), fn);
+    },    cleanup() {
       try {
         fs.rmSync(dir, { recursive: true, force: true });
       } catch {
@@ -137,19 +199,35 @@ export function tempDir(prefix = 'aa-test-') {
  *
  * 只还原**我们动过的那几个键**，不整体替换 process.env——否则会把
  * PATH 之类的东西弄丢，Windows 上会连带影响 spawn。
+ *
+ * 设了值的键会记进 `explicitOverrides`，这样嵌套在里面的 `sandbox().run()`
+ * 不会把它当成"要清掉的真实环境变量"删掉（见那个栈的注释）。
  */
 export async function withEnv(vars, fn) {
   const saved = new Map();
   for (const k of Object.keys(vars)) {
     saved.set(k, process.env[k]);
   }
+  const marked = [];
   try {
     for (const [k, v] of Object.entries(vars)) {
-      if (v === undefined || v === null) delete process.env[k];
-      else process.env[k] = String(v);
+      if (v === undefined || v === null) {
+        // 外层 withEnv 显式设过的键，内层的"清空"要让位——
+        // 否则 `withEnv({ X: 自定义根 }, () => box.run(...))` 里的 X 会被删掉。
+        if (!explicitOverrides.has(k)) delete process.env[k];
+      } else {
+        process.env[k] = String(v);
+        marked.push(k);
+        explicitOverrides.set(k, (explicitOverrides.get(k) || 0) + 1);
+      }
     }
     return await fn();
   } finally {
+    for (const k of marked) {
+      const n = (explicitOverrides.get(k) || 1) - 1;
+      if (n <= 0) explicitOverrides.delete(k);
+      else explicitOverrides.set(k, n);
+    }
     for (const [k, v] of saved) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;

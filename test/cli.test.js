@@ -11,21 +11,13 @@ import { sandbox } from './helpers.js';
 
 /** 在隔离环境里跑一个子命令，返回 {code, out}。 */
 function runCli(box, args) {
-  const env = {
-    ...process.env,
-    USERPROFILE: box.home,
-    HOME: box.home,
-    AGENT_ARCHIVE_HOME: box.state,
-    CODEX_HOME: '',
-    CLAUDE_CONFIG_DIR: '',
-  };
-  delete env.CODEX_HOME;
-  delete env.CLAUDE_CONFIG_DIR;
-
+  // 用 box.env() 而不是手写变量：隔离名单只该有一份。
+  // 以前这里只改了 USERPROFILE/HOME，APPDATA 和 XDG 没改——于是 Cursor /
+  // Kiro / Copilot 的扫描器在测试里读到了本机真实会话，每个用例慢 25 秒。
   try {
     const out = execFileSync(process.execPath, ['--no-warnings', 'src/cli.js', ...args], {
       cwd: process.cwd(),
-      env,
+      env: box.env(),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -133,6 +125,33 @@ test('cli: timeline 在会话很多时只给最近一段，并说明怎么看全
     assert.equal(all.code, 0, all.out);
     assert.doesNotMatch(all.out, /看全部：--all/);
     assert.ok(all.out.split('\n').length > plain.out.split('\n').length, '--all 应该比默认更长');
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('cli: --version 报的版本和 package.json 一致', async () => {
+  // 版本号抄两份的下场是发版后对不上，而用户正是拿这个数字报问题。
+  const fs = await import('node:fs');
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const box = sandbox();
+  try {
+    for (const flag of ['--version', '-v', 'version']) {
+      const { code, out } = runCli(box, [flag]);
+      assert.equal(code, 0, out);
+      assert.ok(out.includes(pkg.version), `${flag} 应该报 ${pkg.version}，实际：${out.trim()}`);
+    }
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('cli: 未知命令给用法提示而不是崩', async () => {
+  const box = sandbox();
+  try {
+    const { out } = runCli(box, ['no-such-command']);
+    assert.match(out, /未知命令/);
+    assert.doesNotMatch(out, /is not defined|TypeError/);
   } finally {
     box.cleanup();
   }

@@ -22,6 +22,9 @@
   },
   "files": [
     "src/",
+    "docs/boundaries.md",
+    "docs/recipes/",
+    "docs/screenshots/",
     "CHANGELOG.md",
     "README.md",
     "LICENSE",

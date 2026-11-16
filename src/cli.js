@@ -16,6 +16,20 @@ import { timelineMarkdown, sessionMarkdown, bundleMarkdown } from './export.js';
 import { auditCollection, detectGaps } from './doctor.js';
 import { scanSecrets } from './secrets.js';
 import { registerUserScanners } from './scanner-loader.js';
+
+/**
+ * 版本号从 package.json 读，不在 CLI 里抄一份。
+ *
+ * 抄一份的下场是发版时改了 package.json、`--version` 还报旧版本。
+ * 读失败就退回 '0.0.0'——它只用于打印，不该成为命令跑不起来的理由。
+ */
+let VERSION = '0.0.0';
+try {
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  if (pkg && pkg.version) VERSION = String(pkg.version);
+} catch {
+  /* 保持 0.0.0 */
+}
 const C = {
   reset: '\x1b[0m',
   dim: '\x1b[2m',
@@ -2884,6 +2898,12 @@ function parseArgs(argv) {
 
 async function main() {
   const [, , cmd, ...rest] = process.argv;
+
+  // --version / -v：npm 包的基本礼貌。装完想确认版本时不该靠翻 package.json。
+  if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
+    console.log(`agent-archive ${VERSION}`);
+    return;
+  }
 
   if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help') {
     usage();
