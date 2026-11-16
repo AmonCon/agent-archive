@@ -127,7 +127,14 @@ function copyFor(file, dbStat, walStat) {
   return rec;
 }
 
-/** 进程退出时清理临时副本。 */
+/**
+ * 进程退出时清理临时副本。
+ *
+ * **这个函数自己会在模块加载时挂上退出钩子**（见文件末尾），调用方不需要
+ * 记得调用它——以前它导出了却没人调用，结果是每跑一次扫描或测试就在系统
+ * 临时目录里留下一个 `agent-archive-sqlite-*` 目录，实测攒了 132 个。
+ * 「导出但不调用」的清理函数等于没有。
+ */
 export function cleanupCopies() {
   for (const rec of copies.values()) safeRm(rec.dir);
   copies.clear();
@@ -249,5 +256,48 @@ export function findVersionedDb(dir, base) {
 function escapeRe(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/**
+ * 挂上退出钩子，让临时副本不会留在系统临时目录里。
+ *
+ * 为什么放在模块加载时而不是让调用方调：这个模块被 CLI、MCP server、
+ * Web server、测试四处引用，指望每处都记得调一次是不现实的——实测结果就是
+ * 谁都没调，攒了 132 个残留目录。
+ *
+ * 三种退出路径都要覆盖：
+ *   exit      正常结束（CLI 跑完）
+ *   SIGINT    用户 Ctrl+C（`serve` 最常见）
+ *   SIGTERM   被 kill（容器/服务管理）
+ *
+ * 用 `prependListener` 而不是 `on`：让清理尽量排在别人的处理之前，避免
+ * 某个 handler 先 `process.exit()` 把我们的清理跳过去。
+ *
+ * `unref` 不需要：这些 handler 在退出时才跑，不会拖住事件循环。
+ */
+let hooked = false;
+function hookCleanup() {
+  if (hooked) return;
+  hooked = true;
+  const cleanup = () => {
+    try {
+      cleanupCopies();
+    } catch {
+      /* 退出路径上抛错只会让真正的退出码丢失 */
+    }
+  };
+  process.prependListener('exit', cleanup);
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    // 只在**没有**别人处理这个信号时才装：装了就等于接管信号，
+    // 会让 `serve` 的优雅关闭逻辑失效。有别人的 handler 时，他们退出时
+    // 照样会触发 'exit'，清理不会丢。
+    if (process.listenerCount(sig) === 0) {
+      process.prependListener(sig, () => {
+        cleanup();
+        process.exit(sig === 'SIGINT' ? 130 : 143);
+      });
+    }
+  }
+}
+hookCleanup();
 
 export { crypto };

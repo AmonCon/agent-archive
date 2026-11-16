@@ -114,6 +114,39 @@ export function applyFakeMachineEnv(box, base = process.env) {
 }
 
 /**
+ * 删掉一个临时目录，带重试。
+ *
+ * Windows 上删不掉通常有两个原因：SQLite 句柄还没关（测试里忘了 `close()`），
+ * 或者杀毒/索引服务刚打开过文件。两种情况都是**过一会儿就好**，所以重试比
+ * 一次放弃有用。
+ *
+ * 为什么要认真对待：以前这里是 `try { rmSync } catch { /* 忽略 *\/ }`，
+ * 结果一次全量测试会在系统临时目录里留下几个删不掉的目录，且**没有任何提示**。
+ * 攒下来就是上百个垃圾目录——用户看不到，但它一直在长。
+ *
+ * 仍然失败时不再抛错（清理失败不该让测试红），但会打印一行，让"有东西没删掉"
+ * 这件事至少是可见的。
+ */
+function removeTempDir(dir, label = '临时目录') {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return true;
+    } catch {
+      // 忙等一小会儿再试：句柄关闭是异步的，立刻重试没用
+      const until = Date.now() + 40 * (attempt + 1);
+      while (Date.now() < until) {
+        /* 同步等待，测试里可接受（最长 240ms） */
+      }
+    }
+  }
+  // 最后一次尝试：目录可能已经不存在了（并发删过）
+  if (!fs.existsSync(dir)) return true;
+  process.emitWarning(`${label}没能删掉（可能有未关闭的文件句柄）：${dir}`);
+  return false;
+}
+
+/**
  * 一个完全隔离的"假机器"。
  *
  * 关键点：`os.homedir()` 在运行时跟随 `USERPROFILE`（Windows）/ `HOME`（POSIX），
@@ -156,12 +189,9 @@ export function sandbox(prefix = 'aa-test-') {
     /** 在隔离环境里跑 fn（家目录 + 状态目录都指向临时位置） */
     async run(fn) {
       return withEnv(fakeMachineEnv(box), fn);
-    },    cleanup() {
-      try {
-        fs.rmSync(dir, { recursive: true, force: true });
-      } catch {
-        /* Windows 上偶发占用，忽略 */
-      }
+    },
+    cleanup() {
+      return removeTempDir(dir, 'sandbox');
     },
   };
   return box;
@@ -185,11 +215,7 @@ export function tempDir(prefix = 'aa-test-') {
       return full;
     },
     cleanup() {
-      try {
-        fs.rmSync(dir, { recursive: true, force: true });
-      } catch {
-        /* 忽略 */
-      }
+      return removeTempDir(dir, 'tempDir');
     },
   };
 }
@@ -271,11 +297,7 @@ export function sourceBox(prefix = 'aa-source-') {
       return withEnv({ AGENT_ARCHIVE_HOME: state }, fn);
     },
     cleanup() {
-      try {
-        fs.rmSync(dir, { recursive: true, force: true });
-      } catch {
-        /* Windows 上偶发占用，忽略 */
-      }
+      return removeTempDir(dir, 'box');
     },
   };
 }
