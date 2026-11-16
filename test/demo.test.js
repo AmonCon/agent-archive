@@ -466,15 +466,78 @@ test('demo: 清空覆盖变量——CODEX_HOME 指向别处也漏不进 demo', a
   assert.doesNotMatch(out, /POISON-PROJECT/, 'CODEX_HOME 没清掉，demo 读到了本机数据');
 });
 
+test('demo: 能力面不列出本机真实安装的软件（PATH 必须隔离）', async () => {
+  // 这条盯的是"demo 截图会泄露什么"。demo 的能力面会扫 PATH 列出"装了哪些
+  // 命令行产品"——留着真实 PATH，用户一贴截图就等于公开自己的软件清单
+  // （内部工具、公司私有 CLI、云账号工具……）。
+  //
+  // 断言方式：先看**父进程** PATH 里实际存在哪些可执行文件，再断言 demo 的
+  // 输出里一个都没有。比写死某个软件名可靠——在没装那些软件的机器上，
+  // 写死的名字会让这条用例永远是绿的。
+  let out = '';
+  const code = await runDemo(['env', 'cli'], {
+    onOutput: (t) => {
+      out += t;
+    },
+  });
+  assert.equal(code, 0, `demo env cli 应该跑通，输出：${out}`);
+
+  // 父进程 PATH 里真实存在的可执行文件名（挑几个最可能被识别成"产品"的）
+  const realBins = [];
+  for (const dir of String(process.env.PATH || '').split(path.delimiter)) {
+    if (!dir) continue;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      const base = e.replace(/\.(exe|cmd|bat|ps1|com)$/i, '').toLowerCase();
+      // 只挑有辨识度的：太短的名字（ls/cp/git）在样例里本来就可能出现
+      if (base.length >= 6 && /^[a-z][a-z0-9-]+$/.test(base)) realBins.push(base);
+    }
+    if (realBins.length > 400) break;
+  }
+
+  if (!realBins.length) return; // 没有可比的样本，跳过（不算通过也不算失败）
+
+  const leaked = realBins.filter((b) => new RegExp(`\\b${b}\\b`, 'i').test(out));
+  assert.deepEqual(
+    leaked.slice(0, 10),
+    [],
+    `demo 输出里出现了本机真实安装的软件：${leaked.slice(0, 10).join(', ')}`
+  );
+});
+
 test('demo: demoEnv 只打补丁，不整体替换环境变量', () => {
   const box = materializeDemo();
   try {
     const env = demoEnv(box.home, box.state);
-    // PATH 之类必须留着：整体替换会让 Windows 上的 spawn 都不可靠。
-    // 注意 Windows 上这个变量的实际键名常是 `Path`（不是全大写），
-    // 所以按大小写不敏感去找，别假设键名。
-    const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === 'path');
-    if (pathKey) assert.equal(env[pathKey], process.env[pathKey], `${pathKey} 不该被改`);
+    // 除了 PATH，其余原样保留：整体替换会让 Windows 上的 spawn 都不可靠
+    // （SystemRoot / TEMP / ComSpec 都还要用）。
+    assert.ok(env.SystemRoot || process.platform !== 'win32', 'SystemRoot 之类要留着');
+
+    // **PATH 是例外，必须换掉。** `env cli` 会扫 PATH 列出"装了哪些命令行
+    // 产品"，`env skills` / `env mcp` 也会顺着 PATH 找私有目录。留着真实
+    // PATH，demo 的能力面就会列出用户本机装的内部工具——而 demo 截图正是
+    // 最容易被贴到群聊和 issue 里的东西。
+    //
+    // 取值要大小写不敏感：Windows 上原键名常是 `Path`，补丁写的是 `PATH`。
+    const findKey = (obj, name) =>
+      Object.keys(obj).find((k) => k.toLowerCase() === name.toLowerCase());
+    const demoPathKey = findKey(env, 'path');
+    assert.ok(demoPathKey, 'demo 环境里必须有 PATH（哪怕指向空目录）');
+    assert.notEqual(
+      env[demoPathKey],
+      process.env[findKey(process.env, 'path')],
+      'PATH 必须被换成空目录'
+    );
+    assert.equal(
+      findKey(env, 'path') && Object.keys(env).filter((k) => k.toLowerCase() === 'path').length,
+      1,
+      'PATH 不该同时存在两个大小写变体'
+    );
 
     assert.equal(env.USERPROFILE, box.home);
     assert.equal(env.HOME, box.home);

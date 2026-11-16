@@ -244,9 +244,74 @@ export function demoEnvPatch(home, state) {
     XDG_DATA_HOME: path.join(dir, 'xdg-data'),
     XDG_CONFIG_HOME: path.join(dir, 'xdg-config'),
     XDG_CACHE_HOME: path.join(dir, 'xdg-cache'),
+
+    // **PATH 也要换掉。** 这一条不是洁癖：`env cli` 会扫 PATH 列出"装了哪些
+    // 命令行产品"，`env skills` / `env mcp` 也会顺着 PATH 找私有目录。
+    // 留着真实 PATH，demo 的能力面就会列出用户本机装的阿里云 CLI、飞书 CLI、
+    // 各种内部工具——而 demo 的截图正是最容易被贴到群里/issue 里的东西。
+    //
+    // 换成 demo 自己的 bin 目录（里面只有几个通用工具的空壳），这样能力面
+    // 那块不是一片空白，同时**指向的是一眼就是示例的名字**。
+    //
+    // 放在**假家目录里面**（不是临时目录根）：`tildify()` 只把家目录缩成 `~`，
+    // 放在外面的话路径会显示成 `/tmp/aa-demo-xxx/demo-bin/git`——临时目录名
+    // 里带本机用户名的 8.3 短名（实测 `ADMINI~1.DES`），等于换个地方泄漏。
+    PATH: demoBinDir(path.join(absHome, '.demo-bin')),
   };
   for (const name of OVERRIDE_VARS) patch[name] = null;
   return patch;
+}
+
+/**
+ * demo 专用的 PATH 目录：放几个通用工具的空壳文件。
+ *
+ * 为什么不是干脆空 PATH：能力面里"CLI 产品覆盖"是一整块面板，空着的话
+ * 截图和 demo 都像坏了。但也不能用真实 PATH——那会泄漏用户装了什么。
+ *
+ * 折中：造几个**跨平台的通用工具**（git / node / npm / docker / python），
+ * 内容是空的、只要求文件存在（`env cli` 只 stat 不执行）。这样：
+ *   - 任何人跑 demo 看到的都一样，截图可以放心贴；
+ *   - 不会指向任何真实用户装的东西。
+ *
+ * @param {string} bin 已经是最终目录（调用方给全路径，别再拼一层）
+ */
+function demoBinDir(bin) {
+  try {
+    fs.mkdirSync(bin, { recursive: true });
+    const ext = process.platform === 'win32' ? '.exe' : '';
+    for (const name of ['git', 'node', 'npm', 'docker', 'python']) {
+      const f = path.join(bin, name + ext);
+      if (!fs.existsSync(f)) fs.writeFileSync(f, '', 'utf8');
+    }
+  } catch {
+    /* 建不出来就让 PATH 指一个不存在的目录，能力面为空——比泄漏好 */
+  }
+  return bin;
+}
+
+/**
+ * 把补丁应用到一份环境变量上。
+ *
+ * **PATH 要按大小写不敏感处理**：Windows 上这个变量的真实键名常常是 `Path`
+ * （不是全大写），而 `process.env` 在 Windows 上是大小写不敏感的代理对象——
+ * 直接 `env.PATH = x` 可能既没覆盖掉原来的 `Path`，又凭空多出一个 `PATH`。
+ * 所以先把所有大小写变体删掉，再写一个规范键名。
+ */
+export function applyDemoEnv(env, patch) {
+  const out = { ...env };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) {
+      delete out[k];
+      continue;
+    }
+    // 同一个键的其它大小写变体一起清掉，避免 Windows 上留下两份
+    const lower = k.toLowerCase();
+    for (const existing of Object.keys(out)) {
+      if (existing !== k && existing.toLowerCase() === lower) delete out[existing];
+    }
+    out[k] = String(v);
+  }
+  return out;
 }
 
 /**
@@ -257,12 +322,7 @@ export function demoEnvPatch(home, state) {
  * `withEnv` 是同一个取舍。
  */
 export function demoEnv(home, state) {
-  const env = { ...process.env };
-  for (const [k, v] of Object.entries(demoEnvPatch(home, state))) {
-    if (v === null) delete env[k];
-    else env[k] = String(v);
-  }
-  return env;
+  return applyDemoEnv(process.env, demoEnvPatch(home, state));
 }
 
 /* ------------------------------ 跑子进程 ------------------------------ */
