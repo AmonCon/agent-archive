@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { openReadOnly } from '../sqlite-read.js';
 import { makeSession } from '../model.js';
@@ -9,10 +10,26 @@ import { extraRoots } from '../config.js';
 /**
  * Cursor 会话扫描。
  *
- * 存储（各平台位置不同，由 platform.userDataCandidates 统一处理）：
- *   Windows  %APPDATA%/Cursor/User/globalStorage/state.vscdb
- *   macOS    ~/Library/Application Support/Cursor/User/globalStorage/state.vscdb
- *   Linux    ~/.config/Cursor/User/globalStorage/state.vscdb
+ * **Cursor 有三个互不相干的会话存储**，只读其中一个会漏掉一大半：
+ *
+ *   1. 编辑器（GUI）——VSCode 键值库，本文件主要处理的就是它：
+ *        Windows  %APPDATA%/Cursor/User/globalStorage/state.vscdb
+ *        macOS    ~/Library/Application Support/Cursor/User/globalStorage/state.vscdb
+ *        Linux    $XDG_CONFIG_HOME/Cursor/User/globalStorage/state.vscdb
+ *
+ *   2. **CLI（`cursor-agent`）**——`~/.cursor/chats/<md5(cwd)>/<chat id>/store.db`，
+ *      每个工作目录一个 MD5 命名的目录。三平台都是 `~/.cursor`，不看 XDG、
+ *      也不看 Application Support。
+ *
+ *   3. **新版编辑器的 project transcripts**——`~/.cursor/projects/<slug>/agent-transcripts/<id>/`，
+ *      同样是 `~/.cursor`。
+ *
+ * 2、3 两处来自 MAGPIE `internal/sessions/cursor.go` 与 `Found()` 的三个来源
+ * （`CursorDir()/chats`、`cursorDataDir()/projects`、`cursorEditorDB()`）。
+ * 我们原来只读第 1 个，于是"用 CLI 干活、编辑器没开过"的用户会看到
+ * Cursor 一场会话都没有。
+ *
+ * ## 编辑器库的格式
  *
  * 这是个 VSCode 的 SQLite 键值库，两张关键表/键：
  *   composerHeaders     一场会话一行（composerId, createdAt, isArchived, isSubagent）
@@ -61,6 +78,28 @@ const DB_REL = 'User/globalStorage/state.vscdb';
  */
 const CURSOR_APPS = ['Cursor', 'Cursor - Insiders', 'Cursor Nightly'];
 
+/**
+ * CLI 与 project-transcripts 的数据根：**三平台都是 `~/.cursor`**。
+ *
+ * 这不是"没做跨平台"，而是 Cursor 自己就这么写：MAGPIE 的
+ * `cursorDataDir()` 是 `$CURSOR_DATA_DIR` 否则 `~/.cursor`，没有 darwin 分支，
+ * 也不用 `os.UserConfigDir()`。编辑器那个库才走平台目录。
+ *
+ * 所以这里和 `cursorRoots()`（编辑器数据目录）是两套根，不能混：
+ * 拿 `~/Library/Application Support/Cursor` 去找 `chats/` 会永远找不到。
+ */
+function cliDataRoots() {
+  const out = [];
+  for (const p of extraRoots(name)) {
+    const abs = path.resolve(String(p));
+    if (!out.includes(abs)) out.push(abs);
+  }
+  const envData = String(process.env.CURSOR_DATA_DIR || '').trim();
+  if (envData && path.isAbsolute(envData)) out.push(envData);
+  out.push(path.join(os.homedir(), '.cursor'));
+  return out;
+}
+
 function cursorRoots() {
   // 配置文件里的根 = "Cursor" 这一层应用数据目录，排在最前
   return [...extraRoots(name), ...editorDataCandidates(CURSOR_APPS)];
@@ -72,9 +111,11 @@ function dbPath() {
   return path.join(cursorRoots()[0], 'User', 'globalStorage', 'state.vscdb');
 }
 
-/** 声明"我会去哪里找数据"（Cursor 应用数据目录那一层；给 doctor 与反向发现用）。 */
+/** 声明"我会去哪里找数据"（编辑器数据目录 + CLI 的 `~/.cursor`；给 doctor 与反向发现用）。 */
 export function candidateRoots() {
-  return cursorRoots();
+  const out = [...cursorRoots()];
+  for (const p of cliDataRoots()) if (!out.includes(p)) out.push(p);
+  return out;
 }
 
 /** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */
@@ -340,8 +381,13 @@ function projectFromWorkspaceJson(workspaceId) {
   const roots = [];
   for (const root of cursorRoots()) {
     // 只要产品根目录（.../Cursor），不要下面的 User/...
-    const idx = root.indexOf('User' + path.sep);
-    const appRoot = idx === -1 ? root : root.slice(0, idx).replace(/[\\/]+$/, '');
+    //
+    // 判断分隔符不能用 `path.sep`：`cursorRoots()` 里既有当前平台的默认位置，
+    // 也有"别的平台可能拷过来"的兜底候选（比如 Windows 上也会列出
+    // `~/.config/Cursor`）。用 `path.sep` 切一条正斜杠路径会切不动，
+    // 于是权威来源静默失效、退回目录名反解。
+    const m = String(root).match(/^(.*?)[\\/]User(?:[\\/]|$)/);
+    const appRoot = m ? m[1].replace(/[\\/]+$/, '') : String(root).replace(/[\\/]+$/, '');
     if (!appRoot) continue;
     const dir = path.join(appRoot, 'User', 'workspaceStorage', workspaceId);
     if (!roots.includes(dir)) roots.push(dir);

@@ -24,6 +24,31 @@ import { sandbox, makeSqlite, withEnv } from './helpers.js';
  */
 
 const scanner = await import('../src/scanners/cursor.js');
+const platform = await import('../src/platform.js');
+
+/**
+ * 当前平台下 Cursor 的编辑器数据目录（相对假家目录的写法）。
+ *
+ * 这个用例以前写死 `.config/Cursor/...`（Linux 的位置），在 Windows 上从来没
+ * 生效过——因为 `cursorRoots()` 在 Windows 上会先返回 `%APPDATA%/Cursor`。
+ * 它一直是"假绿"：断言的是另一条兜底路径恰好被找到，而不是真的走了
+ * "workspace.json 权威优先"这条路。
+ */
+function editorDataRel() {
+  const roots = platform.editorDataCandidates(['Cursor']);
+  const first = roots[0] || '';
+  // 取相对假家目录的那一段
+  const norm = first.replace(/\\/g, '/');
+  const marker = '/AppData/Roaming/';
+  const idx = norm.indexOf(marker);
+  if (idx !== -1) return norm.slice(idx + 1);
+  const home = norm.indexOf('/.config/');
+  if (home !== -1) return norm.slice(home + 1);
+  // 兜底：用家目录之后的相对段
+  const parts = norm.split('/');
+  const ci = parts.findIndex((p) => p === 'Cursor');
+  return parts.slice(Math.max(0, ci - 2), ci + 1).join('/');
+}
 
 /** 在假家目录里跑，并把 VS Code 系的 APPDATA 一并隔离。 */
 function runInBox(box, fn) {
@@ -398,7 +423,7 @@ test(
       ]);
 
       box.write(
-        '.config/Cursor/User/workspaceStorage/ws-1/workspace.json',
+        `${editorDataRel()}/User/workspaceStorage/ws-1/workspace.json`,
         JSON.stringify({ folder: 'file:///e%3A/authoritative-proj' })
       );
 

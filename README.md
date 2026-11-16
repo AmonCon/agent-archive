@@ -2048,9 +2048,9 @@ node src/cli.js doctor
 现在 `model.absProjectPath()` **认出别家的绝对路径就原样保留**（盘符、UNC、
 POSIX 绝对路径三种），只有真正的相对路径才拼 cwd。
 
-### macOS 上最容易搞错的三件事
+### macOS 上最容易搞错的四件事
 
-这三条都是查了官方文档和源码才确认的，和直觉不一样：
+这四条都是查了官方文档和上游源码才确认的，和直觉不一样：
 
 **一、OpenCode 在 macOS 上不用 Application Support。**
 它自己的 `global-roots.ts` 里写死 `XDG_DATA_HOME || ~/.local/share`，
@@ -2065,6 +2065,24 @@ Claude Code 的 CLI 三平台都用 `~/.claude/`，官方文档从没给过 Appl
 
 **三、Hermes 在 Windows 上官方位置是 `%LOCALAPPDATA%/hermes`，mac/Linux 是 `~/.hermes`。**
 这是少数**真的按平台分叉**的一家（源码里 `sys.platform == "win32"` 判断）。
+
+**四、Cursor 有三套会话存储，根目录各不相同。**
+编辑器（GUI）的在平台数据目录（macOS 是 Application Support），但 **CLI
+（`cursor-agent`）和新版 project transcripts 三平台都用 `~/.cursor`**——
+没有 darwin 分支，也不走 XDG。所以拿 `~/Library/Application Support/Cursor`
+去找 CLI 的会话会永远找不到。这条来自 MAGPIE 的
+`internal/sessions/access.go:Found()`（它列了三个来源）和 `cursorDataDir()`。
+
+### ZCode 在 Windows 上可能不在 `%USERPROFILE%`
+
+ZCode 是 Node 应用，取目录是 `process.env.HOME?.trim() || homedir()`。
+macOS/Linux 上两者一致；**Windows 上 homedir 是 `%USERPROFILE%`，而 `HOME`
+通常未设——但为 Git Bash / MSYS2 / Emacs 设过 `HOME` 的用户，ZCode 会把数据
+放在那里**，`%USERPROFILE%\.zcode` 反而空着。
+
+这条来自 MAGPIE `internal/appdir/zcode.go:ZCodeHomeOn`，它专门为这个场景写过
+（"connected, no error, and no magpie in ZCode"）。所以我们的候选根是
+`$HOME/.zcode` 优先、`~/.zcode` 兜底。
 
 ### 环境变量是比平台推断更可靠的一层
 

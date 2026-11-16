@@ -146,6 +146,54 @@ test('zcode: semantics.origin 区分注入与真人——注入归 system，不�
   }
 });
 
+test('zcode: 设了 $HOME 时也去那里找（Windows 上 Git Bash / MSYS2 用户的真实情况）', async () => {
+  // ZCode 是 Node 应用，取目录是 `process.env.HOME?.trim() || homedir()`。
+  // macOS/Linux 上两者一致；Windows 上 homedir 是 %USERPROFILE%，而 HOME
+  // 通常未设——但为 Git Bash / MSYS2 / Emacs 设过 HOME 的用户，ZCode 会把
+  // 数据放在那里，%USERPROFILE%\.zcode 反而空着。
+  //
+  // 这条来自 MAGPIE `internal/appdir/zcode.go:ZCodeHomeOn`，它为这个场景
+  // 专门写过（"connected, no error, and no magpie in ZCode"）。
+  const box = sandbox();
+  try {
+    // 把 db 放在"另一个 HOME"下，假家目录里不放
+    const altHome = box.path('..', 'alt-home');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const dbDir = path.join(altHome, '.zcode', 'cli', 'db');
+    fs.mkdirSync(dbDir, { recursive: true });
+    makeSqlite(path.join(dbDir, 'db.sqlite'), (db) => {
+      db.exec(`create table session (
+        id text primary key, directory text, title text, title_source text,
+        time_created integer, time_updated integer,
+        parent_id text, time_deleted integer)`);
+      db.exec(`create table message (
+        id integer primary key autoincrement, session_id text,
+        sequence integer, data text)`);
+      db.exec(`create table part (message_id integer, sequence integer, data text)`);
+      db.prepare(
+        `insert into session values ('h1','/p','HOME 里的会话','user',1767225600000,1767225700000,null,null)`
+      ).run();
+    });
+
+    const { withEnv } = await import('./helpers.js');
+    await withEnv({ HOME: altHome, USERPROFILE: box.home }, () => {
+      const roots = zcode.candidateRoots();
+      assert.ok(
+        roots.some((r) => r.toLowerCase().includes('alt-home')),
+        `候选根里要有 $HOME 那一份，实际：${roots.join(', ')}`
+      );
+      const found = zcode.discover();
+      assert.ok(
+        found.some((f) => f.toLowerCase().includes('alt-home')),
+        `discover 要能在 $HOME 下找到库，实际：${found.join(', ')}`
+      );
+    });
+  } finally {
+    box.cleanup();
+  }
+});
+
 test('zcode: 子代理照常采集标归属；-wal 参与缓存指纹', async () => {
   const box = sandbox();
   try {

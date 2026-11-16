@@ -95,11 +95,47 @@ function samePathNorm(a, b) {
 }
 
 /**
+ * 按目标平台拼路径。
+ *
+ * **不能用 `path.join`**：它是当前进程平台的分隔符。在 Windows 上跑
+ * `userDataCandidates('Claude', { platform: 'darwin' })` 会得到
+ * `\Users\alice\Library\Application Support\Claude`——反斜杠 + POSIX 家目录，
+ * 一个在任何平台上都不存在的路径。而这条路径正是测试里用来断言
+ * "macOS 上会去哪找"的，于是**测试看起来在验证跨平台，实际验证的是错误的东西**。
+ *
+ * 所以按目标平台选分隔符：win32 用 `\`，其余用 `/`。这与上游的做法一致——
+ * magpie 的 `desktopdir.Find(goos, home, getenv)` 和 CC Switch 的
+ * `#[cfg(target_os = "macos")]` 都是"平台是参数，不是全局状态"。
+ */
+function joinFor(platform, ...parts) {
+  const sep = platform === 'win32' ? '\\' : '/';
+  // 先统一成 '/' 再按目标平台换回：输入可能来自任何地方（配置文件、
+  // 环境变量、别家写的数据），混着两种分隔符是常态。
+  const cleaned = parts
+    .filter((p) => p !== undefined && p !== null && String(p) !== '')
+    .map((p) => String(p).replace(/\\/g, '/').replace(/\/+$/, ''))
+    // 去掉除第一段以外的开头分隔符
+    .map((p, i) => (i === 0 ? p : p.replace(/^\/+/, '')))
+    .filter((p, i) => i === 0 || p !== '');
+  if (!cleaned.length) return '';
+
+  const out = cleaned.join('/');
+  return platform === 'win32' ? out.replace(/\//g, sep) : out;
+}
+
+/**
  * 某个桌面应用的用户数据目录候选（按当前平台优先排序）。
  *
- * `opts` 只为测试存在：默认取真实平台/家目录/环境变量，传了就按传的算。
+ * `opts` 只为测试与跨平台推断存在：默认取真实平台/家目录/环境变量，传了就按传的算。
  * 这样能在实测断言"在 macOS 上会得到什么"——否则跨平台路径假设只能靠
  * 真机验证，而这个项目在 macOS/Linux 上一直没跑过（见 README 的验证状态）。
+ *
+ * 三平台的规则（与 MAGPIE `internal/desktopdir`、CC Switch
+ * `claude_desktop_config.rs` 交叉核对过）：
+ *
+ *   Windows  %APPDATA%\<App>                     （Roaming）
+ *   macOS    ~/Library/Application Support/<App>
+ *   Linux    $XDG_CONFIG_HOME/<App>（默认 ~/.config/<App>）
  *
  * @param {string} appName
  * @param {{platform?: string, home?: string, env?: object}} [opts]
@@ -110,17 +146,21 @@ export function userDataCandidates(appName, opts = {}) {
   const env = opts.env || process.env;
   const out = [];
   const add = makeAdder(out, platform);
+  const join = (...p) => joinFor(platform, ...p);
 
-  if (platform === 'darwin') add(path.join(home, 'Library', 'Application Support', appName));
-  if (platform === 'win32') add(path.join(appDataRoaming(home, env), appName));
+  if (platform === 'darwin') add(join(home, 'Library', 'Application Support', appName));
+  if (platform === 'win32') add(join(appDataRoaming(home, env, platform), appName));
 
-  // Linux / XDG
-  add(path.join(home, '.config', appName));
+  // Linux / XDG：**XDG_CONFIG_HOME 优先**，不是硬编码 ~/.config。
+  // 上游两家都认这个变量（magpie 的 `env("XDG_CONFIG_HOME", ...)`、
+  // CC Switch 的 `config_dir`）。只写 ~/.config 会漏掉改过 XDG 的用户。
+  const xdgConfig = env.XDG_CONFIG_HOME && String(env.XDG_CONFIG_HOME).trim();
+  add(join(xdgConfig || join(home, '.config'), appName));
 
   // 兜底：其它平台的约定，换机或跨平台拷贝时可能命中
-  add(path.join(home, 'Library', 'Application Support', appName));
-  add(path.join(appDataRoaming(home, env), appName));
-  add(path.join(home, '.config', appName.toLowerCase()));
+  add(join(home, 'Library', 'Application Support', appName));
+  add(join(appDataRoaming(home, env, platform), appName));
+  add(join(xdgConfig || join(home, '.config'), appName.toLowerCase()));
 
   return out;
 }
@@ -141,15 +181,20 @@ export function dataCandidates(appName, opts = {}) {
   const env = opts.env || process.env;
   const out = [];
   const add = makeAdder(out, platform);
+  const join = (...p) => joinFor(platform, ...p);
 
-  add(path.join(home, '.local', 'share', appName));
+  // XDG_DATA_HOME 优先：OpenCode 源码写死 `XDG_DATA_HOME || ~/.local/share`，
+  // 两个平台都没有 darwin 分支。
+  const xdgData = env.XDG_DATA_HOME && String(env.XDG_DATA_HOME).trim();
+  add(join(xdgData || join(home, '.local', 'share'), appName));
   if (platform === 'win32') {
-    add(path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), appName));
+    add(join(env.LOCALAPPDATA || join(home, 'AppData', 'Local'), appName));
   }
   if (platform === 'darwin') {
-    add(path.join(home, 'Library', 'Application Support', appName));
+    add(join(home, 'Library', 'Application Support', appName));
   }
-  add(path.join(home, '.config', appName));
+  const xdgConfig = env.XDG_CONFIG_HOME && String(env.XDG_CONFIG_HOME).trim();
+  add(join(xdgConfig || join(home, '.config'), appName));
 
   return out;
 }
@@ -182,10 +227,12 @@ function makeAdder(out, platform = process.platform) {
  *
  * @param {string[]} appNames 产品名，按优先级
  */
-export function editorDataCandidates(appNames) {
+export function editorDataCandidates(appNames, opts = {}) {
   const out = [];
   for (const name of appNames) {
-    for (const p of userDataCandidates(name)) {
+    // 必须把 opts 传下去：否则"模拟 macOS"时仍用真实平台/家目录，
+    // 断言的是跑测试那台机器，不是 macOS。这个 bug 曾经存在过。
+    for (const p of userDataCandidates(name, opts)) {
       if (!out.some((x) => samePath(x, p))) out.push(p);
     }
   }
@@ -198,8 +245,16 @@ function samePath(a, b) {
   return ci ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
-function appDataRoaming(home, env = process.env) {
-  return env.APPDATA || path.join(home, 'AppData', 'Roaming');
+/**
+ * %APPDATA% 的兜底值。
+ *
+ * 用 `joinFor('win32', ...)` 而不是 `path.join`：这个函数只在 win32 分支被调用，
+ * 但**测试会用别的 platform 调进来**（比如断言"在 Windows 上会去哪找"），
+ * 那时进程可能是 Linux，`path.join` 会拼出 `/`，断言就失去意义。
+ */
+function appDataRoaming(home, env = process.env, platform = 'win32') {
+  if (env.APPDATA) return env.APPDATA;
+  return joinFor(platform, home, 'AppData', 'Roaming');
 }
 
 /**

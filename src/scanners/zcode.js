@@ -40,10 +40,39 @@ export const structureSpec = {
   dirHints: ['.zcode'],
 };
 
+/**
+ * ZCode 的数据根候选。
+ *
+ * ZCode 是 Node 应用，取目录的顺序是 **`$HOME` 优先，其次 `os.homedir()`**
+ * （`process.env.HOME?.trim() || homedir()`）。这在 macOS/Linux 上没有区别，
+ * 但在 Windows 上有：Go/Node 的 homedir 是 `%USERPROFILE%`，而 `HOME` 通常
+ * 未设——可一旦用户为 Git Bash / MSYS2 / Emacs 设了 `HOME`，**ZCode 就会把
+ * 数据放在那里**，`%USERPROFILE%\.zcode` 反而空着。
+ *
+ * 这条来自 MAGPIE `internal/appdir/zcode.go:ZCodeHomeOn`，它专门为这个场景
+ * 写过（"connected, no error, and no magpie in ZCode"）。只认 homedir 的话，
+ * 这类用户在我们这里会看到"ZCode 一场会话都没有"。
+ */
+function zcodeHomes() {
+  const out = [];
+  const add = (p) => {
+    if (!p) return;
+    const abs = path.resolve(String(p));
+    if (!out.includes(abs)) out.push(abs);
+  };
+  for (const p of extraRoots(name)) add(p);
+
+  const envHome = String(process.env.HOME || '').trim();
+  // HOME 只在它是绝对路径时才算（相对路径 ZCode 自己也不认）
+  if (envHome && path.isAbsolute(envHome)) add(path.join(envHome, '.zcode'));
+  add(path.join(os.homedir(), '.zcode'));
+  return out;
+}
+
 function dbPath() {
   // 配置文件里可以写多个 `.zcode` 根（外置盘、备份盘……），
   // 取第一个真实存在的；都没有就回默认位置，让 discover 报"没有"。
-  for (const root of extraRoots(name)) {
+  for (const root of zcodeHomes()) {
     const p = path.join(root, 'cli', 'db', 'db.sqlite');
     try {
       fs.accessSync(p, fs.constants.R_OK);
@@ -57,7 +86,7 @@ function dbPath() {
 
 /** 声明"我会去哪里找数据"（`.zcode` 这一层；给 doctor 与反向发现用）。 */
 export function candidateRoots() {
-  return [...extraRoots(name), path.join(os.homedir(), '.zcode')];
+  return zcodeHomes();
 }
 
 /** 契约 A：discover() 无参，旧签名 / 旧行为一字不改。 */

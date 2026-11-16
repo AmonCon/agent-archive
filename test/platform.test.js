@@ -29,6 +29,79 @@ function norm(p) {
   return p.replace(/\\/g, '/');
 }
 
+test('分隔符必须按目标平台，不能按跑测试的平台', () => {
+  // 这条曾经是个真 bug：`userDataCandidates` 用 `path.join` 拼路径，
+  // 而 `path.join` 用的是**当前进程**的分隔符。于是在 Windows 上跑
+  // `{ platform: 'darwin' }` 会得到 `\Users\alice\Library\...`——反斜杠
+  // 配 POSIX 家目录，一个任何平台都不存在的路径。
+  //
+  // 更糟的是当时测试里有个 `norm()` 把反斜杠统一成正斜杠，正好把这个
+  // bug 抹平了：测试看起来在验证跨平台，实际验证的是被修正过的字符串。
+  // 所以这里**断言原始值**，不做任何归一。
+  const darwin = platform.userDataCandidates('Claude', {
+    platform: 'darwin',
+    home: '/Users/alice',
+    env: {},
+  });
+  assert.equal(darwin[0], '/Users/alice/Library/Application Support/Claude');
+  assert.ok(!darwin[0].includes('\\'), 'macOS 路径里不该出现反斜杠');
+
+  const linux = platform.userDataCandidates('Claude', {
+    platform: 'linux',
+    home: '/home/alice',
+    env: {},
+  });
+  assert.equal(linux[0], '/home/alice/.config/Claude');
+  assert.ok(!linux[0].includes('\\'), 'Linux 路径里不该出现反斜杠');
+
+  // Windows 上反过来：必须是反斜杠，不能是正斜杠
+  const win = platform.userDataCandidates('Claude', {
+    platform: 'win32',
+    home: 'C:\\Users\\alice',
+    env: { APPDATA: 'C:\\Users\\alice\\AppData\\Roaming' },
+  });
+  assert.equal(win[0], 'C:\\Users\\alice\\AppData\\Roaming\\Claude');
+  assert.ok(!win[0].includes('/'), 'Windows 路径里不该出现正斜杠');
+});
+
+test('Linux 认 XDG_CONFIG_HOME，不是硬编码 ~/.config', () => {
+  // MAGPIE 的 `env("XDG_CONFIG_HOME", filepath.Join(home, ".config"))` 与
+  // CC Switch 的 config_dir 都认这个变量。只写 ~/.config 会漏掉改过 XDG 的用户，
+  // 而他们看到的会是"这些 Agent 都没装"。
+  const custom = platform.userDataCandidates('Claude', {
+    platform: 'linux',
+    home: '/home/alice',
+    env: { XDG_CONFIG_HOME: '/opt/cfg' },
+  });
+  assert.equal(custom[0], '/opt/cfg/Claude');
+
+  const withSlash = platform.userDataCandidates('Claude', {
+    platform: 'linux',
+    home: '/home/alice',
+    env: { XDG_CONFIG_HOME: '/opt/cfg/' },
+  });
+  assert.equal(withSlash[0], '/opt/cfg/Claude', '尾部斜杠不该变成双斜杠');
+
+  // XDG_DATA_HOME 同理（OpenCode 这类）
+  const data = platform.dataCandidates('opencode', {
+    platform: 'linux',
+    home: '/home/alice',
+    env: { XDG_DATA_HOME: '/opt/data' },
+  });
+  assert.equal(data[0], '/opt/data/opencode');
+});
+
+test('路径拼接的边界：根目录与盘符根', () => {
+  assert.equal(
+    platform.userDataCandidates('X', { platform: 'linux', home: '/', env: {} })[0],
+    '/.config/X'
+  );
+  assert.equal(
+    platform.userDataCandidates('X', { platform: 'win32', home: 'C:\\', env: {} })[0],
+    'C:\\AppData\\Roaming\\X'
+  );
+});
+
 test('用户数据目录：macOS 优先 Application Support', () => {
   const list = platform
     .userDataCandidates('Cursor', { platform: 'darwin', home: posixHome, env: {} })
