@@ -231,11 +231,11 @@ const SOURCES = [
   {
     agent: 'claude-desktop',
     format: 'json-mcpServers',
-    // Claude 桌面版：%APPDATA%/Claude/claude_desktop_config.json
-    paths: () => {
-      const appdata = process.env.APPDATA || path.join(homeDir(), 'AppData', 'Roaming');
-      return [path.join(appdata, 'Claude', 'claude_desktop_config.json')];
-    },
+    // Claude 桌面版：Windows 是 %APPDATA%/Claude，macOS 是
+    // ~/Library/Application Support/Claude，Linux 走 XDG。
+    // 用 userDataCandidates 而不是自己拼 APPDATA——只拼 APPDATA 的写法
+    // 在 macOS 上会永远返回一个不存在的路径。
+    paths: () => userDataCandidates('Claude').map((root) => path.join(root, 'claude_desktop_config.json')),
   },
 ];
 

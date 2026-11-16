@@ -709,32 +709,49 @@ npm test          # node --no-warnings --test
 
 ### 跨平台路径也是被测的
 
-这个工具只在 Windows 上真机跑过，macOS / Linux 的路径假设全部来自官方文档和
-源码核对。造不出一台 Mac，但可以让路径解析**接受平台注入**：
+**这个工具是给所有平台的人用的，不是"Windows 上能用就行"。** CI 每次推送跑
+ubuntu / macOS / windows 三个平台（macOS 只跑最低 Node 版本，把额度省给它）。
+macOS 以前只在手动触发时跑——理由是私有仓库排队太久，但结果是
+**那个平台上没有任何东西被验证过**，而它恰恰最容易错。
+
+路径解析这一层还接受**平台注入**，所以能在 Windows 上断言"在 macOS 上会得到
+什么候选列表"：
 
 ```js
 userDataCandidates('Cursor', { platform: 'darwin', home: '/Users/demo', env: {} })
 // → ['/Users/demo/Library/Application Support/Cursor', ...]
 ```
 
-于是能在实测断言"在 macOS 上会得到什么候选列表"。`test/platform.test.js` 锁住了
-README 里写的那些反直觉事实，比如 **OpenCode 在 macOS 上也用 `~/.local/share`**
-（它源码没有 darwin 分支）。哪天有人"顺手"给它加个 Application Support 分支，
-测试会红。
+`test/platform.test.js` 锁住了那些反直觉事实，比如 **OpenCode 在 macOS 上也用
+`~/.local/share`**（它源码没有 darwin 分支）。哪天有人"顺手"给它加个
+Application Support 分支，测试会红。
+
+`test/project-path.test.js` 锁的是另一类：**归档里的路径天生跨平台**。
+一个 Linux 用户读着 Windows 备份出来的 `.claude/projects`，一台 Mac 装着
+同事拷来的 `.codex`——所以"项目路径怎么归一"不能假设当前平台。
+以前直接 `path.resolve(cwd, p)`，Linux 上查 `E:/my-app` 会变成
+`/home/me/E:/my-app`，用户看到的是"这个项目一场会话都没有"。
 
 这**不替代真机验证**：它验证的是"我们怎么想"，不是"系统怎么表现"。
-真机验证仍然待做——`research/probes/mac-check.mjs` 就是为此准备的。
+`research/probes/verify-posix.mjs` 用 `path.posix` 把关键路径按 Linux/macOS
+语义重放一遍；真机跑一次的脚本是 `research/probes/mac-check.mjs`。
 
 ## 打包与发布
 
-`npm pack` 出来 226 KB / 43 个文件，只含 `src/` 和三个文档：
+`npm pack` 出来约 1.1 MB / 89 个文件：`src/`、README、CHANGELOG、许可，
+加上 `docs/boundaries.md`、`docs/recipes/`、`docs/screenshots/`——README 首屏
+引用了后三者，不发出去就是一堆坏图。
 
 ```json
-"files": ["src/", "README.md", "LICENSE", "NOTICE.md"]
+"files": [
+  "src/", "docs/boundaries.md", "docs/recipes/", "docs/screenshots/",
+  "CHANGELOG.md", "README.md", "LICENSE", "NOTICE.md"
+]
 ```
 
 `research/`（含第三方源码副本与调研脚本）和 `test/` 不进包——安装的人不需要
 它们，而 `research/reference-src/` 里有别人的代码，随包分发只会带来许可上的混乱。
+CI 里有一条门专门查这件事。
 
 `bin` 两个入口都带 shebang，`npx agent-archive` 和全局安装都能直接用。
 
@@ -2005,8 +2022,31 @@ node src/cli.js doctor
 | VS Code 系应用数据 | `%APPDATA%\<App>` | `~/Library/Application Support/<App>` | `~/.config/<App>` |
 | XDG 数据目录 | `%LOCALAPPDATA%\<app>` | **通常是 `~/.local/share`，不是 Application Support** | `~/.local/share/<app>` |
 | 家目录点目录 | `~/.claude` 等，三平台一致 | 同左 | 同左 |
+| npm 全局 bin | `%APPDATA%\npm` | `/usr/local/bin` 或 `/opt/homebrew/bin` | `/usr/local/bin`、`~/.local/bin` |
 
-受影响的是 **Cursor / Kiro / Copilot Chat / OpenCode** 四家。
+受影响的是 **Cursor / Kiro / Copilot Chat / OpenCode / Claude Desktop** 五家。
+
+**这一层最容易犯的错不是写错路径，是只写一个平台的路径。** 比如能力面的
+存在性清单以前写成 `AppData/Roaming/Code/User/workspaceStorage` 这种相对家目录
+的路径，而 `path.join(homedir, 'AppData/...')` 在 macOS/Linux 上根本不存在——
+于是 Copilot Chat 那一行**永远消失**，用户不会知道是"没装"还是"没找到"。
+现在这类路径统一用三种前缀声明（`~/x`、`appdata/x`、`localappdata/x`），
+由 `resolvePresencePath()` 按当前平台展开成候选列表。
+
+### 归档里的路径天生是跨平台的
+
+这是比"路径写对"更容易忽略的一层：**一个 Linux 用户会读着 Windows 备份出来的
+会话，一台 Mac 装着同事拷来的 `.codex`**。所以查询层的路径归一不能假设当前平台。
+
+以前是 `path.resolve(process.cwd(), p)`，两个真实的坑：
+
+- Linux 上查 `E:/my-app` → `/home/me/E:/my-app`，和记录里的 `e:/my-app`
+  永远匹配不上，用户看到的是"这个项目一场会话都没有"。
+- `agent-archive demo` 在 macOS/Linux 上跑 `timeline E:/demo-project`
+  同样落空，样例直接报"没有会话"。
+
+现在 `model.absProjectPath()` **认出别家的绝对路径就原样保留**（盘符、UNC、
+POSIX 绝对路径三种），只有真正的相对路径才拼 cwd。
 
 ### macOS 上最容易搞错的三件事
 

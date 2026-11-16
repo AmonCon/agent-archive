@@ -19,6 +19,7 @@ import { cliSummary } from './cli.js';
 import { providerSummary } from './providers.js';
 import { commandSummary } from './commands.js';
 import { statePath } from '../paths.js';
+import { userDataCandidates } from '../platform.js';
 
 /**
  * 这台机器上"装了什么"的判断。
@@ -31,32 +32,48 @@ import { statePath } from '../paths.js';
  *
  * 只按"目录存在"判断会高估：装了个 VS Code 扩展也会创建目录。
  * 只按"有会话"判断会低估：配好 MCP 但还没聊过的 Agent 是真实存在的状态。
+ *
+ * ## 路径的写法
+ *
+ * 每一条都是**相对某个根**的路径，根有三种前缀：
+ *
+ *   `~/x`        家目录下的点目录（Windows `%USERPROFILE%`、macOS/Linux `$HOME`）
+ *   `appdata/x`  %APPDATA%（macOS 映射到 `~/Library/Application Support`）
+ *   `localappdata/x`  %LOCALAPPDATA%（macOS 映射到 `~/Library/Caches`）
+ *
+ * 以前这里只有家目录一种写法，于是 `copilot` 那条写死了
+ * `AppData/Roaming/...`——**在 macOS/Linux 上永远判成"没装"**，因为
+ * `path.join(os.homedir(), 'AppData/Roaming/...')` 根本不存在。
+ * 这不是显示问题：能力面里那一行会直接消失。
  */
 export const AGENT_PRESENCE = [
-  { agent: 'claude-code', config: ['.claude.json', '.claude/settings.json'], data: ['.claude/projects'] },
-  { agent: 'codex', config: ['.codex/config.toml'], data: ['.codex/sessions', '.codex/memories'] },
-  { agent: 'zcode', config: ['.zcode/cli/config.json'], data: ['.zcode/cli/db'] },
-  { agent: 'qoder', config: ['.qoder/mcp.json', '.qoder/settings.json'], data: ['.qoder/cache/projects', '.qoder/projects', '.qoder-cn/projects', '.qoder/memory'] },
-  { agent: 'dsh', config: ['DeepSeekHarness/cordis.patch.yml', '.dsh/config.yaml'], data: ['DeepSeekHarness/sessions', '.dsh/sessions'] },
-  { agent: 'hermes', config: ['.hermes/config.yaml'], data: ['.hermes/sessions', '.hermes/memories'] },
-  { agent: 'cursor', config: ['.cursor/mcp.json', '.cursor/cli-config.json'], data: ['.cursor/projects', '.cursor/chats'] },
-  { agent: 'opencode', config: ['.config/opencode/opencode.json'], data: ['.local/share/opencode/opencode.db'] },
-  { agent: 'gemini', config: ['.gemini/settings.json'], data: ['.gemini/antigravity', '.gemini/tmp'] },
-  { agent: 'kiro', config: ['.kiro/argv.json'], data: ['.kiro/skills'] },
-  { agent: 'antigravity', config: [], data: ['.gemini/antigravity/conversation_summaries.db'] },
-  { agent: 'copilot', config: [], data: ['AppData/Roaming/Code/User/workspaceStorage'] },
+  { agent: 'claude-code', config: ['~/.claude.json', '~/.claude/settings.json'], data: ['~/.claude/projects'] },
+  { agent: 'codex', config: ['~/.codex/config.toml'], data: ['~/.codex/sessions', '~/.codex/memories'] },
+  { agent: 'zcode', config: ['~/.zcode/cli/config.json'], data: ['~/.zcode/cli/db'] },
+  { agent: 'qoder', config: ['~/.qoder/mcp.json', '~/.qoder/settings.json'], data: ['~/.qoder/cache/projects', '~/.qoder/projects', '~/.qoder-cn/projects', '~/.qoder/memory'] },
+  { agent: 'dsh', config: ['~/DeepSeekHarness/cordis.patch.yml', '~/.dsh/config.yaml'], data: ['~/DeepSeekHarness/sessions', '~/.dsh/sessions'] },
+  { agent: 'hermes', config: ['~/.hermes/config.yaml'], data: ['~/.hermes/sessions', '~/.hermes/memories', 'localappdata/hermes'] },
+  { agent: 'cursor', config: ['~/.cursor/mcp.json', '~/.cursor/cli-config.json'], data: ['appdata/Cursor/User/globalStorage', '~/.cursor/projects', '~/.cursor/chats'] },
+  { agent: 'opencode', config: ['~/.config/opencode/opencode.json'], data: ['~/.local/share/opencode/opencode.db', 'localappdata/opencode'] },
+  { agent: 'gemini', config: ['~/.gemini/settings.json'], data: ['~/.gemini/antigravity', '~/.gemini/tmp'] },
+  { agent: 'kiro', config: ['~/.kiro/argv.json'], data: ['appdata/Kiro/User/globalStorage/kiro.kiroagent', '~/.kiro/skills'] },
+  { agent: 'antigravity', config: [], data: ['~/.gemini/antigravity/conversation_summaries.db'] },
+  // Copilot Chat 是 VS Code 的扩展：数据只在 %APPDATA%/Code（macOS 是
+  // Application Support/Code）里，没有点目录形态。
+  { agent: 'copilot', config: [], data: ['appdata/Code/User/workspaceStorage', 'appdata/Code - Insiders/User/workspaceStorage'] },
   // 2026-11-16：补全会话层已经支持的 9 家。环境层原来只列 12 家，
   // 用户明明有 WorkBuddy/Pi/Kimi 的会话，能力面里却找不到它们——
   // 不是没装，是存在性清单漏了（cc-switch 的 ToolSpec 教训：名字只有一张表）。
-  { agent: 'workbuddy', config: ['.workbuddy/mcp.json'], data: ['.workbuddy/projects', '.workbuddy-ai/projects'] },
-  { agent: 'codebuddy', config: ['.codebuddy.json'], data: ['.codebuddy/projects'] },
-  { agent: 'pi', config: ['.pi/agent/settings.json'], data: ['.pi/agent/sessions'] },
-  { agent: 'omp', config: ['.omp/agent/settings.json'], data: ['.omp/agent/sessions'] },
-  { agent: 'kimi', config: ['.kimi-code/config.toml'], data: ['.kimi-code/sessions', '.kimi/sessions'] },
-  { agent: 'grokbuild', config: ['.grok/config.toml'], data: ['.grok/sessions', '.grok/archived_sessions'] },
-  { agent: 'mcode', config: ['.minimax/mcp.json'], data: ['.minimax/v2'] },
-  { agent: 'cline', config: [], data: ['.cline/data/sessions'] },
-  { agent: 'openclaw', config: ['.openclaw/sessions.json'], data: ['.openclaw/agents', '.openclaw-autoclaw/agents'] },
+  { agent: 'workbuddy', config: ['~/.workbuddy/mcp.json'], data: ['~/.workbuddy/projects', '~/.workbuddy-ai/projects'] },
+  { agent: 'codebuddy', config: ['~/.codebuddy.json'], data: ['~/.codebuddy/projects'] },
+  { agent: 'pi', config: ['~/.pi/agent/settings.json'], data: ['~/.pi/agent/sessions'] },
+  { agent: 'omp', config: ['~/.omp/agent/settings.json'], data: ['~/.omp/agent/sessions'] },
+  { agent: 'kimi', config: ['~/.kimi-code/config.toml'], data: ['~/.kimi-code/sessions', '~/.kimi/sessions'] },
+  { agent: 'grokbuild', config: ['~/.grok/config.toml'], data: ['~/.grok/sessions', '~/.grok/archived_sessions'] },
+  { agent: 'mcode', config: ['~/.minimax/mcp.json'], data: ['~/.minimax/v2'] },
+  { agent: 'cline', config: [], data: ['~/.cline/data/sessions'] },
+  { agent: 'openclaw', config: ['~/.openclaw/sessions.json'], data: ['~/.openclaw/agents', '~/.openclaw-autoclaw/agents'] },
+  { agent: 'claude-desktop', config: ['appdata/Claude/claude_desktop_config.json'], data: [] },
 ];
 
 export const DISPLAY = {
@@ -84,14 +101,54 @@ export const DISPLAY = {
   'shared-agents': '~/.agents（共享）',
 };
 
-function exists(rel) {
-  const p = path.join(os.homedir(), ...rel.split('/'));
-  try {
-    fs.statSync(p);
-    return p;
-  } catch {
-    return null;
+/**
+ * 把 `AGENT_PRESENCE` 里的相对路径解析成当前平台上的真实路径。
+ *
+ * 三种前缀，其余按家目录下的点目录处理：
+ *
+ *   `~/x`           家目录
+ *   `appdata/x`     %APPDATA%（macOS 是 ~/Library/Application Support）
+ *   `localappdata/x` %LOCALAPPDATA%（macOS 是 ~/Library/Caches）
+ *
+ * 用 `platform.js` 的候选逻辑而不是自己拼字符串：那里已经处理了
+ * "用户可能把别的平台的数据整份拷过来"（换机、WSL、备份恢复），
+ * 只 stat 第一个存在的。
+ */
+function resolvePresencePath(rel) {
+  const s = String(rel);
+  if (s.startsWith('appdata/')) {
+    return userDataCandidates(s.slice('appdata/'.length).split('/')[0]).map((root) =>
+      path.join(root, ...s.slice('appdata/'.length).split('/').slice(1))
+    );
   }
+  if (s.startsWith('localappdata/')) {
+    const rest = s.slice('localappdata/'.length).split('/');
+    const out = [];
+    if (process.platform === 'win32') {
+      const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+      out.push(path.join(base, ...rest));
+    } else if (process.platform === 'darwin') {
+      out.push(path.join(os.homedir(), 'Library', 'Caches', ...rest));
+    }
+    // 兜底：换机拷过来的数据也可能落在这
+    out.push(path.join(os.homedir(), '.local', 'share', ...rest));
+    return out;
+  }
+  const tail = s.startsWith('~/') ? s.slice(2) : s;
+  return [path.join(os.homedir(), ...tail.split('/'))];
+}
+
+/** 任一候选存在就返回它，否则 null。 */
+function exists(rel) {
+  for (const p of resolvePresencePath(rel)) {
+    try {
+      fs.statSync(p);
+      return p;
+    } catch {
+      /* 试下一个候选 */
+    }
+  }
+  return null;
 }
 
 /**

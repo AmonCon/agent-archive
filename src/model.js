@@ -74,7 +74,10 @@ export function normalizeProject(p) {
   let s = String(p).trim().replace(/^["']|["']$/g, '');
   if (!s) return null;
   // 统一分隔符，去掉尾部分隔符（根目录除外）
+  const wasRoot = /^[\\/]+$/.test(s); // "/" 或 "\"：文件系统根
   s = s.replace(/\\/g, '/').replace(/\/+$/, '');
+  // 根目录本身：去掉尾斜杠会变成空串，那样它就不再是"一个项目路径"了
+  if (wasRoot && !s) return '/';
   if (/^[a-zA-Z]:$/.test(s)) s += '/';
   return s;
 }
@@ -83,6 +86,36 @@ export function normalizeProject(p) {
 export function projectKey(p) {
   const n = normalizeProject(p);
   return n ? n.toLowerCase() : null;
+}
+
+/**
+ * 把用户给的路径文本归一成"项目身份"用的绝对路径。
+ *
+ * **不能直接 `path.resolve(cwd, p)`**：归档里记的路径来自别的机器，可能和
+ * 当前平台不是一回事。实测三个平台都会踩：
+ *
+ *   - Linux 上查 `E:/my-app`（Windows 备份里记的）→ `path.resolve` 给出
+ *     `/home/me/E:/my-app`，和记录的 `e:/my-app` 永远匹配不上，表现为
+ *     "这个项目一场会话都没有"。
+ *   - Windows 上查 `/home/me/proj`（macOS/Linux 备份里记的）→ `C:\home\me\proj`。
+ *   - demo 在 Linux/macOS 上跑 `timeline E:/demo-project` → 同样落空。
+ *
+ * 所以：**认出别的平台的绝对路径就原样保留**，只有真正的相对路径才拼 cwd。
+ * 这比"按当前平台猜"可靠——归档的意义就是能读别处来的数据。
+ */
+export function absProjectPath(p, { cwd = process.cwd() } = {}) {
+  if (!p) return null;
+  const s = String(p).trim().replace(/^["']|["']$/g, '');
+  if (!s) return null;
+
+  // Windows 盘符路径：E:/x、E:\x、E:（光杆盘符）
+  if (/^[A-Za-z]:(?:[\\/]|$)/.test(s)) return s;
+  // UNC：\\server\share、//server/share
+  if (/^\\\\/.test(s) || /^\/\//.test(s)) return s;
+  // POSIX 绝对路径：/home/me/x（在 Windows 上也不该被拼上盘符）
+  if (s.startsWith('/')) return s;
+
+  return path.resolve(cwd, s);
 }
 
 /** 判断某个会话是否属于给定项目（含子目录项目）。 */

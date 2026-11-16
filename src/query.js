@@ -5,6 +5,7 @@ import { getOrLoad } from './transcript-cache.js';
 import {
   projectKey,
   normalizeProject,
+  absProjectPath,
   belongsTo,
   durationMs,
   isProjectPath,
@@ -28,10 +29,16 @@ import {
  * 相对路径或绝对路径），归一成绝对路径是"项目身份"的一部分，不是展示逻辑。
  */
 
-/** 把用户给的路径文本归一成绝对路径。不访问文件系统。 */
+/**
+ * 把用户给的路径文本归一成绝对路径。不访问文件系统。
+ *
+ * 委托给 `model.absProjectPath()`：它会认出"别的平台的绝对路径"并原样保留。
+ * 这里以前直接 `path.resolve(cwd, p)`，在 Linux 上查 `E:/my-app` 会变成
+ * `/home/me/E:/my-app`——跨机器读备份的人看到的是"这个项目没有会话"。
+ */
 function absProject(p) {
   if (!p) return null;
-  return path.resolve(process.cwd(), p);
+  return absProjectPath(p);
 }
 
 /**

@@ -207,13 +207,25 @@ const PRIVATE_ROOTS = [
 ];
 
 /** 共享 bin 目录：不归属于某一家，所有 Agent 默认都看得到。 */
-const SHARED_ROOTS = [
+/**
+ * 共享 bin 目录：不属于某一家，所有 Agent 默认都看得见。
+ *
+ * `npm -g` 的全局 bin 在三个平台上完全不是一个地方：
+ *   Windows  %APPDATA%/npm
+ *   macOS    /usr/local/bin 或 Homebrew 的 /opt/homebrew/bin
+ *   Linux    /usr/local/bin、~/.local/bin
+ *
+ * 所以家目录相对的那几个列在这里，平台专属的绝对路径由
+ * `platformSharedDirs()` 补——只写 Windows 那一行的话，macOS/Linux 用户的
+ * CLI 清单里会少掉一半，而他们不会知道是"没找到"还是"没装"。
+ */
+const SHARED_HOME_DIRS = [
   '.local/bin',
   '.agents/bin',
   '.cargo/bin',
   '.bun/bin',
   '.deno/bin',
-  'AppData/Roaming/npm',
+  'bin',
 ];
 
 /** 目录遍历时直接跳过的重目录。 */
@@ -259,10 +271,32 @@ function privateRoots() {
   }));
 }
 
+/**
+ * 平台专属的绝对 bin 目录。
+ *
+ * 按平台给出，而不是"全都列上"：Linux 上探 `/opt/homebrew/bin` 永远不存在，
+ * 白 stat 一次还容易让人以为"这里应该有东西"。反过来，Windows 上不该出现
+ * `/usr/local/bin` 这种路径。
+ */
+function platformSharedDirs() {
+  const out = [];
+  if (process.platform === 'win32') {
+    const appdata = process.env.APPDATA || path.join(home(), 'AppData', 'Roaming');
+    out.push(path.join(appdata, 'npm'));
+  } else {
+    out.push('/usr/local/bin');
+    if (process.platform === 'darwin') {
+      // Apple Silicon 的 Homebrew 前缀；Intel 上是 /usr/local
+      out.push('/opt/homebrew/bin');
+    }
+  }
+  return out;
+}
+
 function sharedRoots() {
-  return SHARED_ROOTS.map((rel) => ({
-    abs: path.join(home(), ...rel.split('/')),
-  }));
+  const out = SHARED_HOME_DIRS.map((rel) => ({ abs: path.join(home(), ...rel.split('/')) }));
+  for (const abs of platformSharedDirs()) out.push({ abs });
+  return out;
 }
 
 function binaryBase(name) {

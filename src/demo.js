@@ -54,11 +54,45 @@ import { fileURLToPath } from 'node:url';
  * brief 的「更早的一次换手」都有真实内容可显示。
  */
 
-/** 样例项目。故意用 `E:/demo-project` 这种一眼就是示例的路径。 */
-const PROJECT = 'E:/demo-project';
+/**
+ * 样例项目路径。
+ *
+ * **按当前平台生成**，不是写死 `E:/demo-project`：这个工具要给所有人用，
+ * 一个 Linux 用户在 demo 里看到 `E:/` 会立刻意识到"这是给 Windows 做的"，
+ * 而它本来只是个示例。规则很朴素：
+ *
+ *   win32   E:/demo-project      （盘符路径，一眼就是示例）
+ *   其它    ~/demo-project       （POSIX 绝对路径，展开成真家目录）
+ *
+ * 注意这里必须用**当前进程**的 `os.homedir()`，但 demo 是在假家目录里跑的
+ * （见 runDemo 的子进程环境），所以展开出来的是假家目录里的路径——正好是
+ * 样例数据里记录的 cwd，两边一致。
+ */
+function demoProjectPath() {
+  if (process.platform === 'win32') return 'E:/demo-project';
+  return path.join(os.homedir(), 'demo-project').replace(/\\/g, '/');
+}
+
+const PROJECT = demoProjectPath();
 
 /** 对外暴露项目路径，方便调用方拼 `timeline <项目>` 这类命令。 */
 export const DEMO_PROJECT = PROJECT;
+
+/**
+ * 各家按工作区目录名分目录时的转义形态。
+ *
+ * Claude Code 把 `E:\demo-project` 转成 `E--demo-project`（盘符+分隔符变 `-`），
+ * WorkBuddy 是 `e-demo-project`。POSIX 路径下这个转义不一样，硬编码 Windows
+ * 形态会让 Linux/macOS 上的样例目录名和真实规则对不上——虽然扫描器靠行内
+ * `cwd` 字段也能读出来，但"样例长得像真的"本身就是它该有的样子。
+ */
+function workspaceDirName(kind) {
+  const win = process.platform === 'win32';
+  if (win) return kind === 'claude' ? 'E--demo-project' : 'e-demo-project';
+  // POSIX：Claude Code 把 `/` 换成 `-`，路径开头的 / 也变成 -
+  const slug = PROJECT.replace(/[/\\]+/g, '-').replace(/^-+/, '-');
+  return kind === 'claude' ? slug : slug.replace(/^-/, '');
+}
 
 /** 临时目录前缀。cleanup() 靠它确认"这确实是我建的那个目录"。 */
 const HOME_PREFIX = 'aa-demo-';
@@ -407,17 +441,17 @@ function demoFiles() {
 
   return {
     // 第 1 天：提出并定位（Claude Code）
-    [`.claude/projects/E--demo-project/${claude1}.jsonl`]: sessionClaudeKickoff(claude1),
+    [`.claude/projects/${workspaceDirName('claude')}/${claude1}.jsonl`]: sessionClaudeKickoff(claude1),
     // 第 2 天：按 flex 改一版（Codex）
     [codexPath(2026, 1, 6, 9, 20, codex1)]: sessionCodexFlex(codex1),
     // 第 10 天：八天后接手，窄屏下还是压字（WorkBuddy）
-    [`.workbuddy/projects/e-demo-project/${wb1}.jsonl`]: sessionWorkbuddyFix(wb1),
+    [`.workbuddy/projects/${workspaceDirName('workbuddy')}/${wb1}.jsonl`]: sessionWorkbuddyFix(wb1),
     // 第 10 天：写 CHANGELOG、跑 lint（Codex）
     [codexPath(2026, 1, 14, 16, 20, codex2)]: sessionCodexChangelog(codex2),
     // 第 11 天：核对措辞、更新待办（Claude Code）
-    [`.claude/projects/E--demo-project/${claude2}.jsonl`]: sessionClaudePolish(claude2),
+    [`.claude/projects/${workspaceDirName('claude')}/${claude2}.jsonl`]: sessionClaudePolish(claude2),
     // 第 11 天：把回归用例接进 CI（Claude Code，与上一场同一段工作）
-    [`.claude/projects/E--demo-project/${claude3}.jsonl`]: sessionClaudeCi(claude3),
+    [`.claude/projects/${workspaceDirName('claude')}/${claude3}.jsonl`]: sessionClaudeCi(claude3),
   };
 }
 
